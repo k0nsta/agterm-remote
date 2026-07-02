@@ -98,7 +98,7 @@ State files: `~/.cache/agterm/agterm.sock` (forwarded socket) and
 ## Install
 
 ```sh
-git clone https://github.com/<you>/agterm-remote ~/github.com/agterm-remote
+git clone https://github.com/k0nsta/agterm-remote ~/github.com/agterm-remote
 cd ~/github.com/agterm-remote
 ./install.sh                     # symlinks ./agr into ~/.local/bin
 
