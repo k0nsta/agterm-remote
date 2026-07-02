@@ -89,9 +89,10 @@ State files: `~/.cache/agterm/agterm.sock` (forwarded socket) and
 
 ## Requirements
 
-- **Mac:** macOS + [agterm](https://github.com/umputun/agterm). `autossh`
-  recommended (`brew install autossh`) but optional.
+- **Mac:** macOS + [agterm](https://github.com/umputun/agterm). `autossh` and
+  `mosh` recommended (`brew install autossh mosh`) but optional.
 - **Remote:** `tmux ≥ 3.x`, `python3`, SSH access. Any Linux/BSD/WSL host.
+  `mosh` optional (recommended) for drop-tolerant interactive sessions.
 - SSH that supports Unix-domain socket forwarding (OpenSSH ≥ 6.7) and
   `StreamLocalBindUnlink`.
 
@@ -181,6 +182,12 @@ The design separates two lifetimes so only one needs to be robust:
 - **Status bridge = best-effort, self-healing.** `ServerAlive*` detects dead
   links, `StreamLocalBindUnlink` reclaims a stale remote socket on reconnect,
   and autossh (or the fallback loop) re-establishes the tunnel.
+- **Interactive resilience = mosh (optional).** SSH treats one corrupted packet
+  (Wi-Fi glitch, sleep/wake, VPN roam) as fatal — `Bad packet length … Connection
+  corrupted`. If `mosh` is present on both ends, `agr open` uses it instead of
+  SSH, so the view survives drops and just resyncs. `agr open` also resets local
+  terminal modes on exit, so an abrupt drop never dumps escape-code garbage into
+  your shell.
 
 | Situation | Behavior |
 |---|---|

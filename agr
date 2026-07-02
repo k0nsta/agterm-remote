@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agr"
 # Remote paths, relative to the remote user's $HOME (resolved on the remote side).
@@ -61,9 +61,26 @@ cmd_open() {
   fi
 
   cmd_up "$host"
-  # The remote agr writes the target file and attaches tmux. name is validated;
-  # \$HOME expands on the remote.
-  exec ssh -t "$host" "\$HOME/$REMOTE_BIN attach $name ${AGTERM_SESSION_ID:-}"
+
+  local rhome ragr sid ret=0
+  rhome="$(remote_home "$host")"
+  ragr="$rhome/$REMOTE_BIN"
+  sid="${AGTERM_SESSION_ID:-}"
+
+  # Prefer mosh when available on both sides (marker written by `agr install`):
+  # it survives drops/roaming/sleep instead of dying on a corrupted SSH packet.
+  # Not exec'd, so the terminal-reset guard below always runs.
+  if have mosh && [ -f "$CACHE_DIR/mosh-$host" ]; then
+    mosh "$host" -- "$ragr" attach "$name" "$sid" || ret=$?
+  else
+    ssh -t "$host" "$ragr attach $name $sid" || ret=$?
+  fi
+
+  # After an abrupt drop, tmux's mouse-tracking / bracketed-paste modes may be
+  # left on, dumping escape-code garbage into the local shell. Turn them off.
+  printf '\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?2004l'
+  stty sane 2>/dev/null || true
+  return "$ret"
 }
 
 # agr up <host>   — ensure the shared control tunnel is running (idempotent).
@@ -120,6 +137,14 @@ cmd_install() {
   scp -q "$self" "$host:$REMOTE_BIN"
   ssh "$host" "chmod +x '$REMOTE_BIN'"
 
+  # Record whether the remote has mosh, so `agr open` can prefer it.
+  mkdir -p "$CACHE_DIR"
+  if ssh "$host" 'command -v mosh-server >/dev/null 2>&1'; then
+    touch "$CACHE_DIR/mosh-$host"; log "agr: mosh found on '$host' (agr open will use it)"
+  else
+    rm -f "$CACHE_DIR/mosh-$host"
+  fi
+
   # Merge the four agterm hooks into the remote ~/.claude/settings.json.
   ssh "$host" 'python3 - ' <<'PY'
 import json, os
@@ -159,10 +184,12 @@ cmd_doctor() {
   printf '  agterm socket : %s\n' "$([ -S "$(local_sock)" ] && echo present || echo MISSING)"
   printf '  agtermctl     : %s\n' "$(have agtermctl && echo yes || echo 'no (row auto-label disabled)')"
   printf '  autossh       : %s\n' "$(have autossh && echo yes || echo 'no (using reconnect loop)')"
+  printf '  mosh          : %s\n' "$(have mosh && echo yes || echo 'no (ssh only)')"
   echo "remote ($host):"
   ssh "$host" '
     printf "  tmux          : %s\n" "$(tmux -V 2>/dev/null || echo MISSING)"
     printf "  python3       : %s\n" "$(command -v python3 >/dev/null && python3 -V 2>&1 || echo MISSING)"
+    printf "  mosh-server   : %s\n" "$(command -v mosh-server >/dev/null && echo yes || echo "no (ssh only)")"
     printf "  agr installed : %s\n" "$([ -x ~/.local/bin/agr ] && echo yes || echo no)"
     printf "  cache dir     : %s\n" "$([ -d ~/.cache/agterm ] && echo ok || echo missing)"
   '
