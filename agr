@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# agr — agterm-remote
+#
+# Extend agterm's agent-status integration (sidebar colors + desktop pushes) to
+# AI agents that run on a REMOTE host inside tmux, reached over SSH.
+#
+# One script, installed on both sides:
+#   • the Mac (agterm) uses:  open | up | down | install | doctor
+#   • the remote host uses:   attach | status | relay   (invoked by ssh / hooks)
+#
+# See README.md for the architecture. MIT licensed.
+
+set -euo pipefail
+
+VERSION="0.1.0"
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agr"
+# Remote paths, relative to the remote user's $HOME (resolved on the remote side).
+REMOTE_BIN=".local/bin/agr"
+REMOTE_SOCK=".cache/agterm/agterm.sock"
+REMOTE_TARGETS=".cache/agterm/targets"
+
+log()  { printf '%s\n' "$*" >&2; }
+die()  { log "agr: $*"; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Session names double as tmux session names, target-file keys, and are
+# interpolated into a remote command, so keep them to a safe character set.
+valid_name() { case "$1" in ''|*[!a-zA-Z0-9_.-]*) return 1;; *) return 0;; esac; }
+
+# The Mac's agterm control socket. agterm exports AGTERM_SOCKET into every
+# session; fall back to the default install path when called from elsewhere.
+local_sock() { printf '%s' "${AGTERM_SOCKET:-$HOME/Library/Application Support/agterm/agterm.sock}"; }
+
+# Remote $HOME is needed for the -R forward (ssh will not expand remote env in
+# the forward spec). Query it once per host and cache it.
+remote_home() {
+  local host="$1"; local f="$CACHE_DIR/home-$host"
+  if [ -s "$f" ]; then cat "$f"; return 0; fi
+  mkdir -p "$CACHE_DIR"
+  local h; h="$(ssh "$host" 'printf %s "$HOME"')" || die "cannot reach host '$host'"
+  [ -n "$h" ] || die "empty remote HOME for '$host'"
+  printf '%s' "$h" > "$f"; printf '%s' "$h"
+}
+
+# ---------------------------------------------------------------------------
+# LOCAL (Mac) subcommands
+# ---------------------------------------------------------------------------
+
+# agr open <host> <name>
+# Adopt the current agterm session: relabel its row, ensure the control tunnel,
+# then attach (or create) the named tmux session on the remote host.
+cmd_open() {
+  local host="${1:-}" name="${2:-}"
+  [ -n "$host" ] && [ -n "$name" ] || die "usage: agr open <host> <name>"
+  valid_name "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
+
+  # Relabel the sidebar row to the stable key (best-effort; only inside agterm).
+  if [ -n "${AGTERM_SESSION_ID:-}" ] && have agtermctl; then
+    agtermctl session rename "$name" --target "$AGTERM_SESSION_ID" >/dev/null 2>&1 || true
+  fi
+
+  cmd_up "$host"
+  # The remote agr writes the target file and attaches tmux. name is validated;
+  # \$HOME expands on the remote.
+  exec ssh -t "$host" "\$HOME/$REMOTE_BIN attach $name ${AGTERM_SESSION_ID:-}"
+}
+
+# agr up <host>   — ensure the shared control tunnel is running (idempotent).
+cmd_up() {
+  local host="${1:-}"; [ -n "$host" ] || die "usage: agr up <host>"
+  mkdir -p "$CACHE_DIR"
+  local pidfile="$CACHE_DIR/bridge-$host.pid"
+  if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
+    return 0
+  fi
+
+  local rhome; rhome="$(remote_home "$host")"
+  local rsock="$rhome/$REMOTE_SOCK"
+  ssh "$host" "mkdir -p '$rhome/$REMOTE_TARGETS'"
+
+  # Reverse-forward the Mac's agterm socket to a fixed remote path.
+  # StreamLocalBindUnlink reclaims a stale socket on reconnect / Mac switch.
+  local -a opts=(
+    -N
+    -o ExitOnForwardFailure=yes
+    -o StreamLocalBindUnlink=yes
+    -o ServerAliveInterval=20
+    -o ServerAliveCountMax=3
+    -R "${rsock}:$(local_sock)"
+  )
+
+  if have autossh; then
+    AUTOSSH_PIDFILE="$pidfile" autossh -M 0 -f "${opts[@]}" "$host"
+  else
+    # No autossh: a minimal background reconnect loop.
+    ( while true; do ssh "${opts[@]}" "$host" || true; sleep 3; done ) &
+    echo $! > "$pidfile"
+  fi
+  log "agr: bridge up for '$host'"
+}
+
+# agr down <host> — stop the control tunnel.
+cmd_down() {
+  local host="${1:-}"; [ -n "$host" ] || die "usage: agr down <host>"
+  local pidfile="$CACHE_DIR/bridge-$host.pid"
+  if [ -f "$pidfile" ]; then
+    kill "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null || true
+    rm -f "$pidfile"
+    log "agr: bridge down for '$host'"
+  fi
+}
+
+# agr install <host> — copy this script to the remote and wire agent hooks.
+cmd_install() {
+  local host="${1:-}"; [ -n "$host" ] || die "usage: agr install <host>"
+  local self; self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+  ssh "$host" 'mkdir -p ~/.local/bin ~/.cache/agterm/targets'
+  scp -q "$self" "$host:$REMOTE_BIN"
+  ssh "$host" "chmod +x '$REMOTE_BIN'"
+
+  # Merge the four agterm hooks into the remote ~/.claude/settings.json.
+  ssh "$host" 'python3 - ' <<'PY'
+import json, os
+p = os.path.expanduser("~/.claude/settings.json")
+cfg = {}
+if os.path.exists(p):
+    with open(p) as f:
+        cfg = json.load(f)
+agr = "$HOME/.local/bin/agr status"
+wanted = {
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": f"{agr} active --blink"}]}],
+    "PostToolUse":      [{"hooks": [{"type": "command", "command": f"{agr} active --blink"}]}],
+    "Notification":     [{"matcher": "permission_prompt",
+                          "hooks": [{"type": "command", "command": f"{agr} blocked"}]}],
+    "Stop":             [{"hooks": [{"type": "command", "command": f"{agr} completed --auto-reset"}]}],
+}
+hooks = cfg.setdefault("hooks", {})
+for event, entries in wanted.items():
+    bucket = hooks.setdefault(event, [])
+    # idempotent: skip if any entry already calls `agr status`
+    flat = json.dumps(bucket)
+    if "/agr status" in flat or "agr status" in flat:
+        continue
+    bucket.extend(entries)
+os.makedirs(os.path.dirname(p), exist_ok=True)
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2)
+print("agr: wired Claude Code hooks in", p)
+PY
+  log "agr: installed on '$host'"
+}
+
+# agr doctor <host> — check prerequisites on both sides.
+cmd_doctor() {
+  local host="${1:-}"; [ -n "$host" ] || die "usage: agr doctor <host>"
+  echo "local (agterm host):"
+  printf '  agterm socket : %s\n' "$([ -S "$(local_sock)" ] && echo present || echo MISSING)"
+  printf '  agtermctl     : %s\n' "$(have agtermctl && echo yes || echo 'no (row auto-label disabled)')"
+  printf '  autossh       : %s\n' "$(have autossh && echo yes || echo 'no (using reconnect loop)')"
+  echo "remote ($host):"
+  ssh "$host" '
+    printf "  tmux          : %s\n" "$(tmux -V 2>/dev/null || echo MISSING)"
+    printf "  python3       : %s\n" "$(command -v python3 >/dev/null && python3 -V 2>&1 || echo MISSING)"
+    printf "  agr installed : %s\n" "$([ -x ~/.local/bin/agr ] && echo yes || echo no)"
+    printf "  cache dir     : %s\n" "$([ -d ~/.cache/agterm ] && echo ok || echo missing)"
+  '
+}
+
+# ---------------------------------------------------------------------------
+# REMOTE subcommands (invoked over SSH / by Claude Code hooks)
+# ---------------------------------------------------------------------------
+
+# agr attach <name> [agterm-session-id]
+# Record the current row id for this session name, then attach-or-create tmux.
+cmd_attach() {
+  local name="${1:-}" sid="${2:-}"
+  [ -n "$name" ] || die "usage: agr attach <name> [session-id]"
+  valid_name "$name" || die "invalid name '$name'"
+  mkdir -p "$HOME/$REMOTE_TARGETS"
+  [ -n "$sid" ] && printf '%s' "$sid" > "$HOME/$REMOTE_TARGETS/$name"
+  exec tmux new-session -A -s "$name"
+}
+
+# agr status <state> [--blink] [--auto-reset]
+# Hook entry point: resolve this tmux session's target row, then relay.
+# Always a no-op (exit 0) when there is nothing to do, so it can never block a turn.
+cmd_status() {
+  local state="${1:-}"; [ -n "$state" ] || exit 0; shift || true
+  local name; name="$(tmux display-message -p '#S' 2>/dev/null)" || exit 0
+  local target; target="$(cat "$HOME/$REMOTE_TARGETS/$name" 2>/dev/null || true)"
+  [ -n "$target" ] || exit 0
+  local sock="$HOME/$REMOTE_SOCK"
+  [ -S "$sock" ] || exit 0
+  cmd_relay "$state" "$target" "$sock" "$@" || true
+  exit 0
+}
+
+# agr relay <state> <target> <socket> [--blink] [--auto-reset]
+# Pure transport: write one line of JSON to the forwarded agterm control socket.
+# 0.3s timeout means a stale-but-present socket can never hang the caller.
+cmd_relay() {
+  local state="${1:-}" target="${2:-}" sock="${3:-}"; shift 3 2>/dev/null || true
+  [ -n "$state" ] && [ -n "$target" ] && [ -n "$sock" ] || return 0
+  local blink=false auto=false a
+  for a in "$@"; do
+    case "$a" in --blink) blink=true;; --auto-reset) auto=true;; esac
+  done
+  AGR_STATE="$state" AGR_TARGET="$target" AGR_SOCK="$sock" AGR_BLINK="$blink" AGR_AUTO="$auto" \
+  python3 - <<'PY' 2>/dev/null || true
+import os, socket, json
+m = {"args": {"status": os.environ["AGR_STATE"]},
+     "target": os.environ["AGR_TARGET"], "cmd": "session.status"}
+if os.environ.get("AGR_BLINK") == "true": m["args"]["blink"] = True
+if os.environ.get("AGR_AUTO")  == "true": m["args"]["autoReset"] = True
+try:
+    s = socket.socket(socket.AF_UNIX); s.settimeout(0.3)
+    s.connect(os.environ["AGR_SOCK"])
+    s.sendall((json.dumps(m) + "\n").encode())
+except OSError:
+    pass
+PY
+}
+
+usage() {
+  cat >&2 <<EOF
+agr $VERSION — agterm-remote
+
+Mac (agterm) commands:
+  agr open <host> <name>   adopt the current agterm session -> remote tmux <name>
+  agr up <host>            ensure the control tunnel (idempotent)
+  agr down <host>          stop the control tunnel
+  agr install <host>       copy agr to <host> and wire Claude Code hooks
+  agr doctor <host>        check prerequisites on both sides
+
+Remote commands (usually invoked by ssh / hooks, not by hand):
+  agr attach <name> [id]   record target id, tmux new-session -A -s <name>
+  agr status <state> ...   hook entry point (active|blocked|completed|idle)
+  agr relay <state> <target> <socket> ...   send one status message
+EOF
+  exit "${1:-1}"
+}
+
+main() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    open)    cmd_open    "$@";;
+    up)      cmd_up      "$@";;
+    down)    cmd_down    "$@";;
+    install) cmd_install "$@";;
+    doctor)  cmd_doctor  "$@";;
+    attach)  cmd_attach  "$@";;
+    status)  cmd_status  "$@";;
+    relay)   cmd_relay   "$@";;
+    -V|--version) echo "agr $VERSION";;
+    ''|-h|--help) usage 0;;
+    *) log "agr: unknown command '$sub'"; usage 1;;
+  esac
+}
+
+main "$@"
