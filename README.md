@@ -121,8 +121,39 @@ agr open homelab api
 Open several agterm sessions, each `agr open homelab <name>` with a different
 name, to run independent agents with independent colored rows.
 
-Attach the same tmux sessions from a phone/other terminal any time
-(`ssh homelab; tmux attach -t api`) — colors just pause until a Mac is back.
+### From other clients (iPhone, Windows, another Linux box)
+
+The sessions `agr` creates are plain tmux sessions, reachable from **any** SSH
+client by name:
+
+```sh
+ssh homelab
+tmux ls                 # api, infra, …
+tmux attach -t api      # full agent interaction; colors pause (no agterm here)
+```
+
+Colors/pushes are macOS-agterm-only and resume the next time you
+`agr open homelab api` from a Mac (which rewrites the target row).
+
+### Don't force everything into one tmux session
+
+Per-session colors rely on each agent living in its **own named session** — the
+hook resolves the row from `tmux display-message -p '#S'`. A common footgun is a
+shell-rc rule that auto-attaches every SSH login to a single shared session
+(e.g. `main`): agents run as windows there all report the same `#S`, so their
+colors collide. Prefer a **bare login** (land at a shell; attach by name) so
+`agr open <host> <name>` is the only thing that creates sessions. Example rc
+snippet:
+
+```zsh
+if command -v tmux >/dev/null && [ -n "$SSH_CONNECTION" ] && [ -z "$TMUX" ] && [[ $- == *i* ]]; then
+  tmux ls 2>/dev/null && echo "attach with: tmux attach -t <name>"
+fi
+```
+
+(`agr` itself is unaffected either way — it connects with a non-interactive
+command that bypasses login-shell auto-attach — but a bare login keeps the
+named-session model clean.)
 
 ## Claude Code hook mapping
 
