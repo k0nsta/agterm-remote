@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agr"
 # Remote paths, relative to the remote user's $HOME (resolved on the remote side).
@@ -66,6 +66,13 @@ cmd_open() {
   rhome="$(remote_home "$host")"
   ragr="$rhome/$REMOTE_BIN"
   sid="${AGTERM_SESSION_ID:-}"
+
+  # Remember which host this agterm row is bound to, so `agr quick` can open a
+  # remote shell overlay on it later.
+  if [ -n "$sid" ]; then
+    mkdir -p "$CACHE_DIR/session-host"
+    printf '%s' "$host" > "$CACHE_DIR/session-host/$sid"
+  fi
 
   # Prefer mosh when available on both sides (marker written by `agr install`):
   # it survives drops/roaming/sleep instead of dying on a corrupted SSH packet.
@@ -177,6 +184,40 @@ PY
   log "agr: installed on '$host'"
 }
 
+# agr quick [session-id] — remote-aware quick terminal.
+# If the active agterm session was opened by `agr open`, drop a floating remote
+# shell overlay on it; otherwise fall back to agterm's built-in local quick
+# terminal. Bind this to ctrl+` in keymap.conf (see README).
+cmd_quick() {
+  have agtermctl || die "agtermctl not found (Mac/agterm only)"
+  local id="${1:-}" host=""
+  # Resolve the active session id when the keymap didn't pass one.
+  if [ -z "$id" ]; then
+    id="$(agtermctl tree --json 2>/dev/null | python3 -c '
+import sys, json
+try:
+    t = json.load(sys.stdin)["result"]["tree"]
+except Exception:
+    sys.exit(0)
+wss = t.get("workspaces", [])
+for ws in sorted(wss, key=lambda w: not w.get("active")):   # active workspace first
+    for s in ws.get("sessions", []):
+        if s.get("active"):
+            print(s["id"]); sys.exit(0)
+' 2>/dev/null)"
+  fi
+  [ -n "$id" ] && host="$(cat "$CACHE_DIR/session-host/$id" 2>/dev/null || true)"
+
+  if [ -n "$host" ]; then
+    # Remote session → floating remote shell on this row (falls back to local
+    # quick terminal if the overlay can't open).
+    agtermctl session overlay open "ssh -t $host" --target "$id" --size-percent 60 >/dev/null 2>&1 \
+      || agtermctl quick toggle >/dev/null 2>&1
+  else
+    agtermctl quick toggle >/dev/null 2>&1
+  fi
+}
+
 # agr doctor <host> — check prerequisites on both sides.
 cmd_doctor() {
   local host="${1:-}"; [ -n "$host" ] || die "usage: agr doctor <host>"
@@ -259,6 +300,7 @@ Mac (agterm) commands:
   agr up <host>            ensure the control tunnel (idempotent)
   agr down <host>          stop the control tunnel
   agr install <host>       copy agr to <host> and wire Claude Code hooks
+  agr quick [session-id]   remote-aware quick terminal (bind to ctrl+\`)
   agr doctor <host>        check prerequisites on both sides
 
 Remote commands (usually invoked by ssh / hooks, not by hand):
@@ -276,6 +318,7 @@ main() {
     up)      cmd_up      "$@";;
     down)    cmd_down    "$@";;
     install) cmd_install "$@";;
+    quick)   cmd_quick   "$@";;
     doctor)  cmd_doctor  "$@";;
     attach)  cmd_attach  "$@";;
     status)  cmd_status  "$@";;
