@@ -76,7 +76,6 @@ re-attaches the same running agent and re-labels the row.
 | `agr open <host> <name>` | Mac | Adopt the current agterm session: relabel row, ensure tunnel, attach remote tmux. |
 | `agr up` / `agr down` | Mac | Start / stop the shared control tunnel (autossh if present, else a reconnect loop). |
 | `agr install <host>` | Mac | Copy `agr` to the host and wire Claude Code hooks. |
-| `agr quick [id]` | Mac | Remote-aware quick terminal: remote-shell overlay on agr sessions, else the local quick terminal. |
 | `agr doctor <host>` | Mac | Check prerequisites on both sides. |
 | `agr attach <name> [id]` | remote | Record the row id, `tmux new-session -A -s <name>` (invoked over SSH). |
 | `agr status <state>` | remote | Hook entry point: resolve this tmux session's target, then relay. |
@@ -122,21 +121,6 @@ agr open homelab api
 
 Open several agterm sessions, each `agr open homelab <name>` with a different
 name, to run independent agents with independent colored rows.
-
-### Remote-aware quick terminal
-
-agterm's built-in quick terminal (`ctrl+\``) always opens a *local* shell. Bind
-it to `agr quick` instead and it becomes context-aware: in an `agr` session it
-drops a floating **remote** shell overlay on that host; in a local session it
-falls back to the built-in local quick terminal. `agr open` records which host
-each row is bound to, and `agr quick` opens the overlay via
-`agtermctl session overlay`.
-
-Add to `~/.config/agterm/keymap.conf`, then run `agtermctl keymap reload`:
-
-```
-command "Quick shell (remote-aware)" ctrl+` $HOME/.local/bin/agr quick "$AGT_SESSION_ID"
-```
 
 ### From other clients (iPhone, Windows, another Linux box)
 
