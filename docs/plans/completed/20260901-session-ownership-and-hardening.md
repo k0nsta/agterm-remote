@@ -369,9 +369,14 @@ and has a visible sidebar side effect).
 
 ### Task 12: [Final] Update documentation
 
-- [ ] README reflects everything shipped (re-read once end to end)
-- [ ] add `docs/backlog/` items for the follow-ups listed in Overview (via the backlog skill)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] README reflects everything shipped (re-read once end to end) — fixed two stale passages:
+      "Don't force everything into one tmux session" still described the pre-Task-2 `#S` hook
+      lookup; the version-mismatch reliability row still said "rewrites the target files" instead
+      of `@agr_target`
+- [x] add `docs/backlog/` items for the follow-ups listed in Overview (via the backlog skill) —
+      7 items filed: relay python→nc/socat, `agr uninstall`, bats+CI, `valid_token` leading
+      `-`/`.`/`..`, cache-filename sanitisation, zombie/idle-TTL cleanup, doctor relay probe
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

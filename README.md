@@ -180,7 +180,8 @@ Colors/pushes are macOS-agterm-only and resume the next time you
 ### Don't force everything into one tmux session
 
 Per-session colors rely on each agent living in its **own named session** — the
-hook resolves the row from `tmux display-message -p '#S'`. A common footgun is a
+hook resolves the row from the session's `@agr_target` option, which `agr open`
+sets once per session. A common footgun is a
 shell-rc rule that auto-attaches every SSH login to a single shared session
 (e.g. `main`): agents run as windows there all report the same `#S`, so their
 colors collide. Prefer a **bare login** (land at a shell; attach by name) so
@@ -234,7 +235,7 @@ The design separates two lifetimes so only one needs to be robust:
 |---|---|
 | Bridge down (network drop) | `agr status` no-ops; agent unaffected; tunnel auto-restores; next event re-syncs the color. |
 | Mac app quit, tunnel still up | Relay's 0.3s timeout → no-op. |
-| Switch Macs | Newest `agr up` reclaims the socket; next `agr open` rewrites the target files to the new Mac. |
+| Switch Macs | Newest `agr up` reclaims the socket; next `agr open` rewrites `@agr_target` to the new Mac's row. |
 | Non-agterm client only | No socket → relay no-ops; plain tmux, no colors, no errors. |
 | State changed while fully offline | Not retro-pushed; you see it on reattach, next event re-syncs. |
 | Mac and remote `agr` versions differ | `agr up`/`ls`/`kill` print a warning and still work; `agr doctor <host>` shows both versions and which side to `agr install`. |
