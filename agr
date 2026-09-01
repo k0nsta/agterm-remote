@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agr"
 # Remote paths, relative to the remote user's $HOME (resolved on the remote side).
@@ -24,9 +24,29 @@ log()  { printf '%s\n' "$*" >&2; }
 die()  { log "agr: $*"; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Session names double as tmux session names, target-file keys, and are
+# Session names and agterm session ids double as tmux session names and are
 # interpolated into a remote command, so keep them to a safe character set.
-valid_name() { case "$1" in ''|*[!a-zA-Z0-9_.-]*) return 1;; *) return 0;; esac; }
+valid_token() { case "$1" in ''|*[!a-zA-Z0-9_.-]*) return 1;; *) return 0;; esac; }
+
+# remote_cmd <args...>
+# Print the argv for invoking agr on the remote side, quoted for a remote
+# shell. The leading $HOME is a literal for the remote login shell — it must
+# NOT be expanded here — so it's a single-quoted constant, not $REMOTE_BIN
+# (which is relative and already resolved against remote_home elsewhere).
+remote_cmd() {
+  local out='"$HOME/'"$REMOTE_BIN"'"' a
+  for a in "$@"; do
+    # shellcheck disable=SC2016
+    out="$out $(printf '%q' "$a")"
+  done
+  printf '%s' "$out"
+}
+
+# remote_agr <host> <args...> — run agr on <host> via a non-login remote shell.
+remote_agr() {
+  local host="$1"; shift
+  ssh "$host" -- "$(remote_cmd "$@")"
+}
 
 # The Mac's agterm control socket. agterm exports AGTERM_SOCKET into every
 # session; fall back to the default install path when called from elsewhere.
@@ -53,7 +73,7 @@ remote_home() {
 cmd_open() {
   local host="${1:-}" name="${2:-}"
   [ -n "$host" ] && [ -n "$name" ] || die "usage: agr open <host> <name>"
-  valid_name "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
+  valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
 
   # Relabel the sidebar row to the stable key (best-effort; only inside agterm).
   if [ -n "${AGTERM_SESSION_ID:-}" ] && have agtermctl; then
@@ -84,9 +104,12 @@ cmd_open() {
   fi
 
   # After an abrupt drop, tmux's mouse-tracking / bracketed-paste modes may be
-  # left on, dumping escape-code garbage into the local shell. Turn them off.
-  printf '\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?2004l'
-  stty sane 2>/dev/null || true
+  # left on, dumping escape-code garbage into the local shell. Turn them off —
+  # but only when stdout is actually a terminal (B6).
+  if [ -t 1 ]; then
+    printf '\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?2004l'
+    stty sane 2>/dev/null || true
+  fi
   return "$ret"
 }
 
@@ -245,7 +268,7 @@ cmd_doctor() {
 cmd_attach() {
   local name="${1:-}" sid="${2:-}"
   [ -n "$name" ] || die "usage: agr attach <name> [session-id]"
-  valid_name "$name" || die "invalid name '$name'"
+  valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
   mkdir -p "$HOME/$REMOTE_TARGETS"
   [ -n "$sid" ] && printf '%s' "$sid" > "$HOME/$REMOTE_TARGETS/$name"
   exec tmux new-session -A -s "$name"
@@ -329,4 +352,4 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

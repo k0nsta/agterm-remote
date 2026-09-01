@@ -104,19 +104,19 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] bump `VERSION="0.4.0"`
-- [ ] rename `valid_name` → `valid_token` (same charset `[A-Za-z0-9_.-]`); update call
+- [x] bump `VERSION="0.4.0"`
+- [x] rename `valid_name` → `valid_token` (same charset `[A-Za-z0-9_.-]`); update call
       sites; fix its comment (`agr:27-29` still says "target-file keys"); error text:
       `invalid <what> '<value>' (use [A-Za-z0-9_.-])`
-- [ ] add `remote_cmd <args…>` → prints `"$HOME/.local/bin/agr" <%q-quoted args>`; the
+- [x] add `remote_cmd <args…>` → prints `"$HOME/.local/bin/agr" <%q-quoted args>`; the
       `$HOME` is a **literal** for the remote shell (single-quoted constant + `$REMOTE_BIN`);
       args via `printf '%q '`; `# shellcheck disable=SC2016` on that line
-- [ ] add `remote_agr <host> <args…>` → `ssh "$host" -- "$(remote_cmd "$@")"` (no `-t`)
-- [ ] guard the escape-reset in `cmd_open` (`agr:88`) with `[ -t 1 ]` (B6)
-- [ ] make the script sourceable: replace bare `main "$@"` with
+- [x] add `remote_agr <host> <args…>` → `ssh "$host" -- "$(remote_cmd "$@")"` (no `-t`)
+- [x] guard the escape-reset in `cmd_open` (`agr:88`) with `[ -t 1 ]` (B6)
+- [x] make the script sourceable: replace bare `main "$@"` with
       `if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi` (the `&&` form returns 1
       and, with `set -e` active, exits the sourcing shell — verified)
-- [ ] write `$SCRATCH/checks/01-foundations.sh`: `shellcheck -S warning agr`; `bash -n agr`;
+- [x] write `$SCRATCH/checks/01-foundations.sh`: `shellcheck -S warning agr`; `bash -n agr`;
       `./agr --version` = `agr 0.4.0`; `bash -c 'source ./agr; remote_cmd attach "a b" ""; echo ALIVE'`
       prints `"$HOME/.local/bin/agr" attach a\ b ''` then `ALIVE`
 
