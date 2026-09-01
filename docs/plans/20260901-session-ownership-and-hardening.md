@@ -177,22 +177,22 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] add `remote_data <host> <args…>`: run `remote_agr` capturing stdout and rc
+- [x] add `remote_data <host> <args…>`: run `remote_agr` capturing stdout and rc
       (`local out; out="$(remote_agr "$@")" || rc=$?` — separate `local` from assignment so
       the status isn't masked); rc 255 → `die "cannot reach '$host'"`; first line not
       `agr<TAB>…` → `die "remote agr on '$host' is missing or outdated — run: agr install $host"`;
       version ≠ `$VERSION` → `log "agr: version mismatch (local $VERSION, $host $rv) — run: agr install $host"`;
       print the remaining lines. Callers: `local rows; rows="$(remote_data "$host" sessions)" || exit $?`
       (the `die` runs in the subshell; the caller must propagate)
-- [ ] add `humanize_secs`: `<60 → Ns`, `<3600 → Nm`, `<86400 → Nh`, else `Nd`
-- [ ] add `row_state <sid>`: `-` → `-`; no `agtermctl` → `-`; else look the id up in
+- [x] add `humanize_secs`: `<60 → Ns`, `<3600 → Nm`, `<86400 → Nh`, else `Nd`
+- [x] add `row_state <sid>`: `-` → `-`; no `agtermctl` → `-`; else look the id up in
       `$AGR_TREE` (a variable `cmd_ls` fills **once** with `agtermctl tree --json`; python
       walk as in `cmd_quick`, printing all session ids) → `bound` if present, `stale` otherwise
-- [ ] add `cmd_ls <host>`: rows via `remote_data`; none → `echo "no agr sessions on '$host'"`;
+- [x] add `cmd_ls <host>`: rows via `remote_data`; none → `echo "no agr sessions on '$host'"`;
       else `printf` table `NAME WIN ATT IDLE CMD ROW`, `ATT` = count or `-`; iterate with
       `while IFS=$'\t' read -r …; done <<< "$rows"` (bash 3.2 — no `mapfile`). `ls` never mutates.
-- [ ] wire `ls)` in `main`
-- [ ] write `$SCRATCH/checks/04-ls.sh` (sourced): stub `remote_agr` with canned TSV
+- [x] wire `ls)` in `main`
+- [x] write `$SCRATCH/checks/04-ls.sh` (sourced): stub `remote_agr` with canned TSV
       (`api 2 1 180 claude A69B…`, `infra 1 0 172800 zsh DEADBEEF`, `scratch 1 0 18000 node,vim -`)
       and stub `agtermctl` printing a tree containing only `A69B…` → rows show `3m bound`,
       `2d stale`, `5h -`; header `agr\t0.3.0` → warning on stderr, table still printed; no

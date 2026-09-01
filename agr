@@ -62,6 +62,52 @@ remote_home() {
   printf '%s' "$h" > "$f"; printf '%s' "$h"
 }
 
+# remote_data <host> <args...>
+# Run a data-returning remote command (sessions, reap), enforce the version
+# handshake header, and print the remaining lines. A `die` here runs inside
+# the caller's command substitution subshell — callers must propagate with
+# `|| exit $?`.
+remote_data() {
+  local host="$1"; shift
+  local out; local rc=0
+  out="$(remote_agr "$host" "$@")" || rc=$?
+  [ "$rc" -ne 255 ] || die "cannot reach '$host'"
+  local header="${out%%$'\n'*}"
+  case "$header" in
+    agr$'\t'*) ;;
+    *) die "remote agr on '$host' is missing or outdated — run: agr install $host";;
+  esac
+  local rv="${header#agr$'\t'}"
+  [ "$rv" = "$VERSION" ] || log "agr: version mismatch (local $VERSION, $host $rv) — run: agr install $host"
+  [ "$out" != "$header" ] || return 0
+  printf '%s\n' "${out#*$'\n'}"
+}
+
+# humanize_secs <seconds> — compact age, e.g. 42s / 3m / 5h / 2d.
+humanize_secs() {
+  local s="$1"
+  if   [ "$s" -lt 60 ];    then printf '%ds' "$s"
+  elif [ "$s" -lt 3600 ];  then printf '%dm' $((s / 60))
+  elif [ "$s" -lt 86400 ]; then printf '%dh' $((s / 3600))
+  else                          printf '%dd' $((s / 86400))
+  fi
+}
+
+# row_state <sid> — whether the agterm row bound to <sid> still exists.
+# Looks the id up in $AGR_TREE, a newline-separated list of live session ids
+# that `cmd_ls` fills once per invocation via `agtermctl tree --json`.
+row_state() {
+  local sid="$1"
+  if [ "$sid" = "-" ] || ! have agtermctl; then
+    printf -- '-'; return 0
+  fi
+  if printf '%s\n' "$AGR_TREE" | grep -qxF "$sid"; then
+    printf 'bound'
+  else
+    printf 'stale'
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # LOCAL (Mac) subcommands
 # ---------------------------------------------------------------------------
@@ -242,6 +288,35 @@ for ws in sorted(wss, key=lambda w: not w.get("active")):   # active workspace f
   fi
 }
 
+# agr ls <host> — list agr-owned tmux sessions on <host>. Never mutates.
+cmd_ls() {
+  local host="${1:-}"; [ -n "$host" ] || die "usage: agr ls <host>"
+  local rows; rows="$(remote_data "$host" sessions)" || exit $?
+  [ -n "$rows" ] || { echo "no agr sessions on '$host'"; return 0; }
+
+  AGR_TREE=""
+  if have agtermctl; then
+    AGR_TREE="$(agtermctl tree --json 2>/dev/null | python3 -c '
+import sys, json
+try:
+    t = json.load(sys.stdin)["result"]["tree"]
+except Exception:
+    sys.exit(0)
+for ws in t.get("workspaces", []):
+    for s in ws.get("sessions", []):
+        print(s["id"])
+' 2>/dev/null)"
+  fi
+
+  printf '%-16s %-4s %-4s %-6s %-16s %s\n' NAME WIN ATT IDLE CMD ROW
+  local name windows attached idle_secs cmds sid att
+  while IFS=$'\t' read -r name windows attached idle_secs cmds sid; do
+    att="$attached"; [ "$att" != "0" ] || att="-"
+    printf '%-16s %-4s %-4s %-6s %-16s %s\n' \
+      "$name" "$windows" "$att" "$(humanize_secs "$idle_secs")" "$cmds" "$(row_state "$sid")"
+  done <<< "$rows"
+}
+
 # agr doctor <host> — check prerequisites on both sides.
 cmd_doctor() {
   local host="${1:-}"; [ -n "$host" ] || die "usage: agr doctor <host>"
@@ -372,6 +447,7 @@ main() {
     install) cmd_install "$@";;
     quick)   cmd_quick   "$@";;
     doctor)  cmd_doctor  "$@";;
+    ls)      cmd_ls      "$@";;
     attach)  cmd_attach  "$@";;
     sessions) cmd_sessions "$@";;
     status)  cmd_status  "$@";;
