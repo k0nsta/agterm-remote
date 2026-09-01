@@ -125,23 +125,23 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] rewrite `cmd_attach`: validate `name` (and `sid` when non-empty) with `valid_token`;
+- [x] rewrite `cmd_attach`: validate `name` (and `sid` when non-empty) with `valid_token`;
       `tmux has-session -t "=$name" 2>/dev/null || tmux new-session -d -s "$name"`;
       `tmux set-option -t "=$name:" @agr_target "${sid:--}"` (**colon required**);
       `exec tmux attach -t "=$name"`. (Two simultaneous `open`s of the same *new* name can
       race `new-session`; the loser gets tmux's "duplicate session" error and a retry works — accepted.)
-- [ ] rewrite `cmd_status` target lookup, keeping the hook contract *always exit 0*:
+- [x] rewrite `cmd_status` target lookup, keeping the hook contract *always exit 0*:
       `[ -n "${TMUX_PANE:-}" ] || exit 0`;
       `target="$(tmux display-message -p -t "$TMUX_PANE" '#{@agr_target}' 2>/dev/null)" || exit 0`;
       empty **or `-`** → exit 0. Drop the `#S` lookup.
-- [ ] remove `REMOTE_TARGETS` and its uses — but **keep `mkdir -p ~/.cache/agterm`** in
+- [x] remove `REMOTE_TARGETS` and its uses — but **keep `mkdir -p ~/.cache/agterm`** in
       `cmd_up` (`agr:104`) and `cmd_install` (`agr:143`): it is the parent of the forwarded
       socket, and with `ExitOnForwardFailure=yes` a missing parent kills the bridge. Only the
       `/targets` component and the `cmd_attach` write (`agr:249-250`) go.
-- [ ] `cmd_open`: validate `sid` with `valid_token` when non-empty (B3); ssh path becomes
+- [x] `cmd_open`: validate `sid` with `valid_token` when non-empty (B3); ssh path becomes
       `ssh -t "$host" -- "$(remote_cmd attach "$name" "$sid")"`; mosh path keeps
       `remote_home` + `"$ragr"` argv (mosh-server execs without a shell) with validated args
-- [ ] write `$SCRATCH/checks/02-ownership.sh` (tmux shim): run the has-session/new-session/
+- [x] write `$SCRATCH/checks/02-ownership.sh` (tmux shim): run the has-session/new-session/
       set-option lines against a new and an existing session; `tmux show-option -t "=a:" -qv @agr_target`
       prints the sid / `-`; `bash -c './agr status active'` outside tmux exits 0 with no
       output (`cmd_status` calls `exit`, so never in the sourced shell); `grep -n targets agr`
