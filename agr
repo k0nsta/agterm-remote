@@ -79,13 +79,18 @@ remote_data() {
   esac
   local rv="${header#agr$'\t'}"
   [ "$rv" = "$VERSION" ] || log "agr: version mismatch (local $VERSION, $host $rv) — run: agr install $host"
+  # Handshake is valid; now propagate the remote command's own failure (e.g.
+  # `reap` refusing a session) instead of reporting success on a good header.
+  [ "$rc" -eq 0 ] || return "$rc"
   [ "$out" != "$header" ] || return 0
   printf '%s\n' "${out#*$'\n'}"
 }
 
 # humanize_secs <seconds> — compact age, e.g. 42s / 3m / 5h / 2d.
+# Non-numeric or empty input renders as "-" rather than a shell error.
 humanize_secs() {
   local s="$1"
+  case "$s" in ''|*[!0-9]*) printf -- '-'; return 0;; esac
   if   [ "$s" -lt 60 ];    then printf '%ds' "$s"
   elif [ "$s" -lt 3600 ];  then printf '%dm' $((s / 60))
   elif [ "$s" -lt 86400 ]; then printf '%dh' $((s / 3600))
@@ -96,9 +101,11 @@ humanize_secs() {
 # row_state <sid> — whether the agterm row bound to <sid> still exists.
 # Looks the id up in $AGR_TREE, a newline-separated list of live session ids
 # that `compute_agr_tree` fills once per invocation via `agtermctl tree --json`.
+# An empty tree means "can't tell" (agterm not running, tree unparsable), which
+# renders as "-" — never as "stale", which would claim the row was closed.
 row_state() {
   local sid="$1"
-  if [ "$sid" = "-" ] || ! have agtermctl; then
+  if [ "$sid" = "-" ] || ! have agtermctl || [ -z "${AGR_TREE:-}" ]; then
     printf -- '-'; return 0
   fi
   if printf '%s\n' "$AGR_TREE" | grep -qxF "$sid"; then
@@ -110,7 +117,9 @@ row_state() {
 
 # compute_agr_tree — fill $AGR_TREE with every live agterm session id, once
 # per invocation. Empty (and row_state falls back to "-") when agtermctl is
-# unavailable or the tree can't be parsed.
+# unavailable, agterm isn't running, or the tree can't be parsed. The trailing
+# `|| true` matters: under `pipefail` a failing agtermctl would otherwise abort
+# the whole script (`set -e`) after the ssh round-trip has already completed.
 compute_agr_tree() {
   AGR_TREE=""
   have agtermctl || return 0
@@ -123,7 +132,7 @@ except Exception:
 for ws in t.get("workspaces", []):
     for s in ws.get("sessions", []):
         print(s["id"])
-' 2>/dev/null)"
+' 2>/dev/null || true)"
 }
 
 # pick_lines <rows> — one picker line per session: "name  cmd  row  idle".
@@ -132,6 +141,7 @@ pick_lines() {
   local rows="$1"
   local name windows attached idle_secs cmds sid
   while IFS=$'\t' read -r name windows attached idle_secs cmds sid; do
+    [ -n "$name" ] || continue   # `<<< ""` still yields one empty iteration
     printf '%s  %s  %s  %s\n' "$name" "$cmds" "$(row_state "$sid")" "$(humanize_secs "$idle_secs")"
   done <<< "$rows"
 }
@@ -140,25 +150,34 @@ pick_lines() {
 # LOCAL (Mac) subcommands
 # ---------------------------------------------------------------------------
 
-# agr open <host> <name>
+# agr open <host> [name]
 # Adopt the current agterm session: relabel its row, ensure the control tunnel,
-# then attach (or create) the named tmux session on the remote host.
+# then attach (or create) the named tmux session on the remote host. With no
+# name, open agterm's native picker over the owned sessions (`--allow-custom`
+# so a new name can be typed); without agtermctl, print the list and the usage.
 cmd_open() {
   local host="${1:-}" name="${2:-}"
-  [ -n "$host" ] || die "usage: agr open <host> <name>"
+  [ -n "$host" ] || die "usage: agr open <host> [name]"
 
   if [ -z "$name" ]; then
     if ! have agtermctl; then
       cmd_ls "$host"
-      die "usage: agr open <host> <name>"
+      die "no agtermctl for the picker — usage: agr open <host> <name>"
     fi
     local rows; rows="$(remote_data "$host" sessions)" || exit $?
     compute_agr_tree
-    local result
-    result="$(pick_lines "$rows" | agtermctl pick open --allow-custom \
+    local lines result line
+    lines="$(pick_lines "$rows")"
+    result="$(printf '%s\n' "$lines" | agtermctl pick open --allow-custom \
       --prompt "tmux session on $host — or type a new name")" || true
     [ -n "$result" ] || exit 1
-    name="${result%% *}"
+    # A result that is exactly one of the lines we fed the picker is a chosen
+    # row (name = first column). Anything else is a typed custom name and goes
+    # to valid_token verbatim — so "web server" is rejected, not truncated.
+    name="$result"
+    while IFS= read -r line; do
+      if [ -n "$line" ] && [ "$line" = "$result" ]; then name="${line%%  *}"; break; fi
+    done <<< "$lines"
   fi
   valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
   local sid="${AGTERM_SESSION_ID:-}"
@@ -331,7 +350,9 @@ cmd_install() {
   # Merge the four agterm hooks into the remote ~/.claude/settings.json.
   ssh "$host" 'python3 - ' <<'PY'
 import json, os, shutil, sys
-p = os.path.expanduser("~/.claude/settings.json")
+# realpath: if settings.json is a dotfiles-managed symlink, back up, write the
+# temp file, and os.replace beside the *target* so the link itself survives.
+p = os.path.realpath(os.path.expanduser("~/.claude/settings.json"))
 cfg = {}
 if os.path.exists(p):
     with open(p) as f:
@@ -393,7 +414,7 @@ for ws in sorted(wss, key=lambda w: not w.get("active")):   # active workspace f
     for s in ws.get("sessions", []):
         if s.get("active"):
             print(s["id"]); sys.exit(0)
-' 2>/dev/null)"
+' 2>/dev/null || true)"
   fi
   [ -n "$id" ] && host="$(cat "$CACHE_DIR/session-host/$id" 2>/dev/null || true)"
 
@@ -418,6 +439,7 @@ cmd_ls() {
   printf '%-16s %-4s %-4s %-6s %-16s %s\n' NAME WIN ATT IDLE CMD ROW
   local name windows attached idle_secs cmds sid att
   while IFS=$'\t' read -r name windows attached idle_secs cmds sid; do
+    [ -n "$name" ] || continue
     att="$attached"; [ "$att" != "0" ] || att="-"
     printf '%-16s %-4s %-4s %-6s %-16s %s\n' \
       "$name" "$windows" "$att" "$(humanize_secs "$idle_secs")" "$cmds" "$(row_state "$sid")"
@@ -468,10 +490,12 @@ cmd_doctor() {
       legacy)      legacy="$val";;
     esac
   done <<< "$remote"
+  # The probe is `agr --version` output, i.e. "agr X.Y.Z" — the same shape
+  # cmd_up's probe parses; compare against the prefixed form, print it bare.
   case "$agr_ver" in
-    MISSING) printf '  agr remote    : MISSING ← run: agr install %s\n' "$host";;
-    "$VERSION") printf '  agr remote    : %s\n' "$agr_ver";;
-    *) printf '  agr remote    : %s ← run: agr install %s\n' "$agr_ver" "$host";;
+    MISSING)        printf '  agr remote    : MISSING ← run: agr install %s\n' "$host";;
+    "agr $VERSION") printf '  agr remote    : %s\n' "${agr_ver#agr }";;
+    *)              printf '  agr remote    : %s ← run: agr install %s\n' "${agr_ver#agr }" "$host";;
   esac
   if [ -n "$legacy" ]; then
     printf '  legacy targets: %s — agr open each to adopt, then rm -r ~/.cache/agterm/targets\n' "$legacy"

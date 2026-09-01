@@ -143,9 +143,12 @@ it.
 
 #### Upgrading from 0.3
 
-Sessions created by 0.3.0's `targets/` files are invisible to `agr ls` until
-you `agr open` them once (`agr doctor <host>` lists them as "legacy targets").
-After that, they carry `@agr_target` like any other session, and you can
+First re-run `agr install <host>` — a 0.3 remote has no `sessions`/`reap`
+and its `attach` doesn't set `@agr_target`, so `agr ls` fails with the
+"run: agr install" hint until the remote binary is upgraded. Then sessions
+created under 0.3 are invisible to `agr ls` until you `agr open` them once
+(`agr doctor <host>` lists them as "legacy targets"). After that, they carry
+`@agr_target` like any other session, and you can
 `rm -r ~/.cache/agterm/targets` on the host.
 
 ### Remote-aware quick terminal
@@ -183,8 +186,8 @@ Per-session colors rely on each agent living in its **own named session** — th
 hook resolves the row from the session's `@agr_target` option, which `agr open`
 sets once per session. A common footgun is a
 shell-rc rule that auto-attaches every SSH login to a single shared session
-(e.g. `main`): agents run as windows there all report the same `#S`, so their
-colors collide. Prefer a **bare login** (land at a shell; attach by name) so
+(e.g. `main`): agents running as windows in that one session all share that
+session's `@agr_target`, so their colors collide. Prefer a **bare login** (land at a shell; attach by name) so
 `agr open <host> <name>` is the only thing that creates sessions. Example rc
 snippet:
 
@@ -238,7 +241,7 @@ The design separates two lifetimes so only one needs to be robust:
 | Switch Macs | Newest `agr up` reclaims the socket; next `agr open` rewrites `@agr_target` to the new Mac's row. |
 | Non-agterm client only | No socket → relay no-ops; plain tmux, no colors, no errors. |
 | State changed while fully offline | Not retro-pushed; you see it on reattach, next event re-syncs. |
-| Mac and remote `agr` versions differ | `agr up`/`ls`/`kill` print a warning and still work; `agr doctor <host>` shows both versions and which side to `agr install`. |
+| Mac and remote `agr` versions differ | `agr up` prints a warning and still works. `agr ls`/`agr kill` warn and continue when the remote still speaks the handshake, but fail with "run: agr install <host>" when it predates it (any 0.3 remote). `agr doctor <host>` shows both versions and which side to `agr install`. |
 
 ## Security
 
