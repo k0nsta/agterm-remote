@@ -152,19 +152,22 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] add `cmd_sessions`: `have tmux || die "tmux not found in non-interactive PATH"`
+- [x] add `cmd_sessions`: `have tmux || die "tmux not found in non-interactive PATH"`
       (`remote_agr` runs a non-login shell; a Homebrew/`/usr/local` tmux may be absent —
       must not masquerade as "no sessions"); print header `agr<TAB>$VERSION`; if
       `tmux list-sessions` fails (no server) exit 0 after the header
-- [ ] loop `tmux list-sessions -F '#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_activity}\t#{@agr_target}'`
+- [x] loop `tmux list-sessions -F '#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_activity}\t#{@agr_target}'`
       (`while IFS=$'\t' read -r …`); skip rows with empty `@agr_target` (last field — safe
-      against `read`'s empty-field collapsing)
-- [ ] per session: `cmds="$(tmux list-panes -s -t "=$name" -F '#{pane_current_command}' 2>/dev/null | sort -u)" || true`;
+      against `read`'s empty-field collapsing) — ⚠️ the `-F` format needs a **real tab
+      character** (`$'...\t...'` ANSI-C quoting), not a literal backslash-`t`; tmux 3.7b
+      does not interpret `\t` inside a plain single-quoted format string (verified against
+      the throwaway server — confirmed with `od -c`)
+- [x] per session: `cmds="$(tmux list-panes -s -t "=$name" -F '#{pane_current_command}' 2>/dev/null | sort -u)" || true`;
       drop `sh|bash|zsh|fish|dash`; if nothing left keep the shell names; join with `,`;
       **empty → `-`** (a middle field must never be empty on the wire)
-- [ ] `idle_secs=$(( $(date +%s) - activity ))` computed on the remote
-- [ ] emit `name\twindows\tattached\tidle_secs\tcmds\tbound_sid`; wire `sessions)` in `main`
-- [ ] write `$SCRATCH/checks/03-sessions.sh` (tmux shim): (a) no server → header only, exit 0;
+- [x] `idle_secs=$(( $(date +%s) - activity ))` computed on the remote
+- [x] emit `name\twindows\tattached\tidle_secs\tcmds\tbound_sid`; wire `sessions)` in `main`
+- [x] write `$SCRATCH/checks/03-sessions.sh` (tmux shim): (a) no server → header only, exit 0;
       (b) `owned` with `@agr_target X` + `plain` → exactly one data row, `bound_sid=X`,
       `cmds` = shell name; (c) `sleep 999` running in `owned` → `cmds=sleep`; (d) every row
       has exactly 6 tab-separated fields and `idle_secs` ≥ 0; `shellcheck -S warning agr`

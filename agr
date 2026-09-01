@@ -277,6 +277,31 @@ cmd_attach() {
   exec tmux attach -t "=$name"
 }
 
+# agr sessions
+# Remote producer: list agr-owned tmux sessions as TSV for `agr ls`. This is a
+# data-returning command, so it starts with the version handshake header.
+cmd_sessions() {
+  have tmux || die "tmux not found in non-interactive PATH"
+  printf 'agr\t%s\n' "$VERSION"
+  local list
+  list="$(tmux list-sessions -F $'#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_activity}\t#{@agr_target}' 2>/dev/null)" || exit 0
+  [ -n "$list" ] || exit 0
+  local name windows attached activity target
+  while IFS=$'\t' read -r name windows attached activity target; do
+    [ -n "$target" ] || continue
+    local raw filtered cmds idle_secs
+    raw="$(tmux list-panes -s -t "=$name" -F '#{pane_current_command}' 2>/dev/null | sort -u)" || true
+    # Drop plain shells from the command list; if that empties it, keep them
+    # (a session with only a shell running should still show something).
+    filtered="$(printf '%s\n' "$raw" | grep -vE '^(sh|bash|zsh|fish|dash)$' || true)"
+    if [ -n "$filtered" ]; then cmds="$filtered"; else cmds="$raw"; fi
+    cmds="$(printf '%s' "$cmds" | tr '\n' ',' | sed 's/,$//')"
+    [ -n "$cmds" ] || cmds="-"
+    idle_secs=$(( $(date +%s) - activity ))
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$windows" "$attached" "$idle_secs" "$cmds" "$target"
+  done <<< "$list"
+}
+
 # agr status <state> [--blink] [--auto-reset]
 # Hook entry point: resolve this tmux session's target row, then relay.
 # Always a no-op (exit 0) when there is nothing to do, so it can never block a turn.
@@ -331,6 +356,7 @@ Mac (agterm) commands:
 
 Remote commands (usually invoked by ssh / hooks, not by hand):
   agr attach <name> [id]   record target id, tmux new-session -A -s <name>
+  agr sessions             list agr-owned tmux sessions as TSV (for agr ls)
   agr status <state> ...   hook entry point (active|blocked|completed|idle)
   agr relay <state> <target> <socket> ...   send one status message
 EOF
@@ -347,6 +373,7 @@ main() {
     quick)   cmd_quick   "$@";;
     doctor)  cmd_doctor  "$@";;
     attach)  cmd_attach  "$@";;
+    sessions) cmd_sessions "$@";;
     status)  cmd_status  "$@";;
     relay)   cmd_relay   "$@";;
     -V|--version) echo "agr $VERSION";;
