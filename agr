@@ -436,22 +436,48 @@ cmd_kill() {
   return "$failed"
 }
 
-# agr doctor <host> — check prerequisites on both sides.
+# agr doctor <host> — check prerequisites on both sides, plus the version
+# handshake and bridge socket (constant remote script — no interpolation).
 cmd_doctor() {
   local host="${1:-}"; [ -n "$host" ] || die "usage: agr doctor <host>"
   echo "local (agterm host):"
+  printf '  agr local     : %s\n' "$VERSION"
   printf '  agterm socket : %s\n' "$([ -S "$(local_sock)" ] && echo present || echo MISSING)"
   printf '  agtermctl     : %s\n' "$(have agtermctl && echo yes || echo 'no (row auto-label disabled)')"
   printf '  autossh       : %s\n' "$(have autossh && echo yes || echo 'no (using reconnect loop)')"
   printf '  mosh          : %s\n' "$(have mosh && echo yes || echo 'no (ssh only)')"
   echo "remote ($host):"
-  ssh "$host" '
-    printf "  tmux          : %s\n" "$(tmux -V 2>/dev/null || echo MISSING)"
-    printf "  python3       : %s\n" "$(command -v python3 >/dev/null && python3 -V 2>&1 || echo MISSING)"
-    printf "  mosh-server   : %s\n" "$(command -v mosh-server >/dev/null && echo yes || echo "no (ssh only)")"
-    printf "  agr installed : %s\n" "$([ -x ~/.local/bin/agr ] && echo yes || echo no)"
-    printf "  cache dir     : %s\n" "$([ -d ~/.cache/agterm ] && echo ok || echo missing)"
-  '
+  local remote rc=0
+  remote="$(ssh "$host" -- '
+    printf "tmux\t%s\n" "$(tmux -V 2>/dev/null || echo MISSING)"
+    printf "python3\t%s\n" "$(command -v python3 >/dev/null && python3 -V 2>&1 || echo MISSING)"
+    printf "mosh-server\t%s\n" "$(command -v mosh-server >/dev/null && echo yes || echo no)"
+    printf "agr\t%s\n" "$("$HOME/.local/bin/agr" --version 2>/dev/null || echo MISSING)"
+    printf "socket\t%s\n" "$([ -S ~/.cache/agterm/agterm.sock ] && echo present || echo MISSING)"
+    printf "legacy\t%s\n" "$(ls ~/.cache/agterm/targets 2>/dev/null | tr "\n" " ")"
+  ')" || rc=$?
+  [ "$rc" -eq 0 ] || die "cannot reach '$host'"
+  local key val agr_ver="" legacy=""
+  while IFS=$'\t' read -r key val; do
+    case "$key" in
+      tmux)        printf '  tmux          : %s\n' "$val";;
+      python3)     printf '  python3       : %s\n' "$val";;
+      mosh-server) printf '  mosh-server   : %s\n' "$([ "$val" = yes ] && echo yes || echo 'no (ssh only)')";;
+      agr)         agr_ver="$val";;
+      socket)      printf '  bridge socket : %s\n' "$val";;
+      legacy)      legacy="$val";;
+    esac
+  done <<< "$remote"
+  case "$agr_ver" in
+    MISSING) printf '  agr remote    : MISSING ← run: agr install %s\n' "$host";;
+    "$VERSION") printf '  agr remote    : %s\n' "$agr_ver";;
+    *) printf '  agr remote    : %s ← run: agr install %s\n' "$agr_ver" "$host";;
+  esac
+  if [ -n "$legacy" ]; then
+    printf '  legacy targets: %s — agr open each to adopt, then rm -r ~/.cache/agterm/targets\n' "$legacy"
+  else
+    printf '  legacy targets: none\n'
+  fi
 }
 
 # ---------------------------------------------------------------------------

@@ -306,15 +306,15 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] local block unchanged; add `agr local : $VERSION`
-- [ ] remote block via one `ssh` with a constant script: `agr remote : <version|MISSING>`
+- [x] local block unchanged; add `agr local : $VERSION`
+- [x] remote block via one `ssh` with a constant script: `agr remote : <version|MISSING>`
       (`"$HOME/.local/bin/agr" --version`), `bridge socket : present|MISSING`
       (`[ -S ~/.cache/agterm/agterm.sock ]`), `legacy targets : <names|none>`
       (`ls ~/.cache/agterm/targets 2>/dev/null`)
-- [ ] compare versions on the Mac side; on mismatch/MISSING append `← run: agr install $host`
-- [ ] legacy hint: `legacy targets: api infra — agr open each to adopt, then rm -r ~/.cache/agterm/targets`
-- [ ] no relay probe (see Overview — out of scope)
-- [ ] write `$SCRATCH/checks/09-doctor.sh` (ssh shim printing a canned remote block):
+- [x] compare versions on the Mac side; on mismatch/MISSING append `← run: agr install $host`
+- [x] legacy hint: `legacy targets: api infra — agr open each to adopt, then rm -r ~/.cache/agterm/targets`
+- [x] no relay probe (see Overview — out of scope)
+- [x] write `$SCRATCH/checks/09-doctor.sh` (ssh shim printing a canned remote block):
       matching version → no hint; `0.3.0` / `MISSING` → hint present; `shellcheck -S warning agr`
 
 ### Task 10: `usage()`, header comment, README
