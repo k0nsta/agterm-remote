@@ -279,22 +279,27 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] `scp` to `"$host:$REMOTE_BIN.tmp"`, then
+- [x] `scp` to `"$host:$REMOTE_BIN.tmp"`, then
       `ssh "$host" -- 'chmod +x "$HOME/.local/bin/agr.tmp" && mv -f "$HOME/.local/bin/agr.tmp" "$HOME/.local/bin/agr"'`
       (constant string; this removes the last SC2029 site together with Task 2's mkdir change)
-- [ ] python merge (B5): wrap `json.load` in try/except → print
+- [x] python merge (B5): wrap `json.load` in try/except → print
       `agr: cannot parse ~/.claude/settings.json: <err>` to stderr and `sys.exit(1)` before
       any write; compute the change first and **only if something changes** copy to
       `settings.json.bak-agr` (so a no-op re-run never overwrites the good backup), write
       `settings.json.tmp` in the same dir, `os.replace`; drop the redundant
       `"/agr status" in flat or` clause
-- [ ] final log line: `agr: installed $VERSION on '$host'`
-- [ ] write `$SCRATCH/checks/08-install.sh`: copy the heredoc body to `$SCRATCH/merge.py`
+- [x] final log line: `agr: installed $VERSION on '$host'`
+- [x] write `$SCRATCH/checks/08-install.sh`: copy the heredoc body to `$SCRATCH/merge.py`
       (`sed -n '/<<.PY.$/,/^PY$/p' agr | sed '1d;$d'`) and run it with `HOME=<tmpdir>`:
       (a) no settings.json → created with the four hooks, no `.bak-agr`; (b) valid file with
       unrelated keys → keys preserved, hooks appended, `.bak-agr` equals the original;
       (c) run again → file unchanged, `.bak-agr` unchanged; (d) malformed JSON → one-line
       error, exit 1, file byte-identical; `shellcheck -S warning agr` (SC2029 count now 0)
+      — ⚠️ deviation: Task 7's fallback-loop `ssh "${opts[@]}" "$host"` also trips SC2029
+      (a shellcheck false positive — no remote command on that line, just local ssh flags;
+      confirmed with a minimal repro), which would have kept the count above 0 without any
+      Task 8 involvement; silenced with a targeted `# shellcheck disable=SC2029` there so the
+      count is genuinely 0.
 
 ### Task 9: `doctor` reports both versions and the bridge socket
 

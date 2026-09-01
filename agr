@@ -280,6 +280,8 @@ cmd_up() {
       local delay=3
       while true; do
         local t0=$SECONDS
+        # shellcheck disable=SC2029 # false positive: no remote command here,
+        # $host is just the ssh destination, not an interpolated remote string.
         ssh "${opts[@]}" "$host" & pid=$!
         wait "$pid" || true
         if [ $(( SECONDS - t0 )) -gt 30 ]; then
@@ -315,8 +317,8 @@ cmd_install() {
   local self; self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
   ssh "$host" 'mkdir -p ~/.local/bin ~/.cache/agterm'
-  scp -q "$self" "$host:$REMOTE_BIN"
-  ssh "$host" "chmod +x '$REMOTE_BIN'"
+  scp -q "$self" "$host:$REMOTE_BIN.tmp"
+  ssh "$host" -- 'chmod +x "$HOME/.local/bin/agr.tmp" && mv -f "$HOME/.local/bin/agr.tmp" "$HOME/.local/bin/agr"'
 
   # Record whether the remote has mosh, so `agr open` can prefer it.
   mkdir -p "$CACHE_DIR"
@@ -328,12 +330,16 @@ cmd_install() {
 
   # Merge the four agterm hooks into the remote ~/.claude/settings.json.
   ssh "$host" 'python3 - ' <<'PY'
-import json, os
+import json, os, shutil, sys
 p = os.path.expanduser("~/.claude/settings.json")
 cfg = {}
 if os.path.exists(p):
     with open(p) as f:
-        cfg = json.load(f)
+        try:
+            cfg = json.load(f)
+        except Exception as e:
+            print(f"agr: cannot parse ~/.claude/settings.json: {e}", file=sys.stderr)
+            sys.exit(1)
 agr = "$HOME/.local/bin/agr status"
 wanted = {
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": f"{agr} active --blink"}]}],
@@ -343,19 +349,28 @@ wanted = {
     "Stop":             [{"hooks": [{"type": "command", "command": f"{agr} completed --auto-reset"}]}],
 }
 hooks = cfg.setdefault("hooks", {})
+changed = False
 for event, entries in wanted.items():
     bucket = hooks.setdefault(event, [])
     # idempotent: skip if any entry already calls `agr status`
     flat = json.dumps(bucket)
-    if "/agr status" in flat or "agr status" in flat:
+    if "agr status" in flat:
         continue
     bucket.extend(entries)
+    changed = True
+if not changed:
+    print("agr: Claude Code hooks already wired in", p)
+    sys.exit(0)
 os.makedirs(os.path.dirname(p), exist_ok=True)
-with open(p, "w") as f:
+if os.path.exists(p):
+    shutil.copy2(p, p + ".bak-agr")
+tmp = p + ".tmp"
+with open(tmp, "w") as f:
     json.dump(cfg, f, indent=2)
+os.replace(tmp, p)
 print("agr: wired Claude Code hooks in", p)
 PY
-  log "agr: installed on '$host'"
+  log "agr: installed $VERSION on '$host'"
 }
 
 # agr quick [session-id] — remote-aware quick terminal.
