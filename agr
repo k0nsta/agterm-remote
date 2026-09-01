@@ -5,8 +5,8 @@
 # AI agents that run on a REMOTE host inside tmux, reached over SSH.
 #
 # One script, installed on both sides:
-#   • the Mac (agterm) uses:  open | up | down | install | doctor
-#   • the remote host uses:   attach | status | relay   (invoked by ssh / hooks)
+#   • the Mac (agterm) uses:  open | ls | kill | up | down | install | quick | doctor
+#   • the remote host uses:   attach | sessions | reap | status | relay   (invoked by ssh / hooks)
 #
 # See README.md for the architecture. MIT licensed.
 
@@ -583,7 +583,10 @@ usage() {
 agr $VERSION — agterm-remote
 
 Mac (agterm) commands:
-  agr open <host> <name>   adopt the current agterm session -> remote tmux <name>
+  agr open <host> [name]   adopt the current agterm session -> remote tmux <name>
+                           (no name: pick from owned sessions, or type a new one)
+  agr ls <host>            list agr-owned tmux sessions on <host>
+  agr kill <host> <name>.. kill one or more agr-owned tmux sessions on <host>
   agr up <host>            ensure the control tunnel (idempotent)
   agr down <host>          stop the control tunnel
   agr install <host>       copy agr to <host> and wire Claude Code hooks
@@ -593,7 +596,8 @@ Mac (agterm) commands:
 Remote commands (usually invoked by ssh / hooks, not by hand):
   agr attach <name> [id]   record target id, tmux new-session -A -s <name>
   agr sessions             list agr-owned tmux sessions as TSV (for agr ls)
-  agr status <state> ...   hook entry point (active|blocked|completed|idle)
+  agr reap <name>          kill an agr-owned tmux session (for agr kill)
+  agr status <state> ...   hook entry point (active|blocked|completed)
   agr relay <state> <target> <socket> ...   send one status message
 EOF
   exit "${1:-1}"

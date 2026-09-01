@@ -323,21 +323,21 @@ and has a visible sidebar side effect).
 - Modify: `agr`
 - Modify: `README.md`
 
-- [ ] `usage()`: add `ls`, `kill`, `open <host>` (no name → picker) to the Mac block;
+- [x] `usage()`: add `ls`, `kill`, `open <host>` (no name → picker) to the Mac block;
       `sessions`, `reap` to the remote block; remove the `idle` state from the `status` line
       (nothing emits it)
-- [ ] file header comment (`agr:8-9`): update the Mac / remote verb lists
-- [ ] README "How it works" diagram + "Components" table: replace `targets/<name>` with the
+- [x] file header comment (`agr:8-9`): update the Mac / remote verb lists
+- [x] README "How it works" diagram + "Components" table: replace `targets/<name>` with the
       `@agr_target` session option; add `ls`/`kill`/`sessions`/`reap` rows;
       `agr up <host>` / `agr down <host>` with the argument
-- [ ] README "State files" paragraph: remove `targets/`, add `~/.cache/agr/bridge-<host>.log`
+- [x] README "State files" paragraph: remove `targets/`, add `~/.cache/agr/bridge-<host>.log`
       and `.lock`
-- [ ] README "Usage": add the discovery loop — `agr ls`, `agr open <host>` picker, `agr kill`;
+- [x] README "Usage": add the discovery loop — `agr ls`, `agr open <host>` picker, `agr kill`;
       and a short "Upgrading from 0.3" note (re-run `agr install`; `doctor` lists legacy
       sessions to re-open once; then `rm -r ~/.cache/agterm/targets` on the host)
-- [ ] README "Reliability" table: add *Mac and remote agr versions differ* →
+- [x] README "Reliability" table: add *Mac and remote agr versions differ* →
       `up`/`ls`/`kill` warn, `doctor` says which side to fix
-- [ ] verify: `./agr --help` reads correctly; README code blocks match `usage()` verbatim
+- [x] verify: `./agr --help` reads correctly; README code blocks match `usage()` verbatim
 
 ### Task 11: Verify acceptance criteria
 
