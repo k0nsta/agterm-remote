@@ -95,7 +95,7 @@ humanize_secs() {
 
 # row_state <sid> — whether the agterm row bound to <sid> still exists.
 # Looks the id up in $AGR_TREE, a newline-separated list of live session ids
-# that `cmd_ls` fills once per invocation via `agtermctl tree --json`.
+# that `compute_agr_tree` fills once per invocation via `agtermctl tree --json`.
 row_state() {
   local sid="$1"
   if [ "$sid" = "-" ] || ! have agtermctl; then
@@ -108,6 +108,34 @@ row_state() {
   fi
 }
 
+# compute_agr_tree — fill $AGR_TREE with every live agterm session id, once
+# per invocation. Empty (and row_state falls back to "-") when agtermctl is
+# unavailable or the tree can't be parsed.
+compute_agr_tree() {
+  AGR_TREE=""
+  have agtermctl || return 0
+  AGR_TREE="$(agtermctl tree --json 2>/dev/null | python3 -c '
+import sys, json
+try:
+    t = json.load(sys.stdin)["result"]["tree"]
+except Exception:
+    sys.exit(0)
+for ws in t.get("workspaces", []):
+    for s in ws.get("sessions", []):
+        print(s["id"])
+' 2>/dev/null)"
+}
+
+# pick_lines <rows> — one picker line per session: "name  cmd  row  idle".
+# Requires $AGR_TREE to already be populated (compute_agr_tree).
+pick_lines() {
+  local rows="$1"
+  local name windows attached idle_secs cmds sid
+  while IFS=$'\t' read -r name windows attached idle_secs cmds sid; do
+    printf '%s  %s  %s  %s\n' "$name" "$cmds" "$(row_state "$sid")" "$(humanize_secs "$idle_secs")"
+  done <<< "$rows"
+}
+
 # ---------------------------------------------------------------------------
 # LOCAL (Mac) subcommands
 # ---------------------------------------------------------------------------
@@ -117,7 +145,21 @@ row_state() {
 # then attach (or create) the named tmux session on the remote host.
 cmd_open() {
   local host="${1:-}" name="${2:-}"
-  [ -n "$host" ] && [ -n "$name" ] || die "usage: agr open <host> <name>"
+  [ -n "$host" ] || die "usage: agr open <host> <name>"
+
+  if [ -z "$name" ]; then
+    if ! have agtermctl; then
+      cmd_ls "$host"
+      die "usage: agr open <host> <name>"
+    fi
+    local rows; rows="$(remote_data "$host" sessions)" || exit $?
+    compute_agr_tree
+    local result
+    result="$(pick_lines "$rows" | agtermctl pick open --allow-custom \
+      --prompt "tmux session on $host — or type a new name")" || true
+    [ -n "$result" ] || exit 1
+    name="${result%% *}"
+  fi
   valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
   local sid="${AGTERM_SESSION_ID:-}"
   [ -z "$sid" ] || valid_token "$sid" || die "invalid session-id '$sid' (use [A-Za-z0-9_.-])"
@@ -294,19 +336,7 @@ cmd_ls() {
   local rows; rows="$(remote_data "$host" sessions)" || exit $?
   [ -n "$rows" ] || { echo "no agr sessions on '$host'"; return 0; }
 
-  AGR_TREE=""
-  if have agtermctl; then
-    AGR_TREE="$(agtermctl tree --json 2>/dev/null | python3 -c '
-import sys, json
-try:
-    t = json.load(sys.stdin)["result"]["tree"]
-except Exception:
-    sys.exit(0)
-for ws in t.get("workspaces", []):
-    for s in ws.get("sessions", []):
-        print(s["id"])
-' 2>/dev/null)"
-  fi
+  compute_agr_tree
 
   printf '%-16s %-4s %-4s %-6s %-16s %s\n' NAME WIN ATT IDLE CMD ROW
   local name windows attached idle_secs cmds sid att

@@ -224,15 +224,15 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] in `cmd_open`, when `name` is empty and `host` is set: if no `agtermctl` → run
+- [x] in `cmd_open`, when `name` is empty and `host` is set: if no `agtermctl` → run
       `cmd_ls "$host"` then `die "usage: agr open <host> <name>"`
-- [ ] otherwise `rows="$(remote_data "$host" sessions)" || exit $?`; build one line per
+- [x] otherwise `rows="$(remote_data "$host" sessions)" || exit $?`; build one line per
       session `name  cmd  row  idle` (extract as `pick_lines`, sourced-testable); pipe to
       `agtermctl pick open --allow-custom --prompt "tmux session on $host — or type a new name"`
       captured with `|| true` (cancel exit code unspecified; `set -e` must not fire first)
-- [ ] empty result → `exit 1` silently; else `name=${result%% *}`, `valid_token` or die
-- [ ] fall through into the existing `cmd_open "$host" "$name"` body — no second code path
-- [ ] write `$SCRATCH/checks/06-picker.sh` (sourced): `pick_lines` on the canned TSV yields
+- [x] empty result → `exit 1` silently; else `name=${result%% *}`, `valid_token` or die
+- [x] fall through into the existing `cmd_open "$host" "$name"` body — no second code path
+- [x] write `$SCRATCH/checks/06-picker.sh` (sourced): `pick_lines` on the canned TSV yields
       `api  claude  bound  3m`; `shellcheck -S warning agr`. The picker UI itself is Task 11.
 
 ### Task 7: Bridge — fallback loop owns its ssh, logs to a file, backs off; `up` takes a lock and probes the version
