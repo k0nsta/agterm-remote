@@ -211,9 +211,20 @@ cmd_up() {
     return 0
   fi
 
+  # Everything that can die or needs the network happens before the lock, so
+  # a dead host or a missing/stale remote agr fails loudly here instead of
+  # the loser of the lock race waiting 5s for a bridge that will never start.
   local rhome; rhome="$(remote_home "$host")"
   local rsock="$rhome/$REMOTE_SOCK"
-  ssh "$host" "mkdir -p '$rhome/.cache/agterm'"
+  local probe rc=0
+  probe="$(ssh "$host" -- 'mkdir -p ~/.cache/agterm; "$HOME/.local/bin/agr" --version 2>/dev/null || echo MISSING')" || rc=$?
+  [ "$rc" -eq 0 ] || die "cannot reach '$host'"
+  case "$probe" in
+    MISSING)        die "agr not installed on '$host' — run: agr install $host";;
+    "agr $VERSION") ;;
+    agr\ *)         log "agr: version mismatch (local $VERSION, $host ${probe#agr }) — run: agr install $host";;
+    *)              die "agr not installed on '$host' — run: agr install $host";;
+  esac
 
   # Reverse-forward the Mac's agterm socket to a fixed remote path.
   # StreamLocalBindUnlink reclaims a stale socket on reconnect / Mac switch.
@@ -226,13 +237,63 @@ cmd_up() {
     -R "${rsock}:$(local_sock)"
   )
 
+  # Lock (B4): mkdir is atomic, so exactly one concurrent `up` starts a
+  # bridge. The lock holder's own pid is a poor staleness signal — it's the
+  # `agr up` invocation itself, which normally exits within milliseconds of
+  # grabbing the lock (it just forks the bridge loop/autossh and returns), so
+  # a loser would almost always see it as "dead" despite it having just
+  # succeeded. Poll the *bridge*'s pidfile instead — the thing actually being
+  # waited on — and only fall back to reclaiming a truly abandoned lock (dead
+  # holder, no bridge ever appeared) once that poll times out.
+  local lock="$CACHE_DIR/bridge-$host.lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    local waited=0
+    while [ "$waited" -lt 5 ]; do
+      if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
+        return 0
+      fi
+      sleep 1; waited=$((waited + 1))
+    done
+    local holder; holder="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [ -z "$holder" ] || ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$lock"
+    fi
+    if ! mkdir "$lock" 2>/dev/null; then
+      log "agr: bridge for '$host' not up yet"
+      return 0
+    fi
+  fi
+
+  echo $$ > "$lock/pid"
+  trap 'rm -rf "$lock"' EXIT
+
   if have autossh; then
     AUTOSSH_PIDFILE="$pidfile" autossh -M 0 -f "${opts[@]}" "$host"
   else
-    # No autossh: a minimal background reconnect loop.
-    ( while true; do ssh "${opts[@]}" "$host" || true; sleep 3; done ) &
+    # No autossh: a minimal background reconnect loop that owns its ssh (B1:
+    # TERM/INT kill the child instead of leaving it orphaned), survives the
+    # row that started it closing (B2: ignores HUP), logs to a file instead
+    # of the tty, and backs off 3s->60s (reset after a connection >30s).
+    (
+      trap '' HUP
+      trap 'kill "${pid:-}" 2>/dev/null || true; exit 0' TERM INT
+      local delay=3
+      while true; do
+        local t0=$SECONDS
+        ssh "${opts[@]}" "$host" & pid=$!
+        wait "$pid" || true
+        if [ $(( SECONDS - t0 )) -gt 30 ]; then
+          delay=3
+        else
+          delay=$(( delay * 2 )); [ "$delay" -le 60 ] || delay=60
+        fi
+        sleep "$delay"
+      done
+    ) >"$CACHE_DIR/bridge-$host.log" 2>&1 </dev/null &
     echo $! > "$pidfile"
   fi
+
+  rm -rf "$lock"; trap - EXIT
   log "agr: bridge up for '$host'"
 }
 
@@ -245,6 +306,7 @@ cmd_down() {
     rm -f "$pidfile"
     log "agr: bridge down for '$host'"
   fi
+  rm -rf "$CACHE_DIR/bridge-$host.lock"
 }
 
 # agr install <host> — copy this script to the remote and wire agent hooks.

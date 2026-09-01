@@ -240,29 +240,34 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] restructure `cmd_up`: everything that can `die` or needs the network happens
+- [x] restructure `cmd_up`: everything that can `die` or needs the network happens
       **before** the lock — `remote_home`, and the existing ssh call, now
       `ssh "$host" -- 'mkdir -p ~/.cache/agterm; "$HOME/.local/bin/agr" --version 2>/dev/null || echo MISSING'`
       (constant string) whose output feeds the version probe: `MISSING` →
       `die "agr not installed on '$host' — run: agr install $host"`; mismatch → `log` warning.
       Runs only when a bridge is actually being started, i.e. once per bridge lifetime.
-- [ ] lock (B4): `lock="$CACHE_DIR/bridge-$host.lock"`; `mkdir "$lock"` and write `$$` to
-      `$lock/pid`. If `mkdir` fails: holder pid from `$lock/pid` dead (`kill -0`) → stale →
-      `rm -rf "$lock"` and retry once (narrow TOCTOU accepted; pidfile poll below catches
-      the loser); still held → poll the pidfile up to 5 s for a live pid; none →
-      `log "agr: bridge for '$host' not up yet"` and **return 0** (bridge is best-effort;
-      `open` must still attach). Inside the critical section `trap 'rm -rf "$lock"' EXIT`,
-      and on release `rm -rf "$lock"; trap - EXIT` — `cmd_open` continues after `cmd_up`.
-- [ ] fallback loop (B1, B2): subshell with `trap '' HUP` (closing the row that ran `open`
+- [x] lock (B4): `lock="$CACHE_DIR/bridge-$host.lock"`; `mkdir "$lock"` and write `$$` to
+      `$lock/pid`. ⚠️ deviation: a losing `mkdir` polls the **bridge's** pidfile (the thing
+      actually being waited on) for up to 5s *before* treating the lock as stale, instead of
+      checking the lock-holder's own pid first — a real race showed `agr up`'s own pid is a
+      poor liveness signal: that invocation normally exits within milliseconds of grabbing
+      the lock (it only forks the loop/autossh and returns), so a loser almost always found
+      it "dead" despite it having just succeeded, causing a duplicate bridge. Only once the
+      5s poll finds no live bridge does a dead recorded holder pid make the lock reclaimable
+      (retry once); still no luck → `log "agr: bridge for '$host' not up yet"` and
+      **return 0** (bridge is best-effort; `open` must still attach). Inside the critical
+      section `trap 'rm -rf "$lock"' EXIT`, and on release `rm -rf "$lock"; trap - EXIT` —
+      `cmd_open` continues after `cmd_up`.
+- [x] fallback loop (B1, B2): subshell with `trap '' HUP` (closing the row that ran `open`
       must not take the shared bridge down) and
       `trap 'kill "${pid:-}" 2>/dev/null || true; exit 0' TERM INT`;
       `ssh "${opts[@]}" "$host" & pid=$!; wait "$pid" || true` (`|| true` — the subshell
       inherits `set -e`); backoff `delay` 3→6→…→60 capped, reset to 3 when `SECONDS - t0 > 30`;
       redirected `>"$CACHE_DIR/bridge-$host.log" 2>&1 </dev/null` (truncated on each fresh
       `up`; the log covers one bridge lifetime — no rotation)
-- [ ] `cmd_down`: unchanged plus `rm -rf "$lock"` (a directory — `rm -f` cannot remove it
+- [x] `cmd_down`: unchanged plus `rm -rf "$lock"` (a directory — `rm -f` cannot remove it
       and would abort under `set -e`)
-- [ ] write `$SCRATCH/checks/07-bridge.sh` (ssh shim: `case "$*" in *-N*) exec sleep 300;; *) echo 'agr 0.4.0';; esac`;
+- [x] write `$SCRATCH/checks/07-bridge.sh` (ssh shim: `case "$*" in *-N*) exec sleep 300;; *) echo 'agr 0.4.0';; esac`;
       pre-seed `$CACHE_DIR/home-<host>`; `PATH` without `autossh`): `agr up h` →
       `pgrep -f 'sleep 300'` shows one; `agr down h` → `pgrep` empty **and** the subshell gone,
       no lock dir; `bridge-h.log` exists; `agr up h & agr up h; wait` → exactly one `sleep`,
