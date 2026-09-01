@@ -204,17 +204,17 @@ and has a visible sidebar side effect).
 **Files:**
 - Modify: `agr`
 
-- [ ] add `cmd_reap <name>`: `have tmux || die …` (as Task 3); print the `agr<TAB>$VERSION`
+- [x] add `cmd_reap <name>`: `have tmux || die …` (as Task 3); print the `agr<TAB>$VERSION`
       header first (it returns data → handshake applies); `valid_token`;
       `tmux has-session -t "=$name"` fails → `die "no session '$name'"`;
       `tmux show-option -t "=$name:" -qv @agr_target` empty →
       `die "'$name' exists but is not agr-managed (use tmux kill-session)"`;
       else `tmux kill-session -t "=$name"` and `echo "killed $name"`
-- [ ] add `cmd_kill <host> <name>…`: require ≥1 name; each through `valid_token`, then
+- [x] add `cmd_kill <host> <name>…`: require ≥1 name; each through `valid_token`, then
       `remote_data "$host" reap "$name"` (header check + prints `killed …`); continue on
       per-name failure, exit non-zero if any failed
-- [ ] wire `reap)` and `kill)` in `main`
-- [ ] write `$SCRATCH/checks/05-reap.sh` (tmux shim): sessions `owned`/`plain`/`owned2` —
+- [x] wire `reap)` and `kill)` in `main`
+- [x] write `$SCRATCH/checks/05-reap.sh` (tmux shim): sessions `owned`/`plain`/`owned2` —
       `reap plain` refused with the not-managed message and `plain` still exists;
       `reap nope` → "no session"; `reap owned` → header + `killed owned`, `has-session`
       fails, **`owned2` untouched** (proves the `=` exact match); `shellcheck -S warning agr`

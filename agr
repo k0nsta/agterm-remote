@@ -317,6 +317,18 @@ for ws in t.get("workspaces", []):
   done <<< "$rows"
 }
 
+# agr kill <host> <name>... — kill one or more agr-owned tmux sessions on <host>.
+cmd_kill() {
+  local host="${1:-}"; shift || true
+  [ -n "$host" ] && [ "$#" -ge 1 ] || die "usage: agr kill <host> <name>..."
+  local name failed=0
+  for name in "$@"; do
+    valid_token "$name" || { log "agr: invalid name '$name' (use [A-Za-z0-9_.-])"; failed=1; continue; }
+    ( remote_data "$host" reap "$name" ) || failed=1
+  done
+  return "$failed"
+}
+
 # agr doctor <host> — check prerequisites on both sides.
 cmd_doctor() {
   local host="${1:-}"; [ -n "$host" ] || die "usage: agr doctor <host>"
@@ -375,6 +387,22 @@ cmd_sessions() {
     idle_secs=$(( $(date +%s) - activity ))
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$windows" "$attached" "$idle_secs" "$cmds" "$target"
   done <<< "$list"
+}
+
+# agr reap <name>
+# Remote: kill an agr-owned tmux session. Refuses to touch a tmux session that
+# was not created by `agr attach` (no @agr_target set). Data-returning, so it
+# starts with the version handshake header.
+cmd_reap() {
+  have tmux || die "tmux not found in non-interactive PATH"
+  printf 'agr\t%s\n' "$VERSION"
+  local name="${1:-}"
+  valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
+  tmux has-session -t "=$name" 2>/dev/null || die "no session '$name'"
+  local target; target="$(tmux show-option -t "=$name:" -qv @agr_target 2>/dev/null)" || true
+  [ -n "$target" ] || die "'$name' exists but is not agr-managed (use tmux kill-session)"
+  tmux kill-session -t "=$name"
+  echo "killed $name"
 }
 
 # agr status <state> [--blink] [--auto-reset]
@@ -448,8 +476,10 @@ main() {
     quick)   cmd_quick   "$@";;
     doctor)  cmd_doctor  "$@";;
     ls)      cmd_ls      "$@";;
+    kill)    cmd_kill    "$@";;
     attach)  cmd_attach  "$@";;
     sessions) cmd_sessions "$@";;
+    reap)    cmd_reap    "$@";;
     status)  cmd_status  "$@";;
     relay)   cmd_relay   "$@";;
     -V|--version) echo "agr $VERSION";;
