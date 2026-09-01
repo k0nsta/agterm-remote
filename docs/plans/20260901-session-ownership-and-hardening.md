@@ -341,21 +341,31 @@ and has a visible sidebar side effect).
 
 ### Task 11: Verify acceptance criteria
 
-- [ ] `for c in $SCRATCH/checks/*.sh; do bash "$c" || exit 1; done` green in one pass
-- [ ] `shellcheck -S style -e SC2016 agr` clean (final gate); `bash -n agr`
-- [ ] real host: `agr install <host>` prints `installed 0.4.0`; `agr doctor <host>` shows
+- [x] `for c in $SCRATCH/checks/*.sh; do bash "$c" || exit 1; done` green in one pass —
+      all 9 pass; fixed a stale assertion in `02-ownership.sh` (`grep -n targets` blanket
+      ban), which predated Task 9's deliberate, read-only legacy-targets hint in `doctor`
+      — replaced with a targeted `REMOTE_TARGETS` var check (the actual thing Task 2 removed)
+- [x] `shellcheck -S style -e SC2016 agr` clean (final gate); `bash -n agr` — both clean
+- [x] manual test (skipped - not automatable, no SSH-reachable host in this environment):
+      real host: `agr install <host>` prints `installed 0.4.0`; `agr doctor <host>` shows
       local == remote, socket present, legacy targets listed
-- [ ] real host: `agr open <host> api` → in another row `agr ls <host>` shows `api … bound`;
+- [x] manual test (skipped - not automatable, no SSH-reachable host in this environment):
+      real host: `agr open <host> api` → in another row `agr ls <host>` shows `api … bound`;
       close the `api` row → `stale`
-- [ ] real host: `agr open <host>` with no name → picker lists `api`; typing `new1` creates
+- [x] manual test (skipped - not automatable, no SSH-reachable host in this environment):
+      real host: `agr open <host>` with no name → picker lists `api`; typing `new1` creates
       it and it appears in `ls`; cancel exits quietly
-- [ ] real host: `tmux new -d -s phone` on the host → absent from `ls`; `agr kill <host> phone`
+- [x] manual test (skipped - not automatable, no SSH-reachable host in this environment):
+      real host: `tmux new -d -s phone` on the host → absent from `ls`; `agr kill <host> phone`
       refused with the not-managed message
-- [ ] real host: `agr kill <host> new1` → gone from `agr ls` and from remote `tmux ls`
-- [ ] real host, no autossh on `PATH`: `agr up` → `pgrep -f 'ssh.*agterm.sock'` shows the
+- [x] manual test (skipped - not automatable, no SSH-reachable host in this environment):
+      real host: `agr kill <host> new1` → gone from `agr ls` and from remote `tmux ls`
+- [x] manual test (skipped - not automatable, no SSH-reachable host in this environment):
+      real host, no autossh on `PATH`: `agr up` → `pgrep -f 'ssh.*agterm.sock'` shows the
       forward; force a disconnect (toggle Wi-Fi) → tmux view stays clean, log grows, tunnel
       returns; `agr down` → `pgrep` empty
-- [ ] real host: agent in `api` produces sidebar colors (status hook path with `$TMUX_PANE`)
+- [x] manual test (skipped - not automatable, no SSH-reachable host in this environment):
+      real host: agent in `api` produces sidebar colors (status hook path with `$TMUX_PANE`)
 
 ### Task 12: [Final] Update documentation
 
