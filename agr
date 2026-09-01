@@ -135,15 +135,45 @@ for ws in t.get("workspaces", []):
 ' 2>/dev/null || true)"
 }
 
-# pick_lines <rows> — one picker line per session: "name  cmd  row  idle".
+# pick_items <rows> — JSON item array for `agtermctl pick`: id and label are
+# the bare session name (so the picked id needs no parsing and typing matches
+# names only); subtitle is "cmd · row · idle", displayed but never searched.
+# Empty rows -> "[]", which `pick --allow-custom` accepts as a plain prompt.
 # Requires $AGR_TREE to already be populated (compute_agr_tree).
-pick_lines() {
+pick_items() {
   local rows="$1"
   local name windows attached idle_secs cmds sid
   while IFS=$'\t' read -r name windows attached idle_secs cmds sid; do
     [ -n "$name" ] || continue   # `<<< ""` still yields one empty iteration
-    printf '%s  %s  %s  %s\n' "$name" "$cmds" "$(row_state "$sid")" "$(humanize_secs "$idle_secs")"
-  done <<< "$rows"
+    printf '%s\t%s · %s · %s\n' "$name" "$cmds" "$(row_state "$sid")" "$(humanize_secs "$idle_secs")"
+  done <<< "$rows" | python3 -c '
+import sys, json
+items = []
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if not line:
+        continue
+    name, _, sub = line.partition("\t")
+    items.append({"id": name, "label": name, "subtitle": sub})
+print(json.dumps(items))
+'
+}
+
+# pick_decode <json> — decode the one bare JSON result `agtermctl pick` prints
+# into "<kind><TAB><name>": picked -> its id; custom -> the query verbatim
+# (agtermctl already trims whitespace); cancelled -> empty name. Anything
+# unparsable -> empty kind, so the caller can refuse it by name.
+pick_decode() {
+  printf '%s' "$1" | python3 -c '
+import sys, json
+try:
+    r = json.load(sys.stdin)
+    k = str(r.get("result", ""))
+    n = r.get("id", "") if k == "picked" else r.get("query", "") if k == "custom" else ""
+    print(f"{k}\t{n}")
+except Exception:
+    print("\t")
+' 2>/dev/null || printf '\t\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -166,18 +196,26 @@ cmd_open() {
     fi
     local rows; rows="$(remote_data "$host" sessions)" || exit $?
     compute_agr_tree
-    local lines result line
-    lines="$(pick_lines "$rows")"
-    result="$(printf '%s\n' "$lines" | agtermctl pick open --allow-custom \
-      --prompt "tmux session on $host — or type a new name")" || true
-    [ -n "$result" ] || exit 1
-    # A result that is exactly one of the lines we fed the picker is a chosen
-    # row (name = first column). Anything else is a typed custom name and goes
-    # to valid_token verbatim — so "web server" is rejected, not truncated.
-    name="$result"
-    while IFS= read -r line; do
-      if [ -n "$line" ] && [ "$line" = "$result" ]; then name="${line%%  *}"; break; fi
-    done <<< "$lines"
+    # `agtermctl pick` blocks, then prints ONE bare JSON result and exits 0 for
+    # {"result":"picked","id":…} / {"result":"custom","query":…}, 2 for
+    # {"result":"cancelled"}, 1 on a protocol/transport error. Decode it —
+    # never treat stdout as the chosen line — so a chosen row yields its bare
+    # id, a typed name reaches valid_token verbatim ("web server" is rejected,
+    # not truncated), and a cancel exits quietly.
+    local result rc=0 kind
+    result="$(pick_items "$rows" | agtermctl pick open --allow-custom \
+      --prompt "tmux session on $host — or type a new name")" || rc=$?
+    case "$rc" in
+      0) ;;
+      2) exit 1;;
+      *) die "picker failed (exit $rc)";;
+    esac
+    IFS=$'\t' read -r kind name <<< "$(pick_decode "$result")"
+    case "$kind" in
+      picked|custom) [ -n "$name" ] || die "picker returned an empty name";;
+      cancelled)     exit 1;;
+      *)             die "unexpected picker result: $result";;
+    esac
   fi
   valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
   local sid="${AGTERM_SESSION_ID:-}"
