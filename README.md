@@ -40,9 +40,10 @@ band**, so it's independent of which tmux pane is focused:
 - A tiny **relay** on the remote speaks agterm's JSON control protocol to that
   forwarded socket. Your agent hooks run unchanged; they just reach the Mac's
   app through the tunnel.
-- Each session's **target row id is written to a file keyed by tmux session
-  name** on every connect — defeating tmux's frozen-env problem and staying
-  correct across reconnects and across Macs.
+- Each remote tmux session gets a **`@agr_target` session option** set on every
+  connect — defeating tmux's frozen-env problem and staying correct across
+  reconnects and across Macs. It also marks the session as agr-owned, so
+  `agr ls`/`agr kill` only ever see sessions `agr` created.
 
 Non-agterm clients (iPhone, Windows, Linux terminals) attach the same tmux
 sessions exactly as before; the status layer is additive and self-guarding, so
@@ -59,7 +60,7 @@ it simply no-ops when no Mac is attached.
   │  control socket ◄─┼── ssh -R ──────┤   hooks → agr status <state> │
   │                   │  (agr up)      │            │                 │
   │  sidebar row  ◄───┼── JSON ────────┤   agr relay → forwarded sock │
-  └───────────────────┘                │   target ← targets/<tmux name>│
+  └───────────────────┘                │   target ← @agr_target (tmux)│
         ▲                              └──────────────────────────────┘
         │ agr open <host> <name>: relabel row, ensure tunnel,
         │ ssh -t → agr attach → tmux new-session -A -s <name>
@@ -73,24 +74,31 @@ re-attaches the same running agent and re-labels the row.
 
 | Command | Side | Role |
 |---|---|---|
-| `agr open <host> <name>` | Mac | Adopt the current agterm session: relabel row, ensure tunnel, attach remote tmux. |
-| `agr up` / `agr down` | Mac | Start / stop the shared control tunnel (autossh if present, else a reconnect loop). |
+| `agr open <host> [name]` | Mac | Adopt the current agterm session: relabel row, ensure tunnel, attach remote tmux. No name → pick from owned sessions (or type a new one). |
+| `agr ls <host>` | Mac | List agr-owned tmux sessions on `<host>` (windows, idle time, pane command, whether the agterm row is still bound). |
+| `agr kill <host> <name>…` | Mac | Kill one or more agr-owned tmux sessions on `<host>`. |
+| `agr up <host>` / `agr down <host>` | Mac | Start / stop the shared control tunnel (autossh if present, else a reconnect loop). |
 | `agr install <host>` | Mac | Copy `agr` to the host and wire Claude Code hooks. |
-| `agr doctor <host>` | Mac | Check prerequisites on both sides. |
-| `agr attach <name> [id]` | remote | Record the row id, `tmux new-session -A -s <name>` (invoked over SSH). |
+| `agr doctor <host>` | Mac | Check prerequisites on both sides, including the version handshake and bridge socket. |
+| `agr attach <name> [id]` | remote | Set `@agr_target`, `tmux new-session -A -s <name>` (invoked over SSH). |
+| `agr sessions` | remote | List agr-owned tmux sessions as TSV (feeds `agr ls` and the picker). |
+| `agr reap <name>` | remote | Kill an agr-owned tmux session (feeds `agr kill`); refuses non-agr sessions. |
 | `agr status <state>` | remote | Hook entry point: resolve this tmux session's target, then relay. |
 | `agr relay …` | remote | Pure transport: one line of JSON to the forwarded socket. |
 
-State files: `~/.cache/agterm/agterm.sock` (forwarded socket) and
-`~/.cache/agterm/targets/<name>` (per-session row id) on the remote;
-`~/.cache/agr/` (pidfiles, cached remote `$HOME`) on the Mac.
+State files: `~/.cache/agterm/agterm.sock` (forwarded socket) on the remote,
+with ownership tracked via the `@agr_target` tmux session option (no files);
+`~/.cache/agr/` (bridge pidfiles, `bridge-<host>.log`, `bridge-<host>.lock`,
+cached remote `$HOME`) on the Mac.
 
 ---
 
 ## Requirements
 
-- **Mac:** macOS + [agterm](https://github.com/umputun/agterm). `autossh` and
-  `mosh` recommended (`brew install autossh mosh`) but optional.
+- **Mac:** macOS + [agterm](https://github.com/umputun/agterm), `python3` (ships
+  with the Xcode Command Line Tools / Homebrew; `agr open`'s picker and the `ROW`
+  column use it). `autossh` and `mosh` recommended (`brew install autossh mosh`)
+  but optional.
 - **Remote:** `tmux ≥ 3.x`, `python3`, SSH access. Any Linux/BSD/WSL host.
   `mosh` optional (recommended) for drop-tolerant interactive sessions.
 - SSH that supports Unix-domain socket forwarding (OpenSSH ≥ 6.7) and
@@ -122,6 +130,28 @@ agr open homelab api
 Open several agterm sessions, each `agr open homelab <name>` with a different
 name, to run independent agents with independent colored rows.
 
+### Discovering and cleaning up sessions
+
+```sh
+agr ls homelab                   # what's running, and whether its row is still open
+agr open homelab                 # no name: pick one from the list, or type a new one
+agr kill homelab api infra       # kill agr-owned sessions you're done with
+```
+
+`agr ls` only shows sessions `agr` created (marked via `@agr_target`); a plain
+`tmux new -d -s foo` on the host won't show up, and `agr kill` refuses to touch
+it.
+
+#### Upgrading from 0.3
+
+First re-run `agr install <host>` — a 0.3 remote has no `sessions`/`reap`
+and its `attach` doesn't set `@agr_target`, so `agr ls` fails with the
+"run: agr install" hint until the remote binary is upgraded. Then sessions
+created under 0.3 are invisible to `agr ls` until you `agr open` them once
+(`agr doctor <host>` lists them as "legacy targets"). After that, they carry
+`@agr_target` like any other session, and you can
+`rm -r ~/.cache/agterm/targets` on the host.
+
 ### From other clients (iPhone, Windows, another Linux box)
 
 The sessions `agr` creates are plain tmux sessions, reachable from **any** SSH
@@ -139,10 +169,11 @@ Colors/pushes are macOS-agterm-only and resume the next time you
 ### Don't force everything into one tmux session
 
 Per-session colors rely on each agent living in its **own named session** — the
-hook resolves the row from `tmux display-message -p '#S'`. A common footgun is a
+hook resolves the row from the session's `@agr_target` option, which `agr open`
+sets once per session. A common footgun is a
 shell-rc rule that auto-attaches every SSH login to a single shared session
-(e.g. `main`): agents run as windows there all report the same `#S`, so their
-colors collide. Prefer a **bare login** (land at a shell; attach by name) so
+(e.g. `main`): agents running as windows in that one session all share that
+session's `@agr_target`, so their colors collide. Prefer a **bare login** (land at a shell; attach by name) so
 `agr open <host> <name>` is the only thing that creates sessions. Example rc
 snippet:
 
@@ -193,9 +224,10 @@ The design separates two lifetimes so only one needs to be robust:
 |---|---|
 | Bridge down (network drop) | `agr status` no-ops; agent unaffected; tunnel auto-restores; next event re-syncs the color. |
 | Mac app quit, tunnel still up | Relay's 0.3s timeout → no-op. |
-| Switch Macs | Newest `agr up` reclaims the socket; next `agr open` rewrites the target files to the new Mac. |
+| Switch Macs | Newest `agr up` reclaims the socket; next `agr open` rewrites `@agr_target` to the new Mac's row. |
 | Non-agterm client only | No socket → relay no-ops; plain tmux, no colors, no errors. |
 | State changed while fully offline | Not retro-pushed; you see it on reattach, next event re-syncs. |
+| Mac and remote `agr` versions differ | `agr up` prints a warning and still works. `agr ls`/`agr kill` warn and continue when the remote still speaks the handshake, but fail with "run: agr install <host>" when it predates it (any 0.3 remote). `agr doctor <host>` shows both versions and which side to `agr install`. |
 
 ## Security
 

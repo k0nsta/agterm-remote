@@ -5,28 +5,47 @@
 # AI agents that run on a REMOTE host inside tmux, reached over SSH.
 #
 # One script, installed on both sides:
-#   • the Mac (agterm) uses:  open | up | down | install | doctor
-#   • the remote host uses:   attach | status | relay   (invoked by ssh / hooks)
+#   • the Mac (agterm) uses:  open | ls | kill | up | down | install | doctor
+#   • the remote host uses:   attach | sessions | reap | status | relay   (invoked by ssh / hooks)
 #
 # See README.md for the architecture. MIT licensed.
 
 set -euo pipefail
 
-VERSION="0.2.0"
+VERSION="0.4.0"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agr"
 # Remote paths, relative to the remote user's $HOME (resolved on the remote side).
 REMOTE_BIN=".local/bin/agr"
 REMOTE_SOCK=".cache/agterm/agterm.sock"
-REMOTE_TARGETS=".cache/agterm/targets"
 
 log()  { printf '%s\n' "$*" >&2; }
 die()  { log "agr: $*"; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Session names double as tmux session names, target-file keys, and are
+# Session names and agterm session ids double as tmux session names and are
 # interpolated into a remote command, so keep them to a safe character set.
-valid_name() { case "$1" in ''|*[!a-zA-Z0-9_.-]*) return 1;; *) return 0;; esac; }
+valid_token() { case "$1" in ''|*[!a-zA-Z0-9_.-]*) return 1;; *) return 0;; esac; }
+
+# remote_cmd <args...>
+# Print the argv for invoking agr on the remote side, quoted for a remote
+# shell. The leading $HOME is a literal for the remote login shell — it must
+# NOT be expanded here — so it's a single-quoted constant, not $REMOTE_BIN
+# (which is relative and already resolved against remote_home elsewhere).
+remote_cmd() {
+  local out='"$HOME/'"$REMOTE_BIN"'"' a
+  for a in "$@"; do
+    # shellcheck disable=SC2016
+    out="$out $(printf '%q' "$a")"
+  done
+  printf '%s' "$out"
+}
+
+# remote_agr <host> <args...> — run agr on <host> via a non-login remote shell.
+remote_agr() {
+  local host="$1"; shift
+  ssh "$host" -- "$(remote_cmd "$@")"
+}
 
 # The Mac's agterm control socket. agterm exports AGTERM_SOCKET into every
 # session; fall back to the default install path when called from elsewhere.
@@ -43,43 +62,196 @@ remote_home() {
   printf '%s' "$h" > "$f"; printf '%s' "$h"
 }
 
+# remote_data <host> <args...>
+# Run a data-returning remote command (sessions, reap), enforce the version
+# handshake header, and print the remaining lines. A `die` here runs inside
+# the caller's command substitution subshell — callers must propagate with
+# `|| exit $?`.
+remote_data() {
+  local host="$1"; shift
+  local out; local rc=0
+  out="$(remote_agr "$host" "$@")" || rc=$?
+  [ "$rc" -ne 255 ] || die "cannot reach '$host'"
+  local header="${out%%$'\n'*}"
+  case "$header" in
+    agr$'\t'*) ;;
+    *) die "remote agr on '$host' is missing or outdated — run: agr install $host";;
+  esac
+  local rv="${header#agr$'\t'}"
+  [ "$rv" = "$VERSION" ] || log "agr: version mismatch (local $VERSION, $host $rv) — run: agr install $host"
+  # Handshake is valid; now propagate the remote command's own failure (e.g.
+  # `reap` refusing a session) instead of reporting success on a good header.
+  [ "$rc" -eq 0 ] || return "$rc"
+  [ "$out" != "$header" ] || return 0
+  printf '%s\n' "${out#*$'\n'}"
+}
+
+# humanize_secs <seconds> — compact age, e.g. 42s / 3m / 5h / 2d.
+# Non-numeric or empty input renders as "-" rather than a shell error.
+humanize_secs() {
+  local s="$1"
+  case "$s" in ''|*[!0-9]*) printf -- '-'; return 0;; esac
+  if   [ "$s" -lt 60 ];    then printf '%ds' "$s"
+  elif [ "$s" -lt 3600 ];  then printf '%dm' $((s / 60))
+  elif [ "$s" -lt 86400 ]; then printf '%dh' $((s / 3600))
+  else                          printf '%dd' $((s / 86400))
+  fi
+}
+
+# row_state <sid> — whether the agterm row bound to <sid> still exists.
+# Looks the id up in $AGR_TREE, a newline-separated list of live session ids
+# that `compute_agr_tree` fills once per invocation via `agtermctl tree --json`.
+# An empty tree means "can't tell" (agterm not running, tree unparsable), which
+# renders as "-" — never as "stale", which would claim the row was closed.
+row_state() {
+  local sid="$1"
+  if [ "$sid" = "-" ] || ! have agtermctl || [ -z "${AGR_TREE:-}" ]; then
+    printf -- '-'; return 0
+  fi
+  if printf '%s\n' "$AGR_TREE" | grep -qxF "$sid"; then
+    printf 'bound'
+  else
+    printf 'stale'
+  fi
+}
+
+# compute_agr_tree — fill $AGR_TREE with every live agterm session id, once
+# per invocation. Empty (and row_state falls back to "-") when agtermctl is
+# unavailable, agterm isn't running, or the tree can't be parsed. The trailing
+# `|| true` matters: under `pipefail` a failing agtermctl would otherwise abort
+# the whole script (`set -e`) after the ssh round-trip has already completed.
+compute_agr_tree() {
+  AGR_TREE=""
+  have agtermctl || return 0
+  AGR_TREE="$(agtermctl tree --json 2>/dev/null | python3 -c '
+import sys, json
+try:
+    t = json.load(sys.stdin)["result"]["tree"]
+except Exception:
+    sys.exit(0)
+for ws in t.get("workspaces", []):
+    for s in ws.get("sessions", []):
+        print(s["id"])
+' 2>/dev/null || true)"
+}
+
+# pick_items <rows> — JSON item array for `agtermctl pick`: id and label are
+# the bare session name (so the picked id needs no parsing and typing matches
+# names only); subtitle is "cmd · row · idle", displayed but never searched.
+# Empty rows -> "[]", which `pick --allow-custom` accepts as a plain prompt.
+# Requires $AGR_TREE to already be populated (compute_agr_tree).
+pick_items() {
+  local rows="$1"
+  local name windows attached idle_secs cmds sid
+  while IFS=$'\t' read -r name windows attached idle_secs cmds sid; do
+    [ -n "$name" ] || continue   # `<<< ""` still yields one empty iteration
+    printf '%s\t%s · %s · %s\n' "$name" "$cmds" "$(row_state "$sid")" "$(humanize_secs "$idle_secs")"
+  done <<< "$rows" | python3 -c '
+import sys, json
+items = []
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if not line:
+        continue
+    name, _, sub = line.partition("\t")
+    items.append({"id": name, "label": name, "subtitle": sub})
+print(json.dumps(items))
+'
+}
+
+# pick_decode <json> — decode the one bare JSON result `agtermctl pick` prints
+# into "<kind><TAB><name>": picked -> its id; custom -> the query verbatim
+# (agtermctl already trims whitespace); cancelled -> empty name. Anything
+# unparsable -> empty kind, so the caller can refuse it by name.
+pick_decode() {
+  printf '%s' "$1" | python3 -c '
+import sys, json
+try:
+    r = json.load(sys.stdin)
+    k = str(r.get("result", ""))
+    n = r.get("id", "") if k == "picked" else r.get("query", "") if k == "custom" else ""
+    print(f"{k}\t{n}")
+except Exception:
+    print("\t")
+' 2>/dev/null || printf '\t\n'
+}
+
 # ---------------------------------------------------------------------------
 # LOCAL (Mac) subcommands
 # ---------------------------------------------------------------------------
 
-# agr open <host> <name>
+# agr open <host> [name]
 # Adopt the current agterm session: relabel its row, ensure the control tunnel,
-# then attach (or create) the named tmux session on the remote host.
+# then attach (or create) the named tmux session on the remote host. With no
+# name, open agterm's native picker over the owned sessions (`--allow-custom`
+# so a new name can be typed); without agtermctl, print the list and the usage.
 cmd_open() {
   local host="${1:-}" name="${2:-}"
-  [ -n "$host" ] && [ -n "$name" ] || die "usage: agr open <host> <name>"
-  valid_name "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
+  [ -n "$host" ] || die "usage: agr open <host> [name]"
+
+  if [ -z "$name" ]; then
+    if ! have agtermctl; then
+      cmd_ls "$host"
+      die "no agtermctl for the picker — usage: agr open <host> <name>"
+    fi
+    local rows; rows="$(remote_data "$host" sessions)" || exit $?
+    compute_agr_tree
+    # `agtermctl pick` blocks, then prints ONE bare JSON result and exits 0 for
+    # {"result":"picked","id":…} / {"result":"custom","query":…}, 2 for
+    # {"result":"cancelled"}, 1 on a protocol/transport error. Decode it —
+    # never treat stdout as the chosen line — so a chosen row yields its bare
+    # id, a typed name reaches valid_token verbatim ("web server" is rejected,
+    # not truncated), and a cancel exits quietly.
+    # Build the items first so `rc` means only what the picker did — under
+    # pipefail a producer failure would otherwise be reported as the picker's.
+    local items result rc=0 kind
+    items="$(pick_items "$rows")" || die "cannot build the picker item list (python3 missing?)"
+    result="$(printf '%s\n' "$items" | agtermctl pick open --allow-custom \
+      --prompt "tmux session on $host — or type a new name")" || rc=$?
+    case "$rc" in
+      0) ;;
+      2) exit 1;;
+      *) die "picker failed (exit $rc)";;
+    esac
+    IFS=$'\t' read -r kind name <<< "$(pick_decode "$result")"
+    case "$kind" in
+      picked|custom) [ -n "$name" ] || die "picker returned an empty name";;
+      cancelled)     exit 1;;
+      *)             die "unexpected picker result: $result";;
+    esac
+  fi
+  valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
+  local sid="${AGTERM_SESSION_ID:-}"
+  [ -z "$sid" ] || valid_token "$sid" || die "invalid session-id '$sid' (use [A-Za-z0-9_.-])"
 
   # Relabel the sidebar row to the stable key (best-effort; only inside agterm).
-  if [ -n "${AGTERM_SESSION_ID:-}" ] && have agtermctl; then
+  if [ -n "$sid" ] && have agtermctl; then
     agtermctl session rename "$name" --target "$AGTERM_SESSION_ID" >/dev/null 2>&1 || true
   fi
 
   cmd_up "$host"
 
-  local rhome ragr sid ret=0
+  local rhome ragr ret=0
   rhome="$(remote_home "$host")"
   ragr="$rhome/$REMOTE_BIN"
-  sid="${AGTERM_SESSION_ID:-}"
 
   # Prefer mosh when available on both sides (marker written by `agr install`):
   # it survives drops/roaming/sleep instead of dying on a corrupted SSH packet.
-  # Not exec'd, so the terminal-reset guard below always runs.
+  # Not exec'd, so the terminal-reset guard below always runs. mosh-server execs
+  # argv directly (no remote shell), so the resolved path + validated args are safe.
   if have mosh && [ -f "$CACHE_DIR/mosh-$host" ]; then
     mosh "$host" -- "$ragr" attach "$name" "$sid" || ret=$?
   else
-    ssh -t "$host" "$ragr attach $name $sid" || ret=$?
+    ssh -t "$host" -- "$(remote_cmd attach "$name" "$sid")" || ret=$?
   fi
 
   # After an abrupt drop, tmux's mouse-tracking / bracketed-paste modes may be
-  # left on, dumping escape-code garbage into the local shell. Turn them off.
-  printf '\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?2004l'
-  stty sane 2>/dev/null || true
+  # left on, dumping escape-code garbage into the local shell. Turn them off —
+  # but only when stdout is actually a terminal (B6).
+  if [ -t 1 ]; then
+    printf '\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?2004l'
+    stty sane 2>/dev/null || true
+  fi
   return "$ret"
 }
 
@@ -92,9 +264,20 @@ cmd_up() {
     return 0
   fi
 
+  # Everything that can die or needs the network happens before the lock, so
+  # a dead host or a missing/stale remote agr fails loudly here instead of
+  # the loser of the lock race waiting 5s for a bridge that will never start.
   local rhome; rhome="$(remote_home "$host")"
   local rsock="$rhome/$REMOTE_SOCK"
-  ssh "$host" "mkdir -p '$rhome/$REMOTE_TARGETS'"
+  local probe rc=0
+  probe="$(ssh "$host" -- 'mkdir -p ~/.cache/agterm; "$HOME/.local/bin/agr" --version 2>/dev/null || echo MISSING')" || rc=$?
+  [ "$rc" -eq 0 ] || die "cannot reach '$host'"
+  case "$probe" in
+    MISSING)        die "agr not installed on '$host' — run: agr install $host";;
+    "agr $VERSION") ;;
+    agr\ *)         log "agr: version mismatch (local $VERSION, $host ${probe#agr }) — run: agr install $host";;
+    *)              die "agr not installed on '$host' — run: agr install $host";;
+  esac
 
   # Reverse-forward the Mac's agterm socket to a fixed remote path.
   # StreamLocalBindUnlink reclaims a stale socket on reconnect / Mac switch.
@@ -107,13 +290,65 @@ cmd_up() {
     -R "${rsock}:$(local_sock)"
   )
 
+  # Lock (B4): mkdir is atomic, so exactly one concurrent `up` starts a
+  # bridge. The lock holder's own pid is a poor staleness signal — it's the
+  # `agr up` invocation itself, which normally exits within milliseconds of
+  # grabbing the lock (it just forks the bridge loop/autossh and returns), so
+  # a loser would almost always see it as "dead" despite it having just
+  # succeeded. Poll the *bridge*'s pidfile instead — the thing actually being
+  # waited on — and only fall back to reclaiming a truly abandoned lock (dead
+  # holder, no bridge ever appeared) once that poll times out.
+  local lock="$CACHE_DIR/bridge-$host.lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    local waited=0
+    while [ "$waited" -lt 5 ]; do
+      if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
+        return 0
+      fi
+      sleep 1; waited=$((waited + 1))
+    done
+    local holder; holder="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [ -z "$holder" ] || ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$lock"
+    fi
+    if ! mkdir "$lock" 2>/dev/null; then
+      log "agr: bridge for '$host' not up yet"
+      return 0
+    fi
+  fi
+
+  echo $$ > "$lock/pid"
+  trap 'rm -rf "$lock"' EXIT
+
   if have autossh; then
     AUTOSSH_PIDFILE="$pidfile" autossh -M 0 -f "${opts[@]}" "$host"
   else
-    # No autossh: a minimal background reconnect loop.
-    ( while true; do ssh "${opts[@]}" "$host" || true; sleep 3; done ) &
+    # No autossh: a minimal background reconnect loop that owns its ssh (B1:
+    # TERM/INT kill the child instead of leaving it orphaned), survives the
+    # row that started it closing (B2: ignores HUP), logs to a file instead
+    # of the tty, and backs off 3s->60s (reset after a connection >30s).
+    (
+      trap '' HUP
+      trap 'kill "${pid:-}" 2>/dev/null || true; exit 0' TERM INT
+      local delay=3
+      while true; do
+        local t0=$SECONDS
+        # shellcheck disable=SC2029 # false positive: no remote command here,
+        # $host is just the ssh destination, not an interpolated remote string.
+        ssh "${opts[@]}" "$host" & pid=$!
+        wait "$pid" || true
+        if [ $(( SECONDS - t0 )) -gt 30 ]; then
+          delay=3
+        else
+          delay=$(( delay * 2 )); [ "$delay" -le 60 ] || delay=60
+        fi
+        sleep "$delay"
+      done
+    ) >"$CACHE_DIR/bridge-$host.log" 2>&1 </dev/null &
     echo $! > "$pidfile"
   fi
+
+  rm -rf "$lock"; trap - EXIT
   log "agr: bridge up for '$host'"
 }
 
@@ -126,6 +361,7 @@ cmd_down() {
     rm -f "$pidfile"
     log "agr: bridge down for '$host'"
   fi
+  rm -rf "$CACHE_DIR/bridge-$host.lock"
 }
 
 # agr install <host> — copy this script to the remote and wire agent hooks.
@@ -133,9 +369,9 @@ cmd_install() {
   local host="${1:-}"; [ -n "$host" ] || die "usage: agr install <host>"
   local self; self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
-  ssh "$host" 'mkdir -p ~/.local/bin ~/.cache/agterm/targets'
-  scp -q "$self" "$host:$REMOTE_BIN"
-  ssh "$host" "chmod +x '$REMOTE_BIN'"
+  ssh "$host" 'mkdir -p ~/.local/bin ~/.cache/agterm'
+  scp -q "$self" "$host:$REMOTE_BIN.tmp"
+  ssh "$host" -- 'chmod +x "$HOME/.local/bin/agr.tmp" && mv -f "$HOME/.local/bin/agr.tmp" "$HOME/.local/bin/agr"'
 
   # Record whether the remote has mosh, so `agr open` can prefer it.
   mkdir -p "$CACHE_DIR"
@@ -147,12 +383,18 @@ cmd_install() {
 
   # Merge the four agterm hooks into the remote ~/.claude/settings.json.
   ssh "$host" 'python3 - ' <<'PY'
-import json, os
-p = os.path.expanduser("~/.claude/settings.json")
+import json, os, shutil, sys
+# realpath: if settings.json is a dotfiles-managed symlink, back up, write the
+# temp file, and os.replace beside the *target* so the link itself survives.
+p = os.path.realpath(os.path.expanduser("~/.claude/settings.json"))
 cfg = {}
 if os.path.exists(p):
     with open(p) as f:
-        cfg = json.load(f)
+        try:
+            cfg = json.load(f)
+        except Exception as e:
+            print(f"agr: cannot parse ~/.claude/settings.json: {e}", file=sys.stderr)
+            sys.exit(1)
 agr = "$HOME/.local/bin/agr status"
 wanted = {
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": f"{agr} active --blink"}]}],
@@ -162,37 +404,105 @@ wanted = {
     "Stop":             [{"hooks": [{"type": "command", "command": f"{agr} completed --auto-reset"}]}],
 }
 hooks = cfg.setdefault("hooks", {})
+changed = False
 for event, entries in wanted.items():
     bucket = hooks.setdefault(event, [])
     # idempotent: skip if any entry already calls `agr status`
     flat = json.dumps(bucket)
-    if "/agr status" in flat or "agr status" in flat:
+    if "agr status" in flat:
         continue
     bucket.extend(entries)
+    changed = True
+if not changed:
+    print("agr: Claude Code hooks already wired in", p)
+    sys.exit(0)
 os.makedirs(os.path.dirname(p), exist_ok=True)
-with open(p, "w") as f:
+if os.path.exists(p):
+    shutil.copy2(p, p + ".bak-agr")
+tmp = p + ".tmp"
+with open(tmp, "w") as f:
     json.dump(cfg, f, indent=2)
+os.replace(tmp, p)
 print("agr: wired Claude Code hooks in", p)
 PY
-  log "agr: installed on '$host'"
+  log "agr: installed $VERSION on '$host'"
 }
 
-# agr doctor <host> — check prerequisites on both sides.
+# agr ls <host> — list agr-owned tmux sessions on <host>. Never mutates.
+cmd_ls() {
+  local host="${1:-}"; [ -n "$host" ] || die "usage: agr ls <host>"
+  local rows; rows="$(remote_data "$host" sessions)" || exit $?
+  [ -n "$rows" ] || { echo "no agr sessions on '$host'"; return 0; }
+
+  compute_agr_tree
+
+  printf '%-16s %-4s %-4s %-6s %-16s %s\n' NAME WIN ATT IDLE CMD ROW
+  local name windows attached idle_secs cmds sid att
+  while IFS=$'\t' read -r name windows attached idle_secs cmds sid; do
+    [ -n "$name" ] || continue
+    att="$attached"; [ "$att" != "0" ] || att="-"
+    printf '%-16s %-4s %-4s %-6s %-16s %s\n' \
+      "$name" "$windows" "$att" "$(humanize_secs "$idle_secs")" "$cmds" "$(row_state "$sid")"
+  done <<< "$rows"
+}
+
+# agr kill <host> <name>... — kill one or more agr-owned tmux sessions on <host>.
+cmd_kill() {
+  local host="${1:-}"; shift || true
+  [ -n "$host" ] && [ "$#" -ge 1 ] || die "usage: agr kill <host> <name>..."
+  local name failed=0
+  for name in "$@"; do
+    valid_token "$name" || { log "agr: invalid name '$name' (use [A-Za-z0-9_.-])"; failed=1; continue; }
+    ( remote_data "$host" reap "$name" ) || failed=1
+  done
+  return "$failed"
+}
+
+# agr doctor <host> — check prerequisites on both sides, plus the version
+# handshake and bridge socket (constant remote script — no interpolation).
 cmd_doctor() {
   local host="${1:-}"; [ -n "$host" ] || die "usage: agr doctor <host>"
   echo "local (agterm host):"
+  printf '  agr local     : %s\n' "$VERSION"
   printf '  agterm socket : %s\n' "$([ -S "$(local_sock)" ] && echo present || echo MISSING)"
   printf '  agtermctl     : %s\n' "$(have agtermctl && echo yes || echo 'no (row auto-label disabled)')"
+  printf '  python3       : %s\n' "$(have python3 && python3 -V 2>&1 || echo 'MISSING (agr open picker needs it)')"
   printf '  autossh       : %s\n' "$(have autossh && echo yes || echo 'no (using reconnect loop)')"
   printf '  mosh          : %s\n' "$(have mosh && echo yes || echo 'no (ssh only)')"
   echo "remote ($host):"
-  ssh "$host" '
-    printf "  tmux          : %s\n" "$(tmux -V 2>/dev/null || echo MISSING)"
-    printf "  python3       : %s\n" "$(command -v python3 >/dev/null && python3 -V 2>&1 || echo MISSING)"
-    printf "  mosh-server   : %s\n" "$(command -v mosh-server >/dev/null && echo yes || echo "no (ssh only)")"
-    printf "  agr installed : %s\n" "$([ -x ~/.local/bin/agr ] && echo yes || echo no)"
-    printf "  cache dir     : %s\n" "$([ -d ~/.cache/agterm ] && echo ok || echo missing)"
-  '
+  local remote rc=0
+  remote="$(ssh "$host" -- '
+    printf "tmux\t%s\n" "$(tmux -V 2>/dev/null || echo MISSING)"
+    printf "python3\t%s\n" "$(command -v python3 >/dev/null && python3 -V 2>&1 || echo MISSING)"
+    printf "mosh-server\t%s\n" "$(command -v mosh-server >/dev/null && echo yes || echo no)"
+    printf "agr\t%s\n" "$("$HOME/.local/bin/agr" --version 2>/dev/null || echo MISSING)"
+    printf "socket\t%s\n" "$([ -S ~/.cache/agterm/agterm.sock ] && echo present || echo MISSING)"
+    printf "legacy\t%s\n" "$(ls ~/.cache/agterm/targets 2>/dev/null | tr "\n" " ")"
+  ')" || rc=$?
+  [ "$rc" -eq 0 ] || die "cannot reach '$host'"
+  local key val agr_ver="" legacy=""
+  while IFS=$'\t' read -r key val; do
+    case "$key" in
+      tmux)        printf '  tmux          : %s\n' "$val";;
+      python3)     printf '  python3       : %s\n' "$val";;
+      mosh-server) printf '  mosh-server   : %s\n' "$([ "$val" = yes ] && echo yes || echo 'no (ssh only)')";;
+      agr)         agr_ver="$val";;
+      socket)      printf '  bridge socket : %s\n' "$val";;
+      legacy)      legacy="$val";;
+    esac
+  done <<< "$remote"
+  # The probe is `agr --version` output, i.e. "agr X.Y.Z" — the same shape
+  # cmd_up's probe parses; compare against the prefixed form, print it bare.
+  case "$agr_ver" in
+    MISSING)        printf '  agr remote    : MISSING ← run: agr install %s\n' "$host";;
+    "agr $VERSION") printf '  agr remote    : %s\n' "${agr_ver#agr }";;
+    *)              printf '  agr remote    : %s ← run: agr install %s\n' "${agr_ver#agr }" "$host";;
+  esac
+  if [ -n "$legacy" ]; then
+    printf '  legacy targets: %s — agr open each to adopt, then rm -r ~/.cache/agterm/targets\n' "$legacy"
+  else
+    printf '  legacy targets: none\n'
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -200,14 +510,57 @@ cmd_doctor() {
 # ---------------------------------------------------------------------------
 
 # agr attach <name> [agterm-session-id]
-# Record the current row id for this session name, then attach-or-create tmux.
+# Mark the tmux session as agr-owned (@agr_target = the row id, or "-" when
+# opened outside agterm), then attach-or-create it.
 cmd_attach() {
   local name="${1:-}" sid="${2:-}"
   [ -n "$name" ] || die "usage: agr attach <name> [session-id]"
-  valid_name "$name" || die "invalid name '$name'"
-  mkdir -p "$HOME/$REMOTE_TARGETS"
-  [ -n "$sid" ] && printf '%s' "$sid" > "$HOME/$REMOTE_TARGETS/$name"
-  exec tmux new-session -A -s "$name"
+  valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
+  [ -z "$sid" ] || valid_token "$sid" || die "invalid session-id '$sid' (use [A-Za-z0-9_.-])"
+  tmux has-session -t "=$name" 2>/dev/null || tmux new-session -d -s "$name"
+  tmux set-option -t "=$name:" @agr_target "${sid:--}"
+  exec tmux attach -t "=$name"
+}
+
+# agr sessions
+# Remote producer: list agr-owned tmux sessions as TSV for `agr ls`. This is a
+# data-returning command, so it starts with the version handshake header.
+cmd_sessions() {
+  have tmux || die "tmux not found in non-interactive PATH"
+  printf 'agr\t%s\n' "$VERSION"
+  local list
+  list="$(tmux list-sessions -F $'#{session_name}\t#{session_windows}\t#{session_attached}\t#{session_activity}\t#{@agr_target}' 2>/dev/null)" || exit 0
+  [ -n "$list" ] || exit 0
+  local name windows attached activity target
+  while IFS=$'\t' read -r name windows attached activity target; do
+    [ -n "$target" ] || continue
+    local raw filtered cmds idle_secs
+    raw="$(tmux list-panes -s -t "=$name" -F '#{pane_current_command}' 2>/dev/null | sort -u)" || true
+    # Drop plain shells from the command list; if that empties it, keep them
+    # (a session with only a shell running should still show something).
+    filtered="$(printf '%s\n' "$raw" | grep -vE '^(sh|bash|zsh|fish|dash)$' || true)"
+    if [ -n "$filtered" ]; then cmds="$filtered"; else cmds="$raw"; fi
+    cmds="$(printf '%s' "$cmds" | tr '\n' ',' | sed 's/,$//')"
+    [ -n "$cmds" ] || cmds="-"
+    idle_secs=$(( $(date +%s) - activity ))
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$windows" "$attached" "$idle_secs" "$cmds" "$target"
+  done <<< "$list"
+}
+
+# agr reap <name>
+# Remote: kill an agr-owned tmux session. Refuses to touch a tmux session that
+# was not created by `agr attach` (no @agr_target set). Data-returning, so it
+# starts with the version handshake header.
+cmd_reap() {
+  have tmux || die "tmux not found in non-interactive PATH"
+  printf 'agr\t%s\n' "$VERSION"
+  local name="${1:-}"
+  valid_token "$name" || die "invalid name '$name' (use [A-Za-z0-9_.-])"
+  tmux has-session -t "=$name" 2>/dev/null || die "no session '$name'"
+  local target; target="$(tmux show-option -t "=$name:" -qv @agr_target 2>/dev/null)" || true
+  [ -n "$target" ] || die "'$name' exists but is not agr-managed (use tmux kill-session)"
+  tmux kill-session -t "=$name"
+  echo "killed $name"
 }
 
 # agr status <state> [--blink] [--auto-reset]
@@ -215,9 +568,9 @@ cmd_attach() {
 # Always a no-op (exit 0) when there is nothing to do, so it can never block a turn.
 cmd_status() {
   local state="${1:-}"; [ -n "$state" ] || exit 0; shift || true
-  local name; name="$(tmux display-message -p '#S' 2>/dev/null)" || exit 0
-  local target; target="$(cat "$HOME/$REMOTE_TARGETS/$name" 2>/dev/null || true)"
-  [ -n "$target" ] || exit 0
+  [ -n "${TMUX_PANE:-}" ] || exit 0
+  local target; target="$(tmux display-message -p -t "$TMUX_PANE" '#{@agr_target}' 2>/dev/null)" || exit 0
+  [ -n "$target" ] && [ "$target" != "-" ] || exit 0
   local sock="$HOME/$REMOTE_SOCK"
   [ -S "$sock" ] || exit 0
   cmd_relay "$state" "$target" "$sock" "$@" || true
@@ -255,7 +608,10 @@ usage() {
 agr $VERSION — agterm-remote
 
 Mac (agterm) commands:
-  agr open <host> <name>   adopt the current agterm session -> remote tmux <name>
+  agr open <host> [name]   adopt the current agterm session -> remote tmux <name>
+                           (no name: pick from owned sessions, or type a new one)
+  agr ls <host>            list agr-owned tmux sessions on <host>
+  agr kill <host> <name>.. kill one or more agr-owned tmux sessions on <host>
   agr up <host>            ensure the control tunnel (idempotent)
   agr down <host>          stop the control tunnel
   agr install <host>       copy agr to <host> and wire Claude Code hooks
@@ -263,7 +619,9 @@ Mac (agterm) commands:
 
 Remote commands (usually invoked by ssh / hooks, not by hand):
   agr attach <name> [id]   record target id, tmux new-session -A -s <name>
-  agr status <state> ...   hook entry point (active|blocked|completed|idle)
+  agr sessions             list agr-owned tmux sessions as TSV (for agr ls)
+  agr reap <name>          kill an agr-owned tmux session (for agr kill)
+  agr status <state> ...   hook entry point (active|blocked|completed)
   agr relay <state> <target> <socket> ...   send one status message
 EOF
   exit "${1:-1}"
@@ -277,7 +635,11 @@ main() {
     down)    cmd_down    "$@";;
     install) cmd_install "$@";;
     doctor)  cmd_doctor  "$@";;
+    ls)      cmd_ls      "$@";;
+    kill)    cmd_kill    "$@";;
     attach)  cmd_attach  "$@";;
+    sessions) cmd_sessions "$@";;
+    reap)    cmd_reap    "$@";;
     status)  cmd_status  "$@";;
     relay)   cmd_relay   "$@";;
     -V|--version) echo "agr $VERSION";;
@@ -286,4 +648,4 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
