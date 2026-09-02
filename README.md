@@ -96,8 +96,10 @@ cached remote `$HOME`) on the Mac.
 
 ## Requirements
 
-- **Mac:** macOS + [agterm](https://github.com/umputun/agterm). `autossh` and
-  `mosh` recommended (`brew install autossh mosh`) but optional.
+- **Mac:** macOS + [agterm](https://github.com/umputun/agterm), `python3` (ships
+  with the Xcode Command Line Tools / Homebrew; `agr open`'s picker and the `ROW`
+  column use it). `autossh` and `mosh` recommended (`brew install autossh mosh`)
+  but optional.
 - **Remote:** `tmux ≥ 3.x`, `python3`, SSH access. Any Linux/BSD/WSL host.
   `mosh` optional (recommended) for drop-tolerant interactive sessions.
 - SSH that supports Unix-domain socket forwarding (OpenSSH ≥ 6.7) and

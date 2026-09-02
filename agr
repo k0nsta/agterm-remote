@@ -202,8 +202,11 @@ cmd_open() {
     # never treat stdout as the chosen line — so a chosen row yields its bare
     # id, a typed name reaches valid_token verbatim ("web server" is rejected,
     # not truncated), and a cancel exits quietly.
-    local result rc=0 kind
-    result="$(pick_items "$rows" | agtermctl pick open --allow-custom \
+    # Build the items first so `rc` means only what the picker did — under
+    # pipefail a producer failure would otherwise be reported as the picker's.
+    local items result rc=0 kind
+    items="$(pick_items "$rows")" || die "cannot build the picker item list (python3 missing?)"
+    result="$(printf '%s\n' "$items" | agtermctl pick open --allow-custom \
       --prompt "tmux session on $host — or type a new name")" || rc=$?
     case "$rc" in
       0) ;;
@@ -504,6 +507,7 @@ cmd_doctor() {
   printf '  agr local     : %s\n' "$VERSION"
   printf '  agterm socket : %s\n' "$([ -S "$(local_sock)" ] && echo present || echo MISSING)"
   printf '  agtermctl     : %s\n' "$(have agtermctl && echo yes || echo 'no (row auto-label disabled)')"
+  printf '  python3       : %s\n' "$(have python3 && python3 -V 2>&1 || echo 'MISSING (agr open picker needs it)')"
   printf '  autossh       : %s\n' "$(have autossh && echo yes || echo 'no (using reconnect loop)')"
   printf '  mosh          : %s\n' "$(have mosh && echo yes || echo 'no (ssh only)')"
   echo "remote ($host):"
