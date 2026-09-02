@@ -26,9 +26,12 @@ the Mac binary.
 
 ## Context (from discovery)
 
-- Repo: `agr` (bash, 0.4.0, branch `session-ownership-0-4-0`, revmux-clean), `README.md`,
-  `install.sh`, `docs/backlog/*.md`, `.revmux/profile.md`. Work happens on a new branch
-  **`go-version`** (cut from `session-ownership-0-4-0`); bash `agr` stays on `master` until 1.0 ships.
+- Repo: `agr` (bash, **0.4.0, now merged to `master`** via PR #1), `README.md`, `install.sh`,
+  `docs/backlog/*.md`, `.revmux/profile.md`. Work happens on branch **`go-version`** (has
+  `master` merged in); bash `agr` remains the shipping tool on `master` until 1.0.
+- **`agr quick` is out of scope**: `master` reverted it as untested with the quick terminal
+  broken (`6ae33a1`), and the 0.4 merge mirrored that (`cd3f282`), so no `quick` exists in
+  the code 1.0 replaces. A binding-based rewrite is a separate, later decision.
 - Naming convention kept: Mac verbs user-facing (`open ls kill up down install doctor`),
   remote verbs mechanical (`attach sessions reap status`).
 - **agterm 0.26.0 facts (verified):** control protocol = one newline-delimited JSON request +
