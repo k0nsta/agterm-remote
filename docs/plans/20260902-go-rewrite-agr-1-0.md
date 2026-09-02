@@ -29,7 +29,7 @@ the Mac binary.
 - Repo: `agr` (bash, 0.4.0, branch `session-ownership-0-4-0`, revmux-clean), `README.md`,
   `install.sh`, `docs/backlog/*.md`, `.revmux/profile.md`. Work happens on a new branch
   **`go-version`** (cut from `session-ownership-0-4-0`); bash `agr` stays on `master` until 1.0 ships.
-- Naming convention kept: Mac verbs user-facing (`open ls kill up down install doctor quick`),
+- Naming convention kept: Mac verbs user-facing (`open ls kill up down install doctor`),
   remote verbs mechanical (`attach sessions reap status`).
 - **agterm 0.26.0 facts (verified):** control protocol = one newline-delimited JSON request +
   response per connection, 1 MiB cap, `{"ok":true,"result":…}` / `{"ok":false,"error":…}`;
@@ -387,10 +387,10 @@ the Mac binary.
       argv-only calls, `EnsureDirs` before any write, and the exact constant scripts as stdin
 - [ ] run `make check` — must pass before Task 10
 
-### Task 10: CLI — `open`, `up`, `down`, `ls`, `kill`, `quick`; picker; context
+### Task 10: CLI — `open`, `up`, `down`, `ls`, `kill`; picker; context
 
 **Files:**
-- Create: `internal/cli/open.go`, `internal/cli/updown.go`, `internal/cli/ls.go`, `internal/cli/kill.go`, `internal/cli/quick.go`, `internal/cli/pick.go`, `internal/cli/daemonclient.go`
+- Create: `internal/cli/open.go`, `internal/cli/updown.go`, `internal/cli/ls.go`, `internal/cli/kill.go`, `internal/cli/pick.go`, `internal/cli/daemonclient.go`
 - Create: `internal/cli/dependency.go`, `internal/cli/mocks/dependency_mock.go`
 - Create: `internal/cli/*_test.go`, `internal/cli/testdata/ls_golden.txt`
 - Modify: `cmd/agr/main.go` (wire subcommands)
@@ -418,7 +418,8 @@ the Mac binary.
       (`ROW` = bound/stale/-; `-` when tree unavailable); footer `rows without a session: …`
       for `Dangling`; `no agr sessions on <host>` when empty
 - [ ] `kill.go`: ≥1 name, each validated, `Reap`; non-zero if any failed. `updown.go`: thin.
-      `quick.go`: as 0.4 but binding-based (`ByRow`) and argv overlay command
+      no `quick`: `master` reverted `agr quick` as untested with the quick terminal
+      broken, so 1.0 does not carry it — a binding-based rewrite is a separate decision
 - [ ] write tests: `DecodePick` table (picked/custom/space-in-custom rejected/cancelled/exit 1/
       malformed/empty id); `ItemsFor` subtitle golden; `ls` render golden incl. footer and
       tree-unavailable; `open` with mocks: binding written before `Up`, argv exactness for
