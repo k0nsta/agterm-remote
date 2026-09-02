@@ -79,7 +79,6 @@ re-attaches the same running agent and re-labels the row.
 | `agr kill <host> <name>…` | Mac | Kill one or more agr-owned tmux sessions on `<host>`. |
 | `agr up <host>` / `agr down <host>` | Mac | Start / stop the shared control tunnel (autossh if present, else a reconnect loop). |
 | `agr install <host>` | Mac | Copy `agr` to the host and wire Claude Code hooks. |
-| `agr quick [id]` | Mac | Remote-aware quick terminal: remote-shell overlay on agr sessions, else the local quick terminal. |
 | `agr doctor <host>` | Mac | Check prerequisites on both sides, including the version handshake and bridge socket. |
 | `agr attach <name> [id]` | remote | Set `@agr_target`, `tmux new-session -A -s <name>` (invoked over SSH). |
 | `agr sessions` | remote | List agr-owned tmux sessions as TSV (feeds `agr ls` and the picker). |
@@ -152,21 +151,6 @@ created under 0.3 are invisible to `agr ls` until you `agr open` them once
 (`agr doctor <host>` lists them as "legacy targets"). After that, they carry
 `@agr_target` like any other session, and you can
 `rm -r ~/.cache/agterm/targets` on the host.
-
-### Remote-aware quick terminal
-
-agterm's built-in quick terminal (`ctrl+\``) always opens a *local* shell. Bind
-it to `agr quick` instead and it becomes context-aware: in an `agr` session it
-drops a floating **remote** shell overlay on that host; in a local session it
-falls back to the built-in local quick terminal. `agr open` records which host
-each row is bound to, and `agr quick` opens the overlay via
-`agtermctl session overlay`.
-
-Add to `~/.config/agterm/keymap.conf`, then run `agtermctl keymap reload`:
-
-```
-command "Quick shell (remote-aware)" ctrl+` $HOME/.local/bin/agr quick "$AGT_SESSION_ID"
-```
 
 ### From other clients (iPhone, Windows, another Linux box)
 

@@ -5,7 +5,7 @@
 # AI agents that run on a REMOTE host inside tmux, reached over SSH.
 #
 # One script, installed on both sides:
-#   • the Mac (agterm) uses:  open | ls | kill | up | down | install | quick | doctor
+#   • the Mac (agterm) uses:  open | ls | kill | up | down | install | doctor
 #   • the remote host uses:   attach | sessions | reap | status | relay   (invoked by ssh / hooks)
 #
 # See README.md for the architecture. MIT licensed.
@@ -235,13 +235,6 @@ cmd_open() {
   rhome="$(remote_home "$host")"
   ragr="$rhome/$REMOTE_BIN"
 
-  # Remember which host this agterm row is bound to, so `agr quick` can open a
-  # remote shell overlay on it later.
-  if [ -n "$sid" ]; then
-    mkdir -p "$CACHE_DIR/session-host"
-    printf '%s' "$host" > "$CACHE_DIR/session-host/$sid"
-  fi
-
   # Prefer mosh when available on both sides (marker written by `agr install`):
   # it survives drops/roaming/sleep instead of dying on a corrupted SSH packet.
   # Not exec'd, so the terminal-reset guard below always runs. mosh-server execs
@@ -435,40 +428,6 @@ PY
   log "agr: installed $VERSION on '$host'"
 }
 
-# agr quick [session-id] — remote-aware quick terminal.
-# If the active agterm session was opened by `agr open`, drop a floating remote
-# shell overlay on it; otherwise fall back to agterm's built-in local quick
-# terminal. Bind this to ctrl+` in keymap.conf (see README).
-cmd_quick() {
-  have agtermctl || die "agtermctl not found (Mac/agterm only)"
-  local id="${1:-}" host=""
-  # Resolve the active session id when the keymap didn't pass one.
-  if [ -z "$id" ]; then
-    id="$(agtermctl tree --json 2>/dev/null | python3 -c '
-import sys, json
-try:
-    t = json.load(sys.stdin)["result"]["tree"]
-except Exception:
-    sys.exit(0)
-wss = t.get("workspaces", [])
-for ws in sorted(wss, key=lambda w: not w.get("active")):   # active workspace first
-    for s in ws.get("sessions", []):
-        if s.get("active"):
-            print(s["id"]); sys.exit(0)
-' 2>/dev/null || true)"
-  fi
-  [ -n "$id" ] && host="$(cat "$CACHE_DIR/session-host/$id" 2>/dev/null || true)"
-
-  if [ -n "$host" ]; then
-    # Remote session → floating remote shell on this row (falls back to local
-    # quick terminal if the overlay can't open).
-    agtermctl session overlay open "ssh -t $host" --target "$id" --size-percent 60 >/dev/null 2>&1 \
-      || agtermctl quick toggle >/dev/null 2>&1
-  else
-    agtermctl quick toggle >/dev/null 2>&1
-  fi
-}
-
 # agr ls <host> — list agr-owned tmux sessions on <host>. Never mutates.
 cmd_ls() {
   local host="${1:-}"; [ -n "$host" ] || die "usage: agr ls <host>"
@@ -656,7 +615,6 @@ Mac (agterm) commands:
   agr up <host>            ensure the control tunnel (idempotent)
   agr down <host>          stop the control tunnel
   agr install <host>       copy agr to <host> and wire Claude Code hooks
-  agr quick [session-id]   remote-aware quick terminal (bind to ctrl+\`)
   agr doctor <host>        check prerequisites on both sides
 
 Remote commands (usually invoked by ssh / hooks, not by hand):
@@ -676,7 +634,6 @@ main() {
     up)      cmd_up      "$@";;
     down)    cmd_down    "$@";;
     install) cmd_install "$@";;
-    quick)   cmd_quick   "$@";;
     doctor)  cmd_doctor  "$@";;
     ls)      cmd_ls      "$@";;
     kill)    cmd_kill    "$@";;
