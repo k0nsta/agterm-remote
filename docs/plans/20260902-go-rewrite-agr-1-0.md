@@ -144,7 +144,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - [ ] `Makefile`: `build`, `test` (`go test -race ./...`), `cover`
       (`go test -coverprofile=coverage.out ./... && go tool cover -func`), `lint`,
       `shellcheck` and `check-remote` (both `[ -f … ] || { echo "skip (not yet)"; exit 0; }`
-      guarded until Tasks 11/13 create their targets), `check` = all
+      guarded until Tasks 11/12 create their targets), `check` = all
 - [ ] `.golangci.yml`: default linters plus `depguard` forbidding `internal/remote` from
       importing `internal/daemon` (the cycle guard the type-ownership rule exists to keep)
 - [ ] `.github/workflows/ci.yml`: matrix `macos-latest` + `ubuntu-latest`, installs
@@ -163,7 +163,11 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       these reach `--target`/`--pane-id` argv and filenames)
 - [ ] `ValidState(s)` — exactly `idle|active|completed|blocked`
 - [ ] `ValidHost(s)` — an ssh destination, so it must accept `user@example.com` and `host-1`:
-      printable ASCII without whitespace, quotes, or shell metacharacters, no leading `-`
+      printable ASCII without whitespace, quotes, or shell metacharacters, **no leading `-`**
+      (a destination like `-oProxyCommand=…` would otherwise be argument injection into
+      `ssh … <host> -- …`). Every entry point rejects a failing host: the CLI's
+      `open`/`ls`/`kill`/`install`/`up`/`down` argument parsing (Tasks 15–16) and the
+      daemon's control `up`/`down` ops (Task 10).
 - [ ] `FileKey(host)` — the filename-safe form used for `recv-<key>.sock`,
       `hosts/<key>.json`, `bridge-<key>.log`: `Valid`-safe characters kept, everything else
       replaced, plus a short hash suffix so two hosts can never collide (closes
@@ -180,7 +184,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 **Files:**
 - Create: `internal/agterm/protocol.go`, `internal/agterm/client.go`, `internal/agterm/socket.go`
 - Create: `internal/agterm/dependency.go`, `internal/agterm/mocks/dependency_mock.go`
-- Create: `internal/agterm/client_test.go`, `internal/agterm/socket_test.go`, `internal/agterm/testserver_test.go`
+- Create: `internal/agterm/client_test.go`, `internal/agterm/socket_test.go`, `internal/agterm/agtermtest/server.go`
 
 - [ ] `protocol.go`: `Request{Cmd string; Target string,omitempty; Args any,omitempty}`,
       `StatusArgs{Status string; Blink *bool "blink,omitempty"; AutoReset *bool "autoReset,omitempty"; Pane string "pane,omitempty"; PaneID string "paneID,omitempty"}`,
@@ -199,14 +203,22 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `run.Run(ctx, ctl, "session","status",args.Status,"--target",target,"--socket",sock, [+"--pane" role, +"--pane-id" id, +"--blink", +"--auto-reset"])`
       on **every** such reply (events must not be dropped); the "falling back to agtermctl"
       warning is logged once per process (`sync.Once`)
-- [ ] `dependency.go`: `Runner` interface `Run(ctx, name string, args ...string) error` +
-      `//go:generate` mockgen line; generate mocks
+- [ ] `dependency.go`: three consumer interfaces, because the `agtermctl` calls need three
+      different shapes — `Runner` `Run(ctx, name string, args ...string) error` (fire and
+      forget: status fallback, hud, rename, context); `Outputter`
+      `Output(ctx, stdin []byte, name string, args ...string) ([]byte, int, error)` (stdout
+      **and** the exit code: `tree`, `pick` — `DecodePick` needs both, and `pick` also needs
+      the item array on stdin); `Streamer`
+      `Stream(ctx, name string, args ...string) (io.ReadCloser, func() error, error)`
+      (a live pipe: `events --json`). Plus the `//go:generate` mockgen line; generate mocks.
 - [ ] `MinTestedVersion = "0.25.0"`: a lower `Version()` result warns once
-- [ ] `testserver_test.go`: **the one shared fake** — `newFakeAgterm(t *testing.T, handler)`
-      with `t.Helper()`, listening under `os.MkdirTemp("/tmp", …)` (never `t.TempDir()`:
-      macOS `sun_path` is 104 bytes and the temp path alone measures ~101). Exported for
-      Tasks 7/9/10 via a shared `internal/agterm/agtermtest` package so no test utility is
-      duplicated across packages.
+- [ ] `internal/agterm/agtermtest/server.go`: **the one shared fake** — an ordinary (NOT
+      `_test.go`) file so other packages can import it, exporting
+      `NewFakeAgterm(t *testing.T, handler func(Request) Response) (sock string)` that calls
+      `t.Helper()` and listens under `os.MkdirTemp("/tmp", …)`. Never `t.TempDir()`: macOS
+      `sun_path` is 104 bytes and the temp path alone measures ~101 (verified: a `t.TempDir()`
+      socket path reaches 112 and fails `bind: invalid argument`). Tasks 7/9/10 import this
+      rather than each writing their own.
 - [ ] write tests: ok reply; refused → `ErrRefused`; two decode-failure replies → fallback
       Runner called **twice** with exact argv, warning once; ECONNREFUSED → error, no
       fallback; `Version` parses `result.app.version` and warns below 0.25.0; timeout
@@ -217,8 +229,12 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 
 **Files:**
 - Create: `internal/agterm/ctl.go`, `internal/agterm/ctl_test.go`
+- Modify: `internal/agterm/dependency.go` (if any interface needs widening), `internal/agterm/mocks/dependency_mock.go` (regenerate)
 
-- [ ] `Ctl{path, sock string; run Runner}` — one type providing every non-hot-path call, all
+- [ ] `Ctl{path, sock string; run Runner; out Outputter; stream Streamer}` — one type
+      providing every non-hot-path call (each method uses the interface that carries what it
+      needs: `Run` for hud/rename/context, `Outputter` for `Tree`/`Pick`, `Streamer` for
+      `ClosedRows`), all
       with the absolute binary path and an explicit `--socket` (launchd `PATH` is empty):
       `HudOpen(ctx,row,msg)` → `session hud open <msg> --target <row> --socket <s>`;
       `HudClose(ctx,row)` → `session hud close --target … --socket …`;
@@ -227,9 +243,12 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `Tree(ctx) ([]string, error)` (live row ids via `tree --json`);
       `Pick(ctx, items []PickItem, prompt string) (PickResult, error)`;
       `ClosedRows(ctx) (<-chan string, error)` streaming `events --json --kind session.closed`
-- [ ] `PickItem{ID,Label,Subtitle}`; `DecodePick(out []byte, exit int)` → `picked`→id,
-      `custom`→query verbatim, exit 2 or `cancelled`→`ErrCancelled`, other→error naming the exit
-- [ ] write tests with a mocked `Runner` asserting exact argv for every method; `DecodePick`
+- [ ] `PickItem{ID,Label,Subtitle}`; `PickResult{Kind string; ID, Query string}` (`Kind` is
+      `picked`|`custom`|`cancelled`); `DecodePick(out []byte, exit int) (PickResult, error)` →
+      `picked`→id, `custom`→query verbatim, exit 2 or `cancelled`→`ErrCancelled`, other→error
+      naming the exit
+- [ ] write tests asserting exact argv for every method against the mock it actually uses
+      (`Runner` / `Outputter` / `Streamer` — name which per method); `DecodePick`
       table (picked / custom / cancelled / exit 1 / malformed / empty id); `Context` failing
       with "unknown subcommand" returns nil (best-effort); `ClosedRows` yields rows from
       canned JSON lines and closes cleanly on ctx cancel
@@ -245,12 +264,16 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `/agr`; accessors `Sock()`, `Lock()`, `Pid()`, `Log()`, `Bindings()`,
       `Recv(hostKey)`, `BridgeLog(hostKey)`, `HostInfo(hostKey)`. Every consumer takes a
       `Dirs`, so tests point at a temp dir.
+- [ ] `TestDirs(t *testing.T) Dirs` (`t.Helper()`, `t.Cleanup` removal) rooted at
+      `os.MkdirTemp("/tmp", …)`, **not** `t.TempDir()` — every socket-creating test in Tasks
+      7/9/10/15 must use it, since a `t.TempDir()`-based `recv-<hostKey>.sock` measures 112
+      bytes against macOS's 104-byte `sun_path` limit and fails to bind (verified)
 - [ ] `Binding{Row, PaneID, Pane, Host, Name, Mux string; BoundAt time.Time}` — `Pane` (the
       role, from `$AGTERM_PANE`) is stored beside `PaneID` because 0.26's refusal names a
       role and `--pane-id` falls back to `--pane`
 - [ ] `Store{dirs}` with `Load`, `Save` (tmp + rename), `Bind` (replaces any binding for the
       same Row **and** any for the same Host+Name), `UnbindRow`, `ByHostName`, `ByRow`,
-      `ForHost`, `Dangling(host, live []string)`, `Reconcile(liveRows []string) (removed int)`
+      `ForHost`, `Dangling(host, live []string)`, `Reconcile(liveRows []string) (removed int, err error)`
 - [ ] write tests: round-trip; replace-on-rebind; missing file → empty; corrupt file → error
       not panic; `Dangling` and `Reconcile` set arithmetic; `Dirs` honours `XDG_CACHE_HOME`
 - [ ] run `make check` — must pass before Task 6
@@ -260,7 +283,8 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 **Files:**
 - Create: `internal/remote/sessions.go`, `internal/remote/sessions_test.go`
 
-- [ ] **This package owns the `Session` type** — it is a dependency-free leaf, created here
+- [ ] **This package owns the `Session` type** — it depends only on `internal/token`, so it
+      is a leaf for every consumer, created here
       so Tasks 9–10 can compile their interfaces against `[]remote.Session` without any
       package importing `internal/daemon` back (verified: two `Session` types in two
       packages do not satisfy each other, and the back-import is one step from a cycle)
@@ -285,16 +309,22 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       session name via `token.Valid`
 - [ ] `dependency.go`: `StatusSink` interface `Status(ctx, target string, args agterm.StatusArgs) error`;
       `Resolver` interface `ByHostName(host, name string) (bindings.Binding, bool)`;
-      `Liveness` interface `MarkAlive()` (the supervisor's; wired in Task 10)
+      `Liveness` interface `MarkAlive()` (the supervisor's; wired in Task 9)
 - [ ] `listener.go`: **one listener per host** on `dirs.Recv(hostKey)` — the host's tunnel
       forwards to this socket, so the listener knows which host every line came from; a
       single shared socket could not tell two hosts' `api` sessions apart. `Serve(ctx)`
       accepts, and per connection reads with **`bufio.Reader`**: a line longer than 64 KiB is
       logged and **skipped up to the next `\n`**, keeping the connection usable
       (`bufio.Scanner` cannot do this — on overflow it stops the stream permanently).
-      Each decoded line → resolve → `sink.Status` (+ `MarkAlive`); errors logged per line,
-      never fatal. `LastEvent()` timestamp for liveness.
-- [ ] write tests: decode table (both shapes, missing/bad state, extra args dropped,
+      Routing is per shape: the **agr** shape (`session` name) → `Resolver.ByHostName` →
+      `sink.Status(binding.Row, …)` with the binding's `PaneID`/`Pane`; the **cookbook**
+      shape carries no session name, so its `session_id` IS the target row and its
+      `pane`/`pane_id` pass through unchanged — without this branch every cookbook event
+      would be dropped as "unknown session", contradicting the Context requirement that it
+      be accepted verbatim. Both then `MarkAlive`; errors logged per line, never fatal.
+      `LastEvent()` timestamp for liveness.
+- [ ] write tests: cookbook-shape line reaches the sink with `target = session_id` and its
+      pane fields, resolving no binding; decode table (both shapes, missing/bad state, extra args dropped,
       malformed JSON, unknown cmd, bad token); listener with mocks: two lines on one
       connection → two calls; unknown session → logged, no call; malformed line between two
       good ones → both good ones delivered; **oversized line → skipped and the next line on
@@ -352,7 +382,11 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `agterm.SocketPath()`/`CtlPath()`, `Version()` handshake logged (warn below
       `MinTestedVersion`), load bindings, **reconcile them against `Rows.Tree`** (rows that
       vanished while the daemon was down — e.g. an agterm relaunch — are unbound here, so
-      resync never pushes at dead targets), then per host with bindings: `EnsureDirs` once
+      resync never pushes at dead targets) — **only when `Tree` returns successfully and
+      non-empty**: `agtermctl tree` is window-scoped (it defaults to the frontmost window and
+      takes `--window`; verified — its payload has no `windows` array), so a background
+      window's rows are legitimately absent, and an error means agterm is down, not that
+      every row died. A failed or empty `Tree` unbinds nothing. Then per host with bindings: `EnsureDirs` once
       (`mkdir -p ~/.cache/agr` remotely — `ExitOnForwardFailure` fails on a missing parent),
       start its listener via `ListenClean` and its supervisor, wiring the listener's
       `MarkAlive` to that supervisor; log to `dirs.Log()`; SIGTERM/SIGINT → stop supervisors,
@@ -360,7 +394,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - [ ] write tests: single-instance lock refuses a second daemon; a **leftover** socket file
       does not block startup while a **live** one does; SIGTERM removes sockets and pidfile;
       `EnsureDirs` called once per host per lifetime; startup reconciliation unbinds rows
-      absent from `Tree`
+      absent from a successful `Tree`, and **unbinds nothing when `Tree` errors or is empty**
 - [ ] run `make check` — must pass before Task 10
 
 ### Task 10: `internal/daemon` — control socket, resync, close events, agterm-absent recovery
@@ -369,7 +403,9 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/daemon/control.go`, `internal/daemon/resync.go`, `internal/daemon/events.go`
 - Create: `internal/daemon/control_test.go`, `internal/daemon/resync_test.go`, `internal/daemon/events_test.go`
 
-- [ ] `control.go`: unix socket `dirs.Sock()`, JSON lines
+- [ ] `control.go`: unix socket `dirs.Sock()` opened via **`ListenClean`** — this is the
+      file a `kill -9` leaves behind, so without it Post-Completion step 10 fails with
+      `bind: address already in use` even though the flock is free; JSON lines
       `{"op":"up|down|status|reload-bindings","host":…}` → `{"ok":…,"result":…}`; `up` =
       EnsureDirs + listener + supervisor for a host not yet running; `down` = stop both and
       remove that recv socket; `status` = per host state, since, attempts, last event
@@ -378,10 +414,11 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `StatusSink.Status(row, level)` (`completed` carries `AutoReset`); on `Up→Down` —
       `HudOpen(row, "<host>: reconnecting…")` for each bound row
 - [ ] `events.go`: consume `EventSource.ClosedRows` → `bindings.UnbindRow`; when a host has
-      no bindings left, stop its supervisor and listener
+      no bindings left, stop its supervisor and listener and remove that recv socket
 - [ ] agterm-absent handling: on ECONNREFUSED from the sink, log once, poll `SocketPath()`
       every 5 s; when it returns, re-run the handshake, re-subscribe `ClosedRows`,
-      **re-reconcile bindings against `Tree`**, and resync every host
+      **re-reconcile bindings against `Tree`** under the same success-and-non-empty guard,
+      and resync every host
 - [ ] write tests: control round-trip for each op + malformed line; resync with mocks (levels
       pushed with correct args, `completed` carries AutoReset, dangling ignored, HUD
       open/close ordering); close event → unbind → supervisor stopped when the last binding
@@ -409,28 +446,42 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `set-option -t "=$n:" @agr 1`; `exec tmux attach -t "=$n"`. `sessions` = header
       `agr\t$AGR_VERSION` then per owned session (`@agr` = 1 **or** `@agr_target` non-empty)
       `name\tattached\tidle_secs\tcmds\tstate`, where `state`/`idle_secs` come from
-      `@agr_state` (`<state>@<epoch>`; `-`/`-` when unset) and `cmds` is `-` when empty.
+      `@agr_state` (`<state>@<epoch>`; `-`/`-` when unset) and `cmds` is the unique
+      `list-panes -s -t "=$n" -F '#{pane_current_command}' | sort -u` minus plain shells
+      (`sh|bash|zsh|fish|dash`, kept only when nothing else remains), comma-joined, `-` when empty.
       **`reap` prints the `agr\t$AGR_VERSION` header first** (it is a data verb and the Mac's
       `Data()` requires the handshake), then refuses unowned, `kill-session -t "=$n"`,
       `killed <n>`.
-- [ ] tmux `status`: `[ -n "${TMUX_PANE:-}" ] || exit 0`; **resolve the session name**
-      `n=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}')` — the event line
-      carries it and the daemon resolves bindings by `(host,name)`, so without it every tmux
-      event is unresolvable; ownership check via `show-option -t "=$n:" -qv @agr`/`@agr_target`
-      → exit 0 if empty; `set-option -t "=$n:" @agr_state "$state@$(date +%s)"` (the
-      `-t "=name:"` form throughout, matching the documented rule); `relay`; `exit 0` always
-- [ ] `relay`: `{"cmd":"session-status","session":"<name>","state":"<state>","args":[…]}`
-      built with `printf` (values already token-validated); sent via `$AGR_RELAY`
+- [ ] tmux `status`: `[ -n "${TMUX_PANE:-}" ] || exit 0`; **resolve the session name, and
+      guard it twice** —
+      `n=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || exit 0`
+      then `[ -n "$n" ] || exit 0`. Both guards are load-bearing and verified on tmux 3.7b:
+      a dead tmux server makes the substitution fail and `set -eu` aborts the hook with rc=1
+      (the exact `set -e` defect class this rewrite exists to remove), and a stale
+      `TMUX_PANE` returns **rc=0 with empty output**, after which `-t "=:"` resolves to the
+      *current* session — writing `@agr_state` onto an unrelated session (reproduced:
+      `set-option -t "=:"` landed on `api`). Then ownership via
+      `show-option -t "=$n:" -qv @agr`/`@agr_target` → exit 0 if empty;
+      `set-option -t "=$n:" @agr_state "$state@$(date +%s)"`; `relay`; `exit 0` always
+- [ ] `relay`: `valid_token "$n" || exit 0` first — `$n` comes from the multiplexer, not from
+      agr, so a legacy or hand-adopted session name can hold a `"` or `\` that would break
+      the hand-built JSON; then
+      `{"cmd":"session-status","session":"<name>","state":"<state>","args":[…]}`
+      built with `printf`; sent via `$AGR_RELAY`
       (`nc -U -w1 "$AGR_SOCK"` | `python3` one-liner | `socat - UNIX-CONNECT:"$AGR_SOCK"`);
       any failure → exit 0
 - [ ] `tests/remote/lib.sh`: shim setup (`REAL_TMUX` resolved **before** the PATH change;
       `tmux` shim injecting `-L agr-test`; `nc` shim appending stdin to `$NC_CAPTURE`);
       `assert_eq`/`assert_contains`; `run.sh` runs every `tests/remote/*/*.sh`
+- [ ] write tests for `Script`: `@VERSION@` substituted, the shebang and `set -eu` survive,
+      and the output is byte-identical to `agr.sh` apart from the version
 - [ ] write tmux checks: attach marks `@agr`; sessions lists owned only, treats `@agr_target`
       as owned, emits exactly 5 fields after the header; reap emits the header, refuses
       unowned, kills the exact name (`api` vs `api2`); status outside tmux exits 0 silently;
       status inside an owned session writes `@agr_state` **and the captured JSON line carries
-      the right `session` name**; `--blink --auto-reset` → `args`; unowned → no capture
+      the right `session` name**; `--blink --auto-reset` → `args`; unowned → no capture;
+      **stale `TMUX_PANE` (`%99`) → exit 0, no capture, and a neighbouring session's
+      `@agr_state` unchanged**; **dead tmux server → exit 0, no capture**
 - [ ] `shellcheck -s sh` clean; `make check` — must pass before Task 12
 
 ### Task 12: `agr.sh` — zmx backend and fake-zmx harness
@@ -549,11 +600,14 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 **Files:**
 - Create: `internal/cli/open.go`, `internal/cli/updown.go`, `internal/cli/install.go`
 - Create: `cmd/agr/wire.go`, `cmd/agr/wire_test.go`
-- Modify: `cmd/agr/run.go` (register every subcommand), `internal/cli/open_test.go`, `internal/cli/install_test.go`
+- Create: `internal/cli/open_test.go`, `internal/cli/install_test.go`
+- Modify: `cmd/agr/run.go` (register every subcommand)
 
-- [ ] `run.go` registers **all** subcommands: `open ls kill up down install doctor daemon`
-      (`doctor` lands in Task 17) — `install` and `daemon` are required by the daemon client
-      and by Post-Completion step 1, and neither existed before this task
+- [ ] `run.go` registers every subcommand this task can satisfy —
+      `open ls kill up down install daemon` — and `doctor` as a stub returning
+      "not implemented yet" so `make check` passes at the end of this task; Task 17 replaces
+      the stub. `install` and `daemon` are required by the daemon client and by
+      Post-Completion step 1, and neither existed before this task.
 - [ ] `install.go`: `agr install <host> [--mux zmx|tmux]` → `remote.Install`
 - [ ] `open.go`: `<host> [name]`; no name → `Sessions` + `ItemsFor` + `Pick` (no `agtermctl`
       → print `ls` then usage); validate the name; **inside agterm** (`AGTERM_SESSION_ID`
@@ -566,7 +620,9 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       and hand them to the daemon and CLI; carry the compile-time assertions
       `var _ daemon.Remote = (*remote.Runner)(nil)`, `var _ daemon.UI = (*agterm.Ctl)(nil)`,
       `var _ daemon.EventSource = (*agterm.Ctl)(nil)`, `var _ daemon.Rows = (*agterm.Ctl)(nil)`,
-      `var _ daemon.StatusSink = (*agterm.Client)(nil)` so a mismatch fails in this task
+      `var _ daemon.StatusSink = (*agterm.Client)(nil)`, plus the CLI side
+      `var _ cli.Picker`, `cli.Rows`, `cli.Labeler` = `(*agterm.Ctl)(nil)` and
+      `var _ cli.Sessions = (*remote.Runner)(nil)`, so a mismatch fails in this task
       rather than three tasks later
 - [ ] write tests: `run` dispatches every registered subcommand (table over argv → handler);
       `open` with mocks — binding written before `Up`, argv exactness for the mosh and ssh
