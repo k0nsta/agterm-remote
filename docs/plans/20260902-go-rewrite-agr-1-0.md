@@ -308,21 +308,21 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 **Files:**
 - Create: `internal/remote/sessions.go`, `internal/remote/sessions_test.go`
 
-- [ ] **This package owns the `Session` type** — it depends only on `internal/token`, so it
+- [x] **This package owns the `Session` type** — it depends only on `internal/token`, so it
       is a leaf for every consumer, created here
       so Tasks 9–10 can compile their interfaces against `[]remote.Session` without any
       package importing `internal/daemon` back (verified: two `Session` types in two
       packages do not satisfy each other, and the back-import is one step from a cycle)
-- [ ] `Session{Name string; Attached int; IdleSecs int; Cmds, State string}`
-- [ ] `ParseSessions(body []byte) ([]Session, error)` — 5 tab-separated fields, tolerant of a
+- [x] `Session{Name string; Attached int; IdleSecs int; Cmds, State string}`
+- [x] `ParseSessions(body []byte) ([]Session, error)` — 5 tab-separated fields, tolerant of a
       trailing newline, rejects a wrong field count. `-` for an unknown idle maps to
       **`IdleSecs = -1`** (the sentinel `ls` and `ItemsFor` render as `-`), `-` state stays
       the empty string. A row whose name fails `token.Valid` is **skipped and logged, not an
       error** — one adopted legacy session with an odd name must not kill the whole listing
-- [ ] write tests: well-formed multi-row body; empty body → empty slice, no error; `-`
+- [x] write tests: well-formed multi-row body; empty body → empty slice, no error; `-`
       values (`IdleSecs == -1`); wrong field count → error naming the line; a name failing
       `token.Valid` → that row skipped, the rest returned
-- [ ] run `make check` — must pass before Task 7
+- [x] run `make check` — must pass before Task 7
 
 ### Task 7: `internal/receiver` — per-host forwarded-socket listener and event decode
 
