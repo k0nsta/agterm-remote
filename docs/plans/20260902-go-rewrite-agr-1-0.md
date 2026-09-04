@@ -331,15 +331,15 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/receiver/dependency.go`, `internal/receiver/mocks/dependency_mock.go`
 - Create: `internal/receiver/event_test.go`, `internal/receiver/listener_test.go`
 
-- [ ] `event.go`: `Event{Host, Session, SessionID, State, Pane, PaneID string; Blink, AutoReset bool}`;
+- [x] `event.go`: `Event{Host, Session, SessionID, State, Pane, PaneID string; Blink, AutoReset bool}`;
       `Decode(host string, line []byte) (Event, error)` accepting **both** shapes — agr
       (`"session"`) and cookbook (`"session_id"`, `"pane"`, `"pane_id"`); `args` allowlisted
       to `--blink`/`--auto-reset`; unknown `cmd` → error; state via `token.ValidState`;
       session name via `token.Valid`
-- [ ] `dependency.go`: `StatusSink` interface `Status(ctx, target string, args agterm.StatusArgs) error`;
+- [x] `dependency.go`: `StatusSink` interface `Status(ctx, target string, args agterm.StatusArgs) error`;
       `Resolver` interface `ByHostName(host, name string) (bindings.Binding, bool)`;
       `Liveness` interface `MarkAlive()` (the supervisor's; wired in Task 9)
-- [ ] `listener.go`: **one listener per host** on `dirs.Recv(hostKey)` — the host's tunnel
+- [x] `listener.go`: **one listener per host** on `dirs.Recv(hostKey)` — the host's tunnel
       forwards to this socket, so the listener knows which host every line came from; a
       single shared socket could not tell two hosts' `api` sessions apart. `Serve(ctx)`
       accepts, and per connection reads with **`bufio.Reader`**: a line longer than 64 KiB is
@@ -352,13 +352,13 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       would be dropped as "unknown session", contradicting the Context requirement that it
       be accepted verbatim. Both then `MarkAlive`; errors logged per line, never fatal.
       `LastEvent()` timestamp for liveness.
-- [ ] write tests: cookbook-shape line reaches the sink with `target = session_id` and its
+- [x] write tests: cookbook-shape line reaches the sink with `target = session_id` and its
       pane fields, resolving no binding; decode table (both shapes, missing/bad state, extra args dropped,
       malformed JSON, unknown cmd, bad token); listener with mocks: two lines on one
       connection → two calls; unknown session → logged, no call; malformed line between two
       good ones → both good ones delivered; **oversized line → skipped and the next line on
       the same connection still delivered**; `MarkAlive` called on a delivered event
-- [ ] run `make check` — must pass before Task 8
+- [x] run `make check` — must pass before Task 8
 
 ### Task 8: `internal/bridge` — per-host `ssh -N -R` supervisor
 
