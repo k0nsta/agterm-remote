@@ -614,20 +614,20 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/remote/probe.go`, `internal/remote/install.go`, `internal/remote/hooks.go`
 - Create: `internal/remote/probe_test.go`, `internal/remote/install_test.go`, `internal/remote/hooks_test.go`, `internal/remote/testdata/`
 
-- [ ] `probe.go`: one constant remote script (no interpolation) printing `k\tv` lines — `zmx`
+- [x] `probe.go`: one constant remote script (no interpolation) printing `k\tv` lines — `zmx`
       version or MISSING, `zmx_labels` (`zmx attach --help | grep -q -- --labels`), `zmx_dir`
       (from `zmx version`, run through a **login** shell `sh -lc` so it matches the user's
       interactive resolution), `tmux`, `nc_u` (`nc -h 2>&1 | grep -q -- -U`), `python3`,
       `socat`, `mosh_server`, `home`, installed `agr` version, `sock` present, `legacy`
       counts; `ParseProbe` → struct
-- [ ] `install.go`: probe → `EnsureDirs` → choose `AGR_MUX` (zmx if present else tmux,
+- [x] `install.go`: probe → `EnsureDirs` → choose `AGR_MUX` (zmx if present else tmux,
       `--mux` override) and `AGR_RELAY` (nc-U > python3 > socat; none → error naming what to
       install) → write `~/.config/agr/env` with **`export` on every line** and
       **`ZMX_DIR` pinned** from the probe, plus `AGR_SOCK=$HOME/.cache/agr/bridge.sock` →
       write the script via a constant `cat > …agr.tmp && chmod +x … && mv -f …` with the
       embedded bytes on stdin → save `HostInfo` → merge hooks → print
       `installed <version> on <host> (mux=zmx, relay=nc)`
-- [ ] `hooks.go`: `MergeHooks(existing []byte) (merged []byte, changed bool, err error)` —
+- [x] `hooks.go`: `MergeHooks(existing []byte) (merged []byte, changed bool, err error)` —
       pure Go over `map[string]any`. The four events verbatim: `UserPromptSubmit` and
       `PostToolUse` → `agr status active --blink`, `Notification` (matcher
       `permission_prompt`) → `agr status blocked`, `Stop` → `agr status completed
@@ -639,13 +639,13 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       script `p=$(readlink -f ~/.claude/settings.json 2>/dev/null || echo ~/.claude/settings.json); [ -e "$p" ] && cat "$p" || printf '{}'`;
       unparsable → refuse without writing; write = constant script with `.bak-agr` **only
       when `changed`**, tmp + `mv` beside the symlink target
-- [ ] write tests: `ParseProbe`; install decision table (mux/relay choice, none → error, env
+- [x] write tests: `ParseProbe`; install decision table (mux/relay choice, none → error, env
       file contains `export` and `ZMX_DIR`); `MergeHooks` table (missing file → `{}` input,
       foreign keys kept, idempotent second run, malformed → error, one bucket already wired,
       **a 0.4-style `agr active --blink` entry is replaced rather than duplicated**);
       SSH mock asserting argv-only calls, `EnsureDirs` before any write, and the exact
       constant scripts as stdin
-- [ ] run `make check` — must pass before Task 15
+- [x] run `make check` — must pass before Task 15
 
 ### Task 15: CLI — daemon client, `ls`, `kill`, picker items
 

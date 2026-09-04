@@ -1,0 +1,13 @@
+zmx	0.7.1
+zmx_labels	1
+zmx_dir	/run/user/1000/zmx
+tmux	3.4
+nc_u	1
+python3	1
+socat	0
+mosh_server	1
+home	/home/remote
+agr	0.4.0
+sock	1
+legacy_targets	2
+legacy_agr_target	3
