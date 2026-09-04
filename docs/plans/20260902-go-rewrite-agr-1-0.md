@@ -186,7 +186,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/agterm/dependency.go`, `internal/agterm/mocks/dependency_mock.go`
 - Create: `internal/agterm/client_test.go`, `internal/agterm/socket_test.go`, `internal/agterm/agtermtest/server.go`
 
-- [ ] `protocol.go`: `Request{Cmd string; Target string,omitempty; Args any,omitempty}`,
+- [x] `protocol.go`: `Request{Cmd string; Target string,omitempty; Args any,omitempty}`,
       `StatusArgs{Status string; Blink *bool "blink,omitempty"; AutoReset *bool "autoReset,omitempty"; Pane string "pane,omitempty"; PaneID string "paneID,omitempty"}`,
       `Response{OK bool; Result json.RawMessage; Error string}`; `ErrRefused` (error text
       prefix `blocked status owned by pane`); `ErrUnknownTarget` (prefix `no such session:` —
@@ -194,17 +194,17 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       spellings `invalid request` and `DecodingError` — the exact text is an unverified
       heuristic, so a miss costs only the fallback, never correctness. Assert the JSON tags
       with a marshal golden test.
-- [ ] `socket.go`: `SocketPath()` → `AGTERM_CONTROL_SOCKET` → `AGTERM_SOCKET` →
+- [x] `socket.go`: `SocketPath()` → `AGTERM_CONTROL_SOCKET` → `AGTERM_SOCKET` →
       `$AGTERM_STATE_DIR/agterm.sock` → `~/Library/Application Support/agterm/agterm.sock`;
       `CtlPath()` → the app-bundle path if executable, else `exec.LookPath`, resolved once
-- [ ] `client.go`: `Client{sock, ctl string; timeout time.Duration; run Runner}`;
+- [x] `client.go`: `Client{sock, ctl string; timeout time.Duration; run Runner}`;
       `Do(ctx, Request) (Response, error)` = one dial, write line, read one line, close;
       `Version(ctx) (string, error)`; `Status(ctx, target string, args StatusArgs) error`
       returning `ErrRefused` on the 0.26 refusal, and on a decode failure calling
       `run.Run(ctx, ctl, "session","status",args.Status,"--target",target,"--socket",sock, [+"--pane" role, +"--pane-id" id, +"--blink", +"--auto-reset"])`
       on **every** such reply (events must not be dropped); the "falling back to agtermctl"
       warning is logged once per process (`sync.Once`)
-- [ ] `dependency.go`: three consumer interfaces, because the `agtermctl` calls need three
+- [x] `dependency.go`: three consumer interfaces, because the `agtermctl` calls need three
       different shapes — `Runner` `Run(ctx, name string, args ...string) error` (fire and
       forget: status fallback, hud, rename, context); `Outputter`
       `Output(ctx, stdin []byte, name string, args ...string) ([]byte, int, error)` (stdout
@@ -212,8 +212,8 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       the item array on stdin); `Streamer`
       `Stream(ctx, name string, args ...string) (io.ReadCloser, func() error, error)`
       (a live pipe: `events --json`). Plus the `//go:generate` mockgen line; generate mocks.
-- [ ] `MinTestedVersion = "0.25.0"`: a lower `Version()` result warns once
-- [ ] `internal/agterm/agtermtest/server.go`: **the one shared fake** — an ordinary (NOT
+- [x] `MinTestedVersion = "0.25.0"`: a lower `Version()` result warns once
+- [x] `internal/agterm/agtermtest/server.go`: **the one shared fake** — an ordinary (NOT
       `_test.go`) file so other packages can import it, exporting
       `NewFakeAgterm(t *testing.T, handler func(Request) Response) (sock string)` that calls
       `t.Helper()` and listens under `os.MkdirTemp("/tmp", …)`. Never `t.TempDir()`: macOS
@@ -223,11 +223,11 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       be `package agterm_test`** (external): `agtermtest` imports `internal/agterm` for the
       handler signature, so an in-package `_test.go` importing it is an import cycle
       (verified: `import cycle not allowed in test`).
-- [ ] write tests: ok reply; refused → `ErrRefused`; two decode-failure replies → fallback
+- [x] write tests: ok reply; refused → `ErrRefused`; two decode-failure replies → fallback
       Runner called **twice** with exact argv, warning once; ECONNREFUSED → error, no
       fallback; `Version` parses `result.app.version` and warns below 0.25.0; timeout
       honored; `SocketPath` precedence table
-- [ ] run `make check` — must pass before Task 4
+- [x] run `make check` — must pass before Task 4
 
 ### Task 4: `internal/agterm/ctl.go` — the concrete `agtermctl` adapters
 
