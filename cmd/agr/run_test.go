@@ -24,6 +24,23 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestRunHelp(t *testing.T) {
+	t.Helper()
+
+	for _, arg := range []string{"--help", "-h"} {
+		var out, errw bytes.Buffer
+		if got := run([]string{arg}, &out, &errw); got != 0 {
+			t.Fatalf("run(%q) exit code = %d, want 0", arg, got)
+		}
+		if got, want := out.String(), help+"\n"; got != want {
+			t.Errorf("run(%q) stdout = %q, want %q", arg, got, want)
+		}
+		if got := errw.String(); got != "" {
+			t.Errorf("run(%q) stderr = %q, want empty", arg, got)
+		}
+	}
+}
+
 func TestRunUnknownCommand(t *testing.T) {
 	t.Helper()
 

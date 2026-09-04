@@ -13,6 +13,23 @@ var version = "dev"
 
 const usage = "usage: agr <command> [args...]"
 
+const help = `usage: agr <command> [args...]
+
+Commands:
+  open <host> [name]       Attach to a remote session; without name, use the picker
+  ls <host>                List agr-owned remote sessions
+  kill <host> <name>…      Kill one or more agr-owned remote sessions
+  up <host>                Start the host's status bridge
+  down <host>              Stop the host's status bridge
+  install <host> [--mux zmx|tmux]
+                          Install the remote script and agent hooks
+  daemon                  Run the local bridge daemon
+  doctor <host>            Check local and remote prerequisites
+
+Options:
+  --help, -h               Show this help
+  --version                Show the agr version`
+
 func run(args []string, out, errw io.Writer) int {
 	return runWithApplication(args, out, errw, nil)
 }
@@ -38,6 +55,10 @@ func runWithApplication(args []string, out, errw io.Writer, app *application) in
 
 	if args[0] == "--version" {
 		_, _ = fmt.Fprintln(out, version)
+		return 0
+	}
+	if args[0] == "--help" || args[0] == "-h" {
+		_, _ = fmt.Fprintln(out, help)
 		return 0
 	}
 	if handler, ok := commandHandlers[args[0]]; ok {

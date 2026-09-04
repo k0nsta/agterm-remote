@@ -1,243 +1,168 @@
 # agterm-remote (`agr`)
 
-Bring [agterm](https://github.com/umputun/agterm)'s agent-status sidebar — the
-blue/amber/green indicators and desktop pushes — to AI coding agents that run on
-a **remote host inside tmux**, reached over SSH.
+`agr` brings agent status from a remote host running zmx or tmux into the
+[agterm](https://github.com/umputun/agterm) sidebar on your Mac. The agent
+stays remote and survives SSH disconnects; status, colors, and notifications
+return through a self-healing bridge.
 
-Run agterm on your Mac as a thin front-end to a headless Linux box, keep your
-agents alive in remote tmux across disconnects and device switches, and still
-get per-session colors and "agent needs you" notifications on the Mac.
+## Quick start
 
----
+Install the Mac binary and keep its daemon running:
 
-## The problem
+```sh
+brew install k0nsta/tap/agr
+# or: go install github.com/k0nsta/agterm-remote/cmd/agr@latest
 
-agterm's agent integration is built for **local** agents. Its hooks call
-`agtermctl session status …`, which talks to a **local** Unix-domain control
-socket, targeting the session via `AGTERM_SESSION_ID`. That works beautifully
-when the agent runs in an agterm session on the Mac.
+agr daemon &
+agr install <host>
+agr open <host> <name>
+```
 
-It breaks the moment the agent runs on a remote box in tmux:
+Run `agr open` from the agterm session that should own the remote session.
+Repeat it with the same name to reconnect to the same agent from another Mac.
 
-1. **No binary, no socket on the remote.** `agtermctl` and the app socket only
-   exist on the Mac.
-2. **Env vars don't cross.** SSH doesn't forward `AGTERM_SESSION_ID` /
-   `AGTERM_SOCKET`, and tmux freezes the environment of already-running panes —
-   so a reconnect from a *different* Mac would target a stale/incorrect row.
-3. **tmux buffers off-screen panes.** Even agterm's in-band OSC notifications
-   don't reach the Mac from a background agent pane until you look at it — the
-   exact moment you wanted the push.
+The complete Mac-side command list is:
 
-So with plain remote tmux you get no colors and no pushes for remote agents.
+```text
+usage: agr <command> [args...]
 
-## The solution
+Commands:
+  open <host> [name]       Attach to a remote session; without name, use the picker
+  ls <host>                List agr-owned remote sessions
+  kill <host> <name>…      Kill one or more agr-owned remote sessions
+  up <host>                Start the host's status bridge
+  down <host>              Stop the host's status bridge
+  install <host> [--mux zmx|tmux]
+                          Install the remote script and agent hooks
+  daemon                  Run the local bridge daemon
+  doctor <host>            Check local and remote prerequisites
 
-`agr` bridges the agent's status events back to your Mac's agterm **out of
-band**, so it's independent of which tmux pane is focused:
+Options:
+  --help, -h               Show this help
+  --version                Show the agr version
+```
 
-- A single **reverse-forwarded control socket** carries your Mac's agterm socket
-  to a fixed path on the remote host (`ssh -R`), kept alive and self-healing.
-- A tiny **relay** on the remote speaks agterm's JSON control protocol to that
-  forwarded socket. Your agent hooks run unchanged; they just reach the Mac's
-  app through the tunnel.
-- Each remote tmux session gets a **`@agr_target` session option** set on every
-  connect — defeating tmux's frozen-env problem and staying correct across
-  reconnects and across Macs. It also marks the session as agr-owned, so
-  `agr ls`/`agr kill` only ever see sessions `agr` created.
-
-Non-agterm clients (iPhone, Windows, Linux terminals) attach the same tmux
-sessions exactly as before; the status layer is additive and self-guarding, so
-it simply no-ops when no Mac is attached.
-
----
+With no name, `open` lists the host's owned sessions in agterm's native picker;
+you can select one or type a new name. The picker requires `agtermctl` and an
+agterm session.
 
 ## How it works
 
-```
-  Mac (agterm)                         remote host (tmux + agent)
-  ┌───────────────────┐                ┌──────────────────────────────┐
-  │ agterm.app        │                │  claude / codex / …          │
-  │  control socket ◄─┼── ssh -R ──────┤   hooks → agr status <state> │
-  │                   │  (agr up)      │            │                 │
-  │  sidebar row  ◄───┼── JSON ────────┤   agr relay → forwarded sock │
-  └───────────────────┘                │   target ← @agr_target (tmux)│
-        ▲                              └──────────────────────────────┘
-        │ agr open <host> <name>: relabel row, ensure tunnel,
-        │ ssh -t → agr attach → tmux new-session -A -s <name>
-```
+`agr open` records the Mac row binding, starts the local daemon's bridge for
+the host, and attaches to the named remote multiplexer session. The daemon
+maintains one reverse SSH-forwarded Unix socket per host. Remote hooks send
+events through the installed relay; the daemon resolves the session binding
+and updates agterm directly.
 
-Mapping: **one agterm session (you create) ↔ one `agr open <host> <name>` ↔ one
-remote tmux session `<name>`.** Reconnect with the same name from any Mac and it
-re-attaches the same running agent and re-labels the row.
+The remote script uses zmx by default when available and otherwise uses tmux.
+It marks sessions as agr-owned, so `ls` and `kill` never operate on arbitrary
+user sessions. `install` also installs the Claude Code hooks; other agents can
+call the remote status entry point from their own hooks.
 
-### Components
-
-| Command | Side | Role |
-|---|---|---|
-| `agr open <host> [name]` | Mac | Adopt the current agterm session: relabel row, ensure tunnel, attach remote tmux. No name → pick from owned sessions (or type a new one). |
-| `agr ls <host>` | Mac | List agr-owned tmux sessions on `<host>` (windows, idle time, pane command, whether the agterm row is still bound). |
-| `agr kill <host> <name>…` | Mac | Kill one or more agr-owned tmux sessions on `<host>`. |
-| `agr up <host>` / `agr down <host>` | Mac | Start / stop the shared control tunnel (autossh if present, else a reconnect loop). |
-| `agr install <host>` | Mac | Copy `agr` to the host and wire Claude Code hooks. |
-| `agr doctor <host>` | Mac | Check prerequisites on both sides, including the version handshake and bridge socket. |
-| `agr attach <name> [id]` | remote | Set `@agr_target`, `tmux new-session -A -s <name>` (invoked over SSH). |
-| `agr sessions` | remote | List agr-owned tmux sessions as TSV (feeds `agr ls` and the picker). |
-| `agr reap <name>` | remote | Kill an agr-owned tmux session (feeds `agr kill`); refuses non-agr sessions. |
-| `agr status <state>` | remote | Hook entry point: resolve this tmux session's target, then relay. |
-| `agr relay …` | remote | Pure transport: one line of JSON to the forwarded socket. |
-
-State files: `~/.cache/agterm/agterm.sock` (forwarded socket) on the remote,
-with ownership tracked via the `@agr_target` tmux session option (no files);
-`~/.cache/agr/` (bridge pidfiles, `bridge-<host>.log`, `bridge-<host>.lock`,
-cached remote `$HOME`) on the Mac.
-
----
-
-## Requirements
-
-- **Mac:** macOS + [agterm](https://github.com/umputun/agterm), `python3` (ships
-  with the Xcode Command Line Tools / Homebrew; `agr open`'s picker and the `ROW`
-  column use it). `autossh` and `mosh` recommended (`brew install autossh mosh`)
-  but optional.
-- **Remote:** `tmux ≥ 3.x`, `python3`, SSH access. Any Linux/BSD/WSL host.
-  `mosh` optional (recommended) for drop-tolerant interactive sessions.
-- SSH that supports Unix-domain socket forwarding (OpenSSH ≥ 6.7) and
-  `StreamLocalBindUnlink`.
-
-## Install
-
-```sh
-git clone https://github.com/k0nsta/agterm-remote ~/github.com/agterm-remote
-cd ~/github.com/agterm-remote
-./install.sh                     # symlinks ./agr into ~/.local/bin
-
-agr install <host>               # push agr to the remote + wire Claude Code hooks
-agr doctor  <host>               # verify both sides
+```text
+Mac: agterm ← agr daemon ← per-host receiver ← ssh -N -R
+                                                     ↓
+Remote: agent hook → agr relay → forwarded Unix socket → agterm
 ```
 
-`<host>` is any alias in your `~/.ssh/config`.
+The supported levels are `active`, `blocked`, `completed`, and `idle`. In
+`agr ls`, `IDLE` is the time since the last agent status event, not terminal
+inactivity. There is no `WIN` column: agr sessions are named multiplexer
+sessions, not windows in a shared session.
 
 ## Usage
 
 ```sh
-# In a fresh agterm session on the Mac:
-agr open homelab api             # row becomes "api"; you're in remote tmux "api"
-
-# Later, from any Mac — same command re-attaches the same running agent:
+# Start or attach to a named remote session from an agterm row.
 agr open homelab api
+
+# List owned sessions. The ROW column says bound, stale, or -.
+agr ls homelab
+
+# Open the native picker instead of naming a session.
+agr open homelab
+
+# Stop one or more owned sessions.
+agr kill homelab api infra
+
+# Control the shared bridge explicitly (the daemon must be running).
+agr up homelab
+agr down homelab
+
+# Re-probe the host and install the embedded remote script and hooks.
+agr install homelab --mux zmx
+
+# Print local, remote, and daemon diagnostics.
+agr doctor homelab
 ```
 
-Open several agterm sessions, each `agr open homelab <name>` with a different
-name, to run independent agents with independent colored rows.
+`agr ls` reports the remote command and the elapsed age of its last event.
+The `ROW` value is live only when agterm's tree can be queried; otherwise it
+is shown as `-`.
 
-### Discovering and cleaning up sessions
+## agterm versions
 
-```sh
-agr ls homelab                   # what's running, and whether its row is still open
-agr open homelab                 # no name: pick one from the list, or type a new one
-agr kill homelab api infra       # kill agr-owned sessions you're done with
-```
+agterm 0.26 is recommended. Enable its Live sessions restore mode so pane
+processes survive an agterm relaunch, and use `session context` for the durable
+purpose line that `agr open` sets to `<host> · <name>`. `doctor` reports these
+capabilities and shows `n/a (agterm < 0.26)` where an older agterm cannot
+provide them.
 
-`agr ls` only shows sessions `agr` created (marked via `@agr_target`); a plain
-`tmux new -d -s foo` on the host won't show up, and `agr kill` refuses to touch
-it.
+agterm's own remote sessions are Mac-to-Mac sessions. They do not carry agent
+status from a Linux or BSD multiplexer over SSH, so they do not replace agr's
+remote relay and per-host forwarding.
 
-#### Upgrading from 0.3
+## Requirements
 
-First re-run `agr install <host>` — a 0.3 remote has no `sessions`/`reap`
-and its `attach` doesn't set `@agr_target`, so `agr ls` fails with the
-"run: agr install" hint until the remote binary is upgraded. Then sessions
-created under 0.3 are invisible to `agr ls` until you `agr open` them once
-(`agr doctor <host>` lists them as "legacy targets"). After that, they carry
-`@agr_target` like any other session, and you can
-`rm -r ~/.cache/agterm/targets` on the host.
+Mac side:
 
-### From other clients (iPhone, Windows, another Linux box)
+- macOS, agterm, and `agtermctl` (agterm 0.25 or newer; 0.26 recommended);
+- OpenSSH 6.7 or newer with Unix-domain socket forwarding;
+- `python3` for the native picker and `autossh`/`mosh` are optional
+  conveniences (`brew install autossh mosh`).
 
-The sessions `agr` creates are plain tmux sessions, reachable from **any** SSH
-client by name:
+Remote side:
 
-```sh
-ssh homelab
-tmux ls                 # api, infra, …
-tmux attach -t api      # full agent interaction; colors pause (no agterm here)
-```
+- POSIX `sh`, SSH access, and zmx or tmux (zmx is preferred when installed);
+- one relay with Unix-socket support: OpenBSD `nc -U`, `python3`, or `socat`;
+- `mosh-server` is optional. `agr install` probes the host and persists the
+  selected multiplexer, relay, and zmx socket directory.
 
-Colors/pushes are macOS-agterm-only and resume the next time you
-`agr open homelab api` from a Mac (which rewrites the target row).
-
-### Don't force everything into one tmux session
-
-Per-session colors rely on each agent living in its **own named session** — the
-hook resolves the row from the session's `@agr_target` option, which `agr open`
-sets once per session. A common footgun is a
-shell-rc rule that auto-attaches every SSH login to a single shared session
-(e.g. `main`): agents running as windows in that one session all share that
-session's `@agr_target`, so their colors collide. Prefer a **bare login** (land at a shell; attach by name) so
-`agr open <host> <name>` is the only thing that creates sessions. Example rc
-snippet:
-
-```zsh
-if command -v tmux >/dev/null && [ -n "$SSH_CONNECTION" ] && [ -z "$TMUX" ] && [[ $- == *i* ]]; then
-  tmux ls 2>/dev/null && echo "attach with: tmux attach -t <name>"
-fi
-```
-
-(`agr` itself is unaffected either way — it connects with a non-interactive
-command that bypasses login-shell auto-attach — but a bare login keeps the
-named-session model clean.)
-
-## Claude Code hook mapping
-
-`agr install` writes these into the remote `~/.claude/settings.json`
-(mirroring agterm's local Claude Code integration):
-
-| Event | State |
-|---|---|
-| `UserPromptSubmit` | `active --blink` |
-| `PostToolUse` | `active --blink` |
-| `Notification` (`permission_prompt`) | `blocked` |
-| `Stop` | `completed --auto-reset` |
-
-Other agents (Codex, etc.) can call `agr status <state>` from their own notify
-hooks the same way.
-
----
-
-## Reliability & failure modes
-
-The design separates two lifetimes so only one needs to be robust:
-
-- **Agent survival = tmux.** `new-session -A` means a dropped network never
-  touches the agent; you reconnect and you're back on it.
-- **Status bridge = best-effort, self-healing.** `ServerAlive*` detects dead
-  links, `StreamLocalBindUnlink` reclaims a stale remote socket on reconnect,
-  and autossh (or the fallback loop) re-establishes the tunnel.
-- **Interactive resilience = mosh (optional).** SSH treats one corrupted packet
-  (Wi-Fi glitch, sleep/wake, VPN roam) as fatal — `Bad packet length … Connection
-  corrupted`. If `mosh` is present on both ends, `agr open` uses it instead of
-  SSH, so the view survives drops and just resyncs. `agr open` also resets local
-  terminal modes on exit, so an abrupt drop never dumps escape-code garbage into
-  your shell.
+## Failure modes
 
 | Situation | Behavior |
-|---|---|
-| Bridge down (network drop) | `agr status` no-ops; agent unaffected; tunnel auto-restores; next event re-syncs the color. |
-| Mac app quit, tunnel still up | Relay's 0.3s timeout → no-op. |
-| Switch Macs | Newest `agr up` reclaims the socket; next `agr open` rewrites `@agr_target` to the new Mac's row. |
-| Non-agterm client only | No socket → relay no-ops; plain tmux, no colors, no errors. |
-| State changed while fully offline | Not retro-pushed; you see it on reattach, next event re-syncs. |
-| Mac and remote `agr` versions differ | `agr up` prints a warning and still works. `agr ls`/`agr kill` warn and continue when the remote still speaks the handshake, but fail with "run: agr install <host>" when it predates it (any 0.3 remote). `agr doctor <host>` shows both versions and which side to `agr install`. |
+| --- | --- |
+| Network or bridge drop | Hooks no-op, the agent keeps running, and the daemon reconnects. The last level is pushed again after reconnect. |
+| agterm quits | The relay's short socket timeout drops the event; the next agterm attach rebinds the row. |
+| Switch Macs | The new bridge reclaims the per-host socket and `open` rewrites the session binding. |
+| No agterm client | The remote agent continues normally; status delivery is simply unavailable. |
+| Event while fully offline | It is not queued. The most recent level is restored when the bridge reconnects. |
+| Local and remote versions differ | `ls`, `kill`, and `doctor` report a warning; run `agr install <host>` to upgrade the remote script. |
 
 ## Security
 
-The reverse-forwarded socket is agterm's **full control API** (including
-`session type`, which injects text into terminals). So the trust boundary
-becomes "the remote host is as trusted as a local terminal on your Mac." The
-socket is a Unix file in your home directory (user-only perms), never a TCP
-port, and rides your existing authenticated SSH. For a single-user host you
-reach over LAN/VPN this is an accepted trade-off; don't point `agr` at a host
-you don't fully trust.
+The forwarded Unix socket exposes agterm's control API, including operations
+that can inject text into terminals. Treat the remote host as trusted as a
+local terminal. The socket is user-owned, is not a TCP listener, and travels
+over the authenticated SSH connection; do not use agr with an untrusted host.
+
+## Upgrading from agr 0.4 or 0.3
+
+Version 1.0 is a Go binary. The old root `agr` script and `install.sh` are no
+longer shipped. Remove an old checkout symlink before installing the new
+binary if necessary:
+
+```sh
+if [ -L "$HOME/.local/bin/agr" ]; then rm "$HOME/.local/bin/agr"; fi
+brew install k0nsta/tap/agr
+agr install <host>
+```
+
+`agr install` replaces the remote script and merges the current hooks. Sessions
+created by 0.4 with a non-empty `@agr_target` remain recognized as owned.
+Sessions from 0.3's `~/.cache/agterm/targets` are reported by `doctor` as
+legacy and are not listed until you adopt them with `agr open`; after that,
+the old target files can be removed on the remote host.
 
 ## License
 

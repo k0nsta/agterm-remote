@@ -1,4 +1,4 @@
-.PHONY: build test cover lint shellcheck check-remote check
+.PHONY: build test cover lint shellcheck check-remote check release-snapshot
 
 VERSION ?= dev
 
@@ -22,3 +22,7 @@ check-remote:
 	tests/remote/run.sh
 
 check: test lint shellcheck check-remote
+
+release-snapshot: VERSION := snapshot
+release-snapshot: build
+	go run -ldflags "-X main.version=$(VERSION)" ./cmd/agr --version

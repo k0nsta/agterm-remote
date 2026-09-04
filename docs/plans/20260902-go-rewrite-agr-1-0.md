@@ -734,21 +734,21 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Modify: `README.md`, `Makefile` (`release-snapshot`)
 - Delete: `install.sh`, and the root bash `agr`
 
-- [ ] `.goreleaser.yml`: `darwin/arm64` + `darwin/amd64`, `-ldflags -X main.version={{.Version}}`,
+- [x] `.goreleaser.yml`: `darwin/arm64` + `darwin/amd64`, `-ldflags -X main.version={{.Version}}`,
       archives, Homebrew tap `k0nsta/homebrew-tap` formula `agr`; `release.yml` on tag
-- [ ] **delete the root bash `agr` and `install.sh` in this task** — 1.0 replaces both, and
+- [x] **delete the root bash `agr` and `install.sh` in this task** — 1.0 replaces both, and
       leaving a 660-line bash `agr` beside `internal/remotescript/agr.sh` would ship two
       tools with one name (users who ran `install.sh` also keep a `~/.local/bin/agr` symlink
       pointing at it; the README upgrade note tells them to remove it)
-- [ ] `README.md` rewrite, concise and example-first: problem, how it works (daemon,
+- [x] `README.md` rewrite, concise and example-first: problem, how it works (daemon,
       forwarded socket per host, levels, zmx/tmux), install (brew / `go install`), usage
       (`open`, `ls`, picker, `kill`, `doctor`), **a note that `IDLE` is now time since the
       last agent event, not terminal inactivity, and that there is no `WIN` column**,
       agterm 0.26 notes (Live sessions recommended, `session context`, why agterm's own
       remote sessions don't replace agr), requirements per side, the failure-mode table,
       security, upgrading from 0.4/0.3
-- [ ] `make release-snapshot` builds; `go run ./cmd/agr --version` shows the snapshot version
-- [ ] verify: README code blocks match `agr --help`; `make check` green
+- [x] `make release-snapshot` builds; `go run ./cmd/agr --version` shows the snapshot version
+- [x] verify: README code blocks match `agr --help`; `make check` green
 
 ### Task 19: Verify acceptance criteria
 
