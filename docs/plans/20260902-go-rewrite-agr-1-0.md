@@ -280,28 +280,28 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/paths/paths.go`, `internal/paths/paths_test.go`
 - Create: `internal/bindings/store.go`, `internal/bindings/store_test.go`
 
-- [ ] `paths.Dirs{Cache string}` — `New()` honours `XDG_CACHE_HOME` else `~/.cache`, then
+- [x] `paths.Dirs{Cache string}` — `New()` honours `XDG_CACHE_HOME` else `~/.cache`, then
       `/agr`; accessors `Sock()`, `Lock()`, `Pid()`, `Log()`, `Bindings()`,
       `Recv(hostKey)`, `BridgeLog(hostKey)`, `HostInfo(hostKey)`. Every consumer takes a
       `Dirs`, so tests point at a temp dir.
-- [ ] `TestDirs(t *testing.T) Dirs` — **in `paths.go`, NOT `paths_test.go`**, or the tasks
+- [x] `TestDirs(t *testing.T) Dirs` — **in `paths.go`, NOT `paths_test.go`**, or the tasks
       told to use it cannot import it (the same mistake the fake-agterm helper had) —
       (`t.Helper()`, `t.Cleanup` removal) rooted at
       `os.MkdirTemp("/tmp", …)`, **not** `t.TempDir()` — every socket-creating test in Tasks
       7/9/10/15 must use it, since a `t.TempDir()`-based `recv-<hostKey>.sock` measures 112
       bytes against macOS's 104-byte `sun_path` limit and fails to bind (verified)
-- [ ] `Binding{Row, PaneID, Pane, Host, Name, Mux string; BoundAt time.Time}` — `Pane` (the
+- [x] `Binding{Row, PaneID, Pane, Host, Name, Mux string; BoundAt time.Time}` — `Pane` (the
       role, from `$AGTERM_PANE`) is stored beside `PaneID` because 0.26's refusal names a
       role and `--pane-id` falls back to `--pane`
-- [ ] `Store{dirs}` — **`Save` takes a flock on `Bindings()` across the read-modify-write**:
+- [x] `Store{dirs}` — **`Save` takes a flock on `Bindings()` across the read-modify-write**:
       `open` writes from the CLI process while the daemon writes on close events and resync,
       so an unlocked tmp+rename silently loses one. `Load`, `Save` (flock, tmp + rename), `Bind` (replaces any binding for the
       same Row **and** any for the same Host+Name), `UnbindRow`, `ByHostName`, `ByRow`,
       `ForHost`, `Dangling(host, live []string)`, `Reconcile(liveRows []string) (removed int, err error)`
-- [ ] write tests: round-trip; replace-on-rebind; missing file → empty; corrupt file → error
+- [x] write tests: round-trip; replace-on-rebind; missing file → empty; corrupt file → error
       not panic; `Dangling` and `Reconcile` set arithmetic; **two concurrent `Save`s both
       survive (flock)**; `Dirs` honours `XDG_CACHE_HOME`
-- [ ] run `make check` — must pass before Task 6
+- [x] run `make check` — must pass before Task 6
 
 ### Task 6: `internal/remote/sessions.go` — the `Session` DTO and TSV parser
 
