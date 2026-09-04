@@ -654,22 +654,22 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/cli/dependency.go`, `internal/cli/mocks/dependency_mock.go`
 - Create: `internal/cli/*_test.go`, `internal/cli/testdata/ls_golden.txt`
 
-- [ ] `dependency.go` — narrow, consumer-defined (1–3 methods each): `Picker`
+- [x] `dependency.go` — narrow, consumer-defined (1–3 methods each): `Picker`
       `Pick(ctx,[]agterm.PickItem,string) (agterm.PickResult,error)`; `Rows` `Tree(ctx) ([]string,error)`;
       `Labeler` `Rename(ctx,row,name) error; Context(ctx,row,text) error`; `Sessions`
       `Sessions(ctx,host) ([]remote.Session,error); Reap(ctx,host,name) error`
-- [ ] `daemonclient.go`: connect to `dirs.Sock()`; if absent, start `agr daemon` detached
+- [x] `daemonclient.go`: connect to `dirs.Sock()`; if absent, start `agr daemon` detached
       (`Setsid`) and wait ≤3 s for the socket; `Up`, `Down`, `Status`, `ReloadBindings`
-- [ ] `ls.go`: `Sessions` + bindings + `Tree` → table `NAME ATT IDLE STATE CMD ROW`
+- [x] `ls.go`: `Sessions` + bindings + `Tree` → table `NAME ATT IDLE STATE CMD ROW`
       (`ROW` = bound/stale/-, `-` when the tree is unavailable); footer
       `rows without a session: …` from `Dangling`; `no agr sessions on <host>` when empty
-- [ ] `kill.go`: ≥1 name, each `token.Valid`, `Reap` each; non-zero if any failed
-- [ ] `pick.go`: `ItemsFor(sessions, bindings, tree)` → `{id: name, label: name, subtitle: "cmd · state · idle"}`,
+- [x] `kill.go`: ≥1 name, each `token.Valid`, `Reap` each; non-zero if any failed
+- [x] `pick.go`: `ItemsFor(sessions, bindings, tree)` → `{id: name, label: name, subtitle: "cmd · state · idle"}`,
       mirroring `zmx tree`'s shape
-- [ ] write tests: `ls` render golden incl. footer and tree-unavailable; `ItemsFor` subtitle
+- [x] write tests: `ls` render golden incl. footer and tree-unavailable; `ItemsFor` subtitle
       golden; `kill` partial failure → non-zero, invalid name reported not sent;
       `daemonclient` spawns once and gives up cleanly if the socket never appears
-- [ ] run `make check` — must pass before Task 16
+- [x] run `make check` — must pass before Task 16
 
 ### Task 16: CLI — `open`, `up`/`down`, `install`, `daemon`, and `cmd/agr` wiring
 
