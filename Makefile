@@ -16,9 +16,9 @@ lint:
 	golangci-lint run ./...
 
 shellcheck:
-	[ -f internal/remotescript/agr.sh ] || { echo "skip (not yet)"; exit 0; }; shellcheck -s sh internal/remotescript/agr.sh
+	shellcheck -s sh internal/remotescript/agr.sh
 
 check-remote:
-	[ -f tests/remote/run.sh ] || { echo "skip (not yet)"; exit 0; }; tests/remote/run.sh
+	tests/remote/run.sh
 
 check: test lint shellcheck check-remote

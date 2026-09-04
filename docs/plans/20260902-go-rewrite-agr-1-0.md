@@ -472,11 +472,11 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `tests/remote/run.sh`, `tests/remote/lib.sh`, `tests/remote/tmux/*.sh`, `tests/remote/shims/nc`
 - Modify: `Makefile` (`shellcheck`, `check-remote` now real)
 
-- [ ] `embed.go`: package `remotescript` with `import _ "embed"` (required for a
+- [x] `embed.go`: package `remotescript` with `import _ "embed"` (required for a
       `string`/`[]byte` target) and `//go:embed agr.sh`; `Script(version string) []byte`
       substitutes `@VERSION@`. It lives **under `internal/`** so it is not public API and the
       package name matches its directory.
-- [ ] `agr.sh`: `#!/bin/sh`, `set -eu`; `AGR_VERSION="@VERSION@"`; source
+- [x] `agr.sh`: `#!/bin/sh`, `set -eu`; `AGR_VERSION="@VERSION@"`; source
       `~/.config/agr/env` when present (`AGR_MUX`, `AGR_SOCK`, `ZMX_DIR`, `AGR_RELAY` — the
       file uses `export` so values reach the `zmx`/`tmux` children), else defaults
       `AGR_MUX=tmux`, `AGR_SOCK=$HOME/.cache/agr/bridge.sock`, relay auto-detected
@@ -485,7 +485,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `$AGR_MUX`. **The `agr\t$AGR_VERSION` header is printed once by the dispatcher** for
       every data verb (`sessions`, `reap`), never inside a backend, so both backends are
       guaranteed to satisfy the Mac's handshake.
-- [ ] tmux backend: `attach` = `has-session -t "=$n" || new-session -d -s "$n"`;
+- [x] tmux backend: `attach` = `has-session -t "=$n" || new-session -d -s "$n"`;
       `set-option -t "=$n:" @agr 1`; `exec tmux attach -t "=$n"`. `sessions` = header
       `agr\t$AGR_VERSION` then per owned session (`@agr` = 1 **or** `@agr_target` non-empty)
       `name\tattached\tidle_secs\tcmds\tstate`, where `state`/`idle_secs` come from
@@ -496,7 +496,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `Data()` requires the handshake), then refuses unowned, `kill-session -t "=$n"`,
       `killed <n>`. Ownership is one `owned()` helper used by `sessions`, `reap` and
       `status` alike, so 0.4's `@agr_target` counts everywhere or nowhere.
-- [ ] tmux `status`: `[ -n "${TMUX_PANE:-}" ] || exit 0`; **resolve the session name, and
+- [x] tmux `status`: `[ -n "${TMUX_PANE:-}" ] || exit 0`; **resolve the session name, and
       guard it twice** —
       `n=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || exit 0`
       then `[ -n "$n" ] || exit 0`. Both guards are load-bearing and verified on tmux 3.7b:
@@ -507,29 +507,29 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `set-option -t "=:"` landed on `api`). Then ownership via
       `show-option -t "=$n:" -qv @agr`/`@agr_target` → exit 0 if empty;
       `set-option -t "=$n:" @agr_state "$state@$(date +%s)"`; `relay`; `exit 0` always
-- [ ] `relay`: `valid_token "$n" || exit 0` first — `$n` comes from the multiplexer, not from
+- [x] `relay`: `valid_token "$n" || exit 0` first — `$n` comes from the multiplexer, not from
       agr, so a legacy or hand-adopted session name can hold a `"` or `\` that would break
       the hand-built JSON; then
       `{"cmd":"session-status","session":"<name>","state":"<state>","args":[…]}`
       built with `printf`; sent via `$AGR_RELAY`
       (`nc -U -w1 "$AGR_SOCK"` | `python3` one-liner | `socat - UNIX-CONNECT:"$AGR_SOCK"`);
       any failure → exit 0
-- [ ] `tests/remote/lib.sh`: shim setup (`REAL_TMUX` resolved **before** the PATH change;
+- [x] `tests/remote/lib.sh`: shim setup (`REAL_TMUX` resolved **before** the PATH change;
       `tmux` shim injecting `-L agr-test`; `nc` shim appending stdin to `$NC_CAPTURE`);
       `assert_eq`/`assert_contains`; `run.sh` runs every `tests/remote/*/*.sh`
-- [ ] `list-sessions` is `2>/dev/null || :`-guarded: with no tmux server it exits 1, which
+- [x] `list-sessions` is `2>/dev/null || :`-guarded: with no tmux server it exits 1, which
       under `set -eu` would abort *after* the header and surface as a remote failure instead
       of the "no agr sessions" path Task 15 promises
-- [ ] write tests for `Script`: `@VERSION@` substituted, the shebang and `set -eu` survive,
+- [x] write tests for `Script`: `@VERSION@` substituted, the shebang and `set -eu` survive,
       and the output is byte-identical to `agr.sh` apart from the version
-- [ ] write tmux checks: **no tmux server → header only, exit 0**; attach marks `@agr`; sessions lists owned only, treats `@agr_target`
+- [x] write tmux checks: **no tmux server → header only, exit 0**; attach marks `@agr`; sessions lists owned only, treats `@agr_target`
       as owned, emits exactly 5 fields after the header; reap emits the header, refuses
       unowned, kills the exact name (`api` vs `api2`); status outside tmux exits 0 silently;
       status inside an owned session writes `@agr_state` **and the captured JSON line carries
       the right `session` name**; `--blink --auto-reset` → `args`; unowned → no capture;
       **stale `TMUX_PANE` (`%99`) → exit 0, no capture, and a neighbouring session's
       `@agr_state` unchanged**; **dead tmux server → exit 0, no capture**
-- [ ] `shellcheck -s sh` clean; `make check` — must pass before Task 12
+- [x] `shellcheck -s sh` clean; `make check` — must pass before Task 12
 
 ### Task 12: `agr.sh` — zmx backend and fake-zmx harness
 

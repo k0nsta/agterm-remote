@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+exec "${REAL_TMUX:?REAL_TMUX is not set}" -L agr-test "$@"
