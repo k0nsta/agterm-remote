@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/konstantinnaumov/github.com/machine-setup/claude/skills/spawn-agent/**)",
+      "Bash(python3 -)",
+      "Bash(bash -n scripts/spawn-agent.sh)"
+    ]
+  }
+}
