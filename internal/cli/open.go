@@ -16,18 +16,6 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/token"
 )
 
-// OpenerRemote contains the remote runner behavior needed by open.
-type OpenerRemote interface {
-	Sessions
-	AgrPath(host string) string
-}
-
-// OpenBridge contains the daemon operations needed by open.
-type OpenBridge interface {
-	Up(ctx context.Context, host string) error
-	ReloadBindings(ctx context.Context) error
-}
-
 // HostInfoReader reads locally cached remote capabilities.
 type HostInfoReader func(host string) (remote.HostInfo, error)
 

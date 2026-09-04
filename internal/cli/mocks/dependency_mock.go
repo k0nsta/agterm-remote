@@ -396,3 +396,171 @@ func (mr *MockDaemonStatusMockRecorder) Status(ctx, host interface{}) *gomock.Ca
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Status", reflect.TypeOf((*MockDaemonStatus)(nil).Status), ctx, host)
 }
+
+// MockOpenerRemote is a mock of OpenerRemote interface.
+type MockOpenerRemote struct {
+	ctrl     *gomock.Controller
+	recorder *MockOpenerRemoteMockRecorder
+}
+
+// MockOpenerRemoteMockRecorder is the mock recorder for MockOpenerRemote.
+type MockOpenerRemoteMockRecorder struct {
+	mock *MockOpenerRemote
+}
+
+// NewMockOpenerRemote creates a new mock instance.
+func NewMockOpenerRemote(ctrl *gomock.Controller) *MockOpenerRemote {
+	mock := &MockOpenerRemote{ctrl: ctrl}
+	mock.recorder = &MockOpenerRemoteMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockOpenerRemote) EXPECT() *MockOpenerRemoteMockRecorder {
+	return m.recorder
+}
+
+// AgrPath mocks base method.
+func (m *MockOpenerRemote) AgrPath(host string) string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AgrPath", host)
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// AgrPath indicates an expected call of AgrPath.
+func (mr *MockOpenerRemoteMockRecorder) AgrPath(host interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AgrPath", reflect.TypeOf((*MockOpenerRemote)(nil).AgrPath), host)
+}
+
+// Reap mocks base method.
+func (m *MockOpenerRemote) Reap(ctx context.Context, host, name string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Reap", ctx, host, name)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Reap indicates an expected call of Reap.
+func (mr *MockOpenerRemoteMockRecorder) Reap(ctx, host, name interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reap", reflect.TypeOf((*MockOpenerRemote)(nil).Reap), ctx, host, name)
+}
+
+// Sessions mocks base method.
+func (m *MockOpenerRemote) Sessions(ctx context.Context, host string) ([]remote.Session, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Sessions", ctx, host)
+	ret0, _ := ret[0].([]remote.Session)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Sessions indicates an expected call of Sessions.
+func (mr *MockOpenerRemoteMockRecorder) Sessions(ctx, host interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Sessions", reflect.TypeOf((*MockOpenerRemote)(nil).Sessions), ctx, host)
+}
+
+// MockOpenBridge is a mock of OpenBridge interface.
+type MockOpenBridge struct {
+	ctrl     *gomock.Controller
+	recorder *MockOpenBridgeMockRecorder
+}
+
+// MockOpenBridgeMockRecorder is the mock recorder for MockOpenBridge.
+type MockOpenBridgeMockRecorder struct {
+	mock *MockOpenBridge
+}
+
+// NewMockOpenBridge creates a new mock instance.
+func NewMockOpenBridge(ctrl *gomock.Controller) *MockOpenBridge {
+	mock := &MockOpenBridge{ctrl: ctrl}
+	mock.recorder = &MockOpenBridgeMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockOpenBridge) EXPECT() *MockOpenBridgeMockRecorder {
+	return m.recorder
+}
+
+// ReloadBindings mocks base method.
+func (m *MockOpenBridge) ReloadBindings(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReloadBindings", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ReloadBindings indicates an expected call of ReloadBindings.
+func (mr *MockOpenBridgeMockRecorder) ReloadBindings(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReloadBindings", reflect.TypeOf((*MockOpenBridge)(nil).ReloadBindings), ctx)
+}
+
+// Up mocks base method.
+func (m *MockOpenBridge) Up(ctx context.Context, host string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Up", ctx, host)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Up indicates an expected call of Up.
+func (mr *MockOpenBridgeMockRecorder) Up(ctx, host interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Up", reflect.TypeOf((*MockOpenBridge)(nil).Up), ctx, host)
+}
+
+// MockBridge is a mock of Bridge interface.
+type MockBridge struct {
+	ctrl     *gomock.Controller
+	recorder *MockBridgeMockRecorder
+}
+
+// MockBridgeMockRecorder is the mock recorder for MockBridge.
+type MockBridgeMockRecorder struct {
+	mock *MockBridge
+}
+
+// NewMockBridge creates a new mock instance.
+func NewMockBridge(ctrl *gomock.Controller) *MockBridge {
+	mock := &MockBridge{ctrl: ctrl}
+	mock.recorder = &MockBridgeMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockBridge) EXPECT() *MockBridgeMockRecorder {
+	return m.recorder
+}
+
+// Down mocks base method.
+func (m *MockBridge) Down(ctx context.Context, host string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Down", ctx, host)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Down indicates an expected call of Down.
+func (mr *MockBridgeMockRecorder) Down(ctx, host interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Down", reflect.TypeOf((*MockBridge)(nil).Down), ctx, host)
+}
+
+// Up mocks base method.
+func (m *MockBridge) Up(ctx context.Context, host string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Up", ctx, host)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Up indicates an expected call of Up.
+func (mr *MockBridgeMockRecorder) Up(ctx, host interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Up", reflect.TypeOf((*MockBridge)(nil).Up), ctx, host)
+}

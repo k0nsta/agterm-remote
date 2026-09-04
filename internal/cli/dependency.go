@@ -59,3 +59,21 @@ type Prober interface {
 type DaemonStatus interface {
 	Status(ctx context.Context, host string) ([]daemon.HostStatus, error)
 }
+
+// OpenerRemote contains the remote runner behavior needed by open.
+type OpenerRemote interface {
+	Sessions
+	AgrPath(host string) string
+}
+
+// OpenBridge contains the daemon operations needed by open.
+type OpenBridge interface {
+	Up(ctx context.Context, host string) error
+	ReloadBindings(ctx context.Context) error
+}
+
+// Bridge controls the daemon's per-host reverse bridge.
+type Bridge interface {
+	Up(ctx context.Context, host string) error
+	Down(ctx context.Context, host string) error
+}

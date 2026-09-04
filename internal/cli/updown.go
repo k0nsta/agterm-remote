@@ -8,12 +8,6 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/token"
 )
 
-// Bridge controls the daemon's per-host reverse bridge.
-type Bridge interface {
-	Up(ctx context.Context, host string) error
-	Down(ctx context.Context, host string) error
-}
-
 // RunUp starts the bridge for one host.
 func RunUp(ctx context.Context, host string, bridge Bridge, errw io.Writer) int {
 	return runBridge(ctx, "up", host, bridge, errw)
