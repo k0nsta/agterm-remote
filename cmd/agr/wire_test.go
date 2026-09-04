@@ -130,7 +130,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 				t.Fatalf("daemon calls = %d, want one", daemon.calls)
 			}
 		}},
-		{name: "doctor", argv: []string{"doctor"}, want: 1, check: func(t *testing.T) {}},
+		{name: "doctor", argv: []string{"doctor", "host"}, want: 1, check: func(t *testing.T) {}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

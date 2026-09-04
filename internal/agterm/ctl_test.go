@@ -55,6 +55,55 @@ func TestCtlContextUnknownSubcommandIsBestEffort(t *testing.T) {
 	}
 }
 
+func TestCtlRestoreModeUsesJSONOutput(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "restore", "mode", "--json", "--socket", testCtlSock).
+		Return([]byte(`{"result":{"mode":"live"}}`), 0, nil)
+	mode, err := ctl.RestoreMode(context.Background())
+	if err != nil {
+		t.Fatalf("RestoreMode() error = %v", err)
+	}
+	if mode != "live" {
+		t.Fatalf("RestoreMode() = %q, want live", mode)
+	}
+}
+
+func TestCtlRestoreModeReportsUnsupported(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "restore", "mode", "--json", "--socket", testCtlSock).
+		Return(nil, 1, errors.New("agtermctl: unknown subcommand restore"))
+	_, err := ctl.RestoreMode(context.Background())
+	if !errors.Is(err, agterm.ErrUnsupported) {
+		t.Fatalf("RestoreMode() error = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestCtlSupportsContextUsesHelpAndReportsUnsupported(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	runner := mocks.NewMockRunner(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, runner, nil, nil)
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "session", "context", "--help", "--socket", testCtlSock).
+		Return(nil)
+	supported, err := ctl.SupportsContext(context.Background())
+	if err != nil || !supported {
+		t.Fatalf("SupportsContext() = %v, %v, want true, nil", supported, err)
+	}
+
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "session", "context", "--help", "--socket", testCtlSock).
+		Return(errors.New("agtermctl: unknown subcommand context"))
+	supported, err = ctl.SupportsContext(context.Background())
+	if supported || !errors.Is(err, agterm.ErrUnsupported) {
+		t.Fatalf("SupportsContext() = %v, %v, want false, ErrUnsupported", supported, err)
+	}
+}
+
 func TestCtlTreeUsesOutputterAndDecodesRows(t *testing.T) {
 	t.Helper()
 	ctrl := gomock.NewController(t)

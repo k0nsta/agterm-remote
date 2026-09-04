@@ -714,18 +714,18 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
   `SupportsContext`), `internal/remote/probe.go` (+`Probe(ctx,host) (ProbeResult, error)`),
   `internal/cli/dependency.go` + `internal/cli/mocks/dependency_mock.go` (regenerate)
 
-- [ ] local block: agr version, agterm socket present, app version via handshake, `agtermctl`
+- [x] local block: agr version, agterm socket present, app version via handshake, `agtermctl`
       path + version, restore mode via `agtermctl restore mode --json` (recommend `live`;
       **`n/a (agterm < 0.26)`** when the subcommand is unknown), `session context` support
       reported the same way, mosh
-- [ ] remote block from `ParseProbe`: agr version vs local (hint on mismatch/missing), mux +
+- [x] remote block from `ParseProbe`: agr version vs local (hint on mismatch/missing), mux +
       version (+ `--labels` support and the pinned `ZMX_DIR` for zmx), relay tool, bridge
       socket present, legacy counts (0.3 `targets`, 0.4 `@agr_target`)
-- [ ] daemon block from control `status`: per host state/since/attempts/last event, or
+- [x] daemon block from control `status`: per host state/since/attempts/last event, or
       "not running"
-- [ ] write tests: rendering from fixed probe/status structs (ok, mismatch, missing, daemon
+- [x] write tests: rendering from fixed probe/status structs (ok, mismatch, missing, daemon
       down, restore mode not live, restore mode unsupported); no network in tests
-- [ ] run `make check` — must pass before Task 18
+- [x] run `make check` — must pass before Task 18
 
 ### Task 18: Release config, README, and retiring the bash tool
 

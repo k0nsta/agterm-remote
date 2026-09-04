@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/cli"
 )
 
@@ -26,7 +27,7 @@ var commandHandlers = map[string]commandHandler{
 	"down":    runDown,
 	"install": runInstall,
 	"daemon":  runDaemon,
-	"doctor":  runDoctorStub,
+	"doctor":  runDoctor,
 }
 
 func runWithApplication(args []string, out, errw io.Writer, app *application) int {
@@ -124,9 +125,23 @@ func runDaemon(ctx context.Context, app *application, args []string, _, errw io.
 	return 0
 }
 
-func runDoctorStub(_ context.Context, _ *application, _ []string, _ io.Writer, errw io.Writer) int {
-	_, _ = fmt.Fprintln(errw, "not implemented yet")
-	return 1
+func runDoctor(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
+	if len(args) != 1 {
+		_, _ = fmt.Fprintln(errw, "usage: agr doctor <host>")
+		return 2
+	}
+	if app == nil {
+		_, _ = fmt.Fprintln(errw, "agr: doctor is unavailable")
+		return 1
+	}
+	deps := app.doctor
+	if deps.LocalVersion == "" {
+		deps.LocalVersion = version
+	}
+	if deps.SocketPath == "" {
+		deps.SocketPath = agterm.SocketPath()
+	}
+	return cli.RunDoctor(ctx, args[0], deps, out, errw)
 }
 
 func optionalArg(args []string, index int) string {

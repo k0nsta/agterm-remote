@@ -64,11 +64,90 @@ func (c *Ctl) Rename(ctx context.Context, row, name string) error {
 // versions do not have this subcommand, so that specific failure is harmless.
 func (c *Ctl) Context(ctx context.Context, row, text string) error {
 	err := c.run.Run(ctx, c.path, "session", "context", text, "--target", row, "--socket", c.sock)
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unknown subcommand") {
+	if err != nil && unsupportedCommand(err) {
 		log.Printf("warning: agterm session context unavailable: %v", err)
 		return nil
 	}
 	return err
+}
+
+// RestoreMode reads agterm's restore mode. The command was added in agterm
+// 0.26; older versions report an unknown subcommand and are represented by
+// ErrUnsupported for doctor.
+func (c *Ctl) RestoreMode(ctx context.Context) (string, error) {
+	if c == nil || c.out == nil {
+		return "", errors.New("agterm restore-mode client is unavailable")
+	}
+	out, exit, err := c.out.Output(ctx, nil, c.path, "restore", "mode", "--json", "--socket", c.sock)
+	if err != nil || exit != 0 {
+		if unsupportedCommand(err) {
+			return "", ErrUnsupported
+		}
+		if err == nil {
+			err = fmt.Errorf("command exited with status %d", exit)
+		}
+		return "", commandError("restore mode", out, exit, err)
+	}
+	mode, err := decodeRestoreMode(out)
+	if err != nil {
+		return "", err
+	}
+	return mode, nil
+}
+
+// SupportsContext checks for the agterm 0.26 session context command without
+// mutating a row. It uses --help so no target or context text is required.
+func (c *Ctl) SupportsContext(ctx context.Context) (bool, error) {
+	if c == nil || c.run == nil {
+		return false, errors.New("agterm context probe is unavailable")
+	}
+	err := c.run.Run(ctx, c.path, "session", "context", "--help", "--socket", c.sock)
+	if err == nil {
+		return true, nil
+	}
+	if unsupportedCommand(err) {
+		return false, ErrUnsupported
+	}
+	return false, err
+}
+
+func unsupportedCommand(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unknown subcommand") ||
+		strings.Contains(message, "unknown command")
+}
+
+func decodeRestoreMode(out []byte) (string, error) {
+	var value any
+	if err := json.Unmarshal(bytes.TrimSpace(out), &value); err != nil {
+		return "", fmt.Errorf("decode agterm restore mode: %w", err)
+	}
+	if mode := restoreModeValue(value); mode != "" {
+		return mode, nil
+	}
+	return "", errors.New("decode agterm restore mode: missing mode")
+}
+
+func restoreModeValue(value any) string {
+	if mode, ok := value.(string); ok {
+		return mode
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{"mode", "restoreMode"} {
+		if mode, ok := object[key].(string); ok {
+			return mode
+		}
+	}
+	if result, ok := object["result"]; ok {
+		return restoreModeValue(result)
+	}
+	return ""
 }
 
 // Tree returns the ids of all live agterm rows.

@@ -35,6 +35,9 @@ var (
 	ErrRefused = errors.New("blocked status owned by pane")
 	// ErrUnknownTarget identifies a row that agterm no longer knows.
 	ErrUnknownTarget error = errorText("no such session:")
+	// ErrUnsupported identifies a command that is not available in this agterm
+	// version. Doctor renders this as n/a rather than as a broken check.
+	ErrUnsupported = errors.New("agterm command unsupported")
 )
 
 type errorText string

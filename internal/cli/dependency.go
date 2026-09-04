@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
+	"github.com/k0nsta/agterm-remote/internal/daemon"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -35,4 +36,26 @@ type Sessions interface {
 // Installer installs the embedded remote agr script and its hooks.
 type Installer interface {
 	Install(ctx context.Context, host, mux string) error
+}
+
+// Versioner reads the running agterm app version through its control socket.
+type Versioner interface {
+	Version(ctx context.Context) (string, error)
+}
+
+// AgtermInspector probes agterm capabilities that are newer than the base
+// status protocol.
+type AgtermInspector interface {
+	RestoreMode(ctx context.Context) (string, error)
+	SupportsContext(ctx context.Context) (bool, error)
+}
+
+// Prober gathers the fixed remote capability report used by doctor.
+type Prober interface {
+	Probe(ctx context.Context, host string) (remote.ProbeResult, error)
+}
+
+// DaemonStatus reads the daemon's per-host bridge state.
+type DaemonStatus interface {
+	Status(ctx context.Context, host string) ([]daemon.HostStatus, error)
 }

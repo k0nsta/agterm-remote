@@ -30,6 +30,7 @@ type application struct {
 	openRemote cli.OpenerRemote
 	hostInfo   cli.HostInfoReader
 	moshPath   func() string
+	doctor     cli.DoctorDependencies
 }
 
 type applicationBridge interface {
@@ -60,6 +61,10 @@ func newApplication() *application {
 		dirs: dirs, control: control, status: status, remote: remoteRunner,
 		tty: &remote.ExecTTY{}, store: store, bridge: client,
 		installer: remoteRunner, openRemote: remoteRunner,
+		doctor: cli.DoctorDependencies{
+			LocalVersion: version, SocketPath: sockPath, AppVersion: status,
+			Agterm: control, CtlPath: ctlPath, Remote: remoteRunner, Daemon: client,
+		},
 		hostInfo: func(host string) (remote.HostInfo, error) {
 			return remote.LoadHostInfo(dirs, host)
 		},
@@ -90,6 +95,10 @@ var (
 	_ cli.Labeler                             = (*agterm.Ctl)(nil)
 	_ cli.Sessions                            = (*remote.Runner)(nil)
 	_ cli.Installer                           = (*remote.Runner)(nil)
+	_ cli.Versioner                           = (*agterm.Client)(nil)
+	_ cli.AgtermInspector                     = (*agterm.Ctl)(nil)
+	_ cli.Prober                              = (*remote.Runner)(nil)
+	_ cli.DaemonStatus                        = (*cli.DaemonClient)(nil)
 	_ cli.Bridge                              = (*cli.DaemonClient)(nil)
 	_ daemon.Supervisors                      = bridgeFactory{}
 	_ daemon.Supervisor                       = (*bridge.Supervisor)(nil)
