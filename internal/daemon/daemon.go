@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,9 +14,11 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
+	"github.com/k0nsta/agterm-remote/internal/bridge"
 	"github.com/k0nsta/agterm-remote/internal/paths"
 	"github.com/k0nsta/agterm-remote/internal/receiver"
 	"github.com/k0nsta/agterm-remote/internal/token"
@@ -56,6 +59,13 @@ type Daemon struct {
 	children sync.WaitGroup
 	hosts    map[string]*hostRuntime
 	ensured  map[string]bool
+	ensureMu sync.Mutex
+	control  net.Listener
+
+	recoveryRunning bool
+	recoveryLogged  bool
+	recoveryDone    chan struct{}
+	eventReset      chan struct{}
 }
 
 type hostRuntime struct {
@@ -65,6 +75,9 @@ type hostRuntime struct {
 	listener   *receiver.Listener
 	cancel     context.CancelFunc
 	supervisor Supervisor
+	state      string
+	since      time.Time
+	attempts   int
 }
 
 type versioner interface {
@@ -97,6 +110,7 @@ func New(config Config) *Daemon {
 		logger:      config.Logger,
 		hosts:       make(map[string]*hostRuntime),
 		ensured:     make(map[string]bool),
+		eventReset:  make(chan struct{}),
 	}
 }
 
@@ -196,6 +210,13 @@ func (d *Daemon) Close() error {
 			_ = os.Remove(host.localSock)
 		}
 	}
+	d.mu.Lock()
+	control := d.control
+	d.control = nil
+	d.mu.Unlock()
+	if control != nil {
+		_ = control.Close()
+	}
 	d.children.Wait()
 	for _, host := range hosts {
 		_ = os.Remove(host.localSock)
@@ -243,6 +264,9 @@ func (d *Daemon) Status(ctx context.Context, target string, args agterm.StatusAr
 		return errors.New("daemon status sink is unavailable")
 	}
 	err := d.sink.Status(ctx, target, args)
+	if isConnectionRefused(err) {
+		d.beginAgtermRecovery()
+	}
 	if errors.Is(err, agterm.ErrUnknownTarget) {
 		if unbindErr := d.store.UnbindRow(target); unbindErr != nil {
 			d.logf("warning: unbind unknown agterm row %q: %v", target, unbindErr)
@@ -296,6 +320,9 @@ func (d *Daemon) initialize(ctx context.Context) error {
 	ctl := agterm.CtlPath()
 	d.logf("agterm control socket=%q agtermctl=%q", sock, ctl)
 	d.handshake(ctx)
+	if err := d.startControl(ctx); err != nil {
+		return err
+	}
 
 	bound, err := d.store.Load()
 	if err != nil {
@@ -320,24 +347,26 @@ func (d *Daemon) initialize(ctx context.Context) error {
 			return err
 		}
 	}
+	d.startEvents(ctx)
 	return nil
 }
 
-func (d *Daemon) handshake(ctx context.Context) {
+func (d *Daemon) handshake(ctx context.Context) bool {
 	v, ok := d.sink.(versioner)
 	if !ok {
-		return
+		return true
 	}
 	version, err := v.Version(ctx)
 	if err != nil {
 		d.logf("warning: agterm version handshake: %v", err)
-		return
+		return false
 	}
 	if olderVersion(version, agterm.MinTestedVersion) {
 		d.logf("warning: agterm %s is older than tested minimum %s", version, agterm.MinTestedVersion)
-		return
+		return true
 	}
 	d.logf("agterm version: %s", version)
+	return true
 }
 
 func olderVersion(got, minimum string) bool {
@@ -376,7 +405,14 @@ func parseVersion(value string) ([3]int, bool) {
 }
 
 func (d *Daemon) startHost(ctx context.Context, host string) error {
+	if !token.ValidHost(host) {
+		return fmt.Errorf("invalid host %q", host)
+	}
 	d.mu.Lock()
+	if !d.started || d.closing {
+		d.mu.Unlock()
+		return errors.New("daemon is stopping")
+	}
 	if _, exists := d.hosts[host]; exists {
 		d.mu.Unlock()
 		return nil
@@ -389,12 +425,16 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		return errors.New("supervisor factory is unavailable")
 	}
 	hostKey := token.FileKey(host)
-	if !d.ensured[host] {
+	d.ensureMu.Lock()
+	ensured := d.ensured[host]
+	if !ensured {
 		if err := d.remote.EnsureDirs(ctx, host); err != nil {
+			d.ensureMu.Unlock()
 			return fmt.Errorf("ensure remote agr directories for %s: %w", host, err)
 		}
 		d.ensured[host] = true
 	}
+	d.ensureMu.Unlock()
 	home, err := d.remote.Home(ctx, host)
 	if err != nil {
 		return fmt.Errorf("resolve remote home for %s: %w", host, err)
@@ -415,9 +455,20 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 	}
 	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness)
 	hostCtx, cancel := newHostContext(ctx)
-	runtime := &hostRuntime{host: host, hostKey: hostKey, localSock: localSock, listener: listener, cancel: cancel, supervisor: supervisor}
+	stateSource, hasStateSource := supervisor.(interface{ Changes() <-chan bridge.State })
+	runtime := &hostRuntime{
+		host: host, hostKey: hostKey, localSock: localSock,
+		listener: listener, cancel: cancel, supervisor: supervisor,
+		state: "down", since: time.Now().UTC(), attempts: 1,
+	}
 
 	d.mu.Lock()
+	if !d.started || d.closing {
+		d.mu.Unlock()
+		cancel()
+		supervisor.Stop()
+		return errors.New("daemon is stopping")
+	}
 	if _, exists := d.hosts[host]; exists {
 		d.mu.Unlock()
 		cancel()
@@ -425,9 +476,12 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		return nil
 	}
 	d.hosts[host] = runtime
+	d.children.Add(2)
+	if hasStateSource {
+		d.children.Add(1)
+	}
 	d.mu.Unlock()
 
-	d.children.Add(2)
 	go func() {
 		defer d.children.Done()
 		if err := listener.Serve(hostCtx); err != nil && hostCtx.Err() == nil {
@@ -440,7 +494,37 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 			d.logf("warning: supervisor for %s stopped: %v", host, err)
 		}
 	}()
+	if hasStateSource {
+		go func() {
+			defer d.children.Done()
+			d.watchHostStates(hostCtx, host, stateSource.Changes())
+		}()
+	}
 	return nil
+}
+
+func (d *Daemon) stopHost(host string) {
+	d.mu.Lock()
+	runtime, ok := d.hosts[host]
+	if ok {
+		delete(d.hosts, host)
+	}
+	d.mu.Unlock()
+	if !ok {
+		_ = os.Remove(d.dirs.Recv(token.FileKey(host)))
+		return
+	}
+	if runtime.cancel != nil {
+		runtime.cancel()
+	}
+	if runtime.supervisor != nil {
+		runtime.supervisor.Stop()
+	}
+	_ = os.Remove(runtime.localSock)
+}
+
+func isConnectionRefused(err error) bool {
+	return err != nil && (errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(strings.ToLower(err.Error()), "connection refused"))
 }
 
 func newHostContext(parent context.Context) (context.Context, context.CancelFunc) {

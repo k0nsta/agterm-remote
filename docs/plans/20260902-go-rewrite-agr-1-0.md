@@ -441,29 +441,29 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/daemon/control.go`, `internal/daemon/resync.go`, `internal/daemon/events.go`
 - Create: `internal/daemon/control_test.go`, `internal/daemon/resync_test.go`, `internal/daemon/events_test.go`
 
-- [ ] `control.go`: unix socket `dirs.Sock()` opened via **`ListenClean`** — this is the
+- [x] `control.go`: unix socket `dirs.Sock()` opened via **`ListenClean`** — this is the
       file a `kill -9` leaves behind, so without it Post-Completion step 10 fails with
       `bind: address already in use` even though the flock is free; JSON lines
       `{"op":"up|down|status|reload-bindings","host":…}` → `{"ok":…,"result":…}`; `up` =
       EnsureDirs + listener + supervisor for a host not yet running; `down` = stop both and
       remove that recv socket; `status` = per host state, since, attempts, last event
-- [ ] `resync.go`: on `Down→Up` — `HudClose` each of that host's rows, `Sessions(host)`, then
+- [x] `resync.go`: on `Down→Up` — `HudClose` each of that host's rows, `Sessions(host)`, then
       for every binding whose session is live and whose level is non-empty
       `StatusSink.Status(row, level)` (`completed` carries `AutoReset`; a re-pushed level
       cannot carry `blink` — the remote label stores only `<state>@<epoch>`); on `Up→Down` —
       `HudOpen(row, "<host>: reconnecting…")` for each bound row
-- [ ] `events.go`: consume `EventSource.ClosedRows` → `bindings.UnbindRow`; when a host has
+- [x] `events.go`: consume `EventSource.ClosedRows` → `bindings.UnbindRow`; when a host has
       no bindings left, stop its supervisor and listener and remove that recv socket
-- [ ] agterm-absent handling: on ECONNREFUSED from the sink, log once, poll `SocketPath()`
+- [x] agterm-absent handling: on ECONNREFUSED from the sink, log once, poll `SocketPath()`
       every 5 s; when it returns, re-run the handshake, re-subscribe `ClosedRows`,
       and resync every host (dead rows unbind themselves via `ErrUnknownTarget` on the first
       push — no tree diffing)
-- [ ] write tests: control round-trip for each op + malformed line + **an invalid host
+- [x] write tests: control round-trip for each op + malformed line + **an invalid host
       (`ValidHost`) rejected by `up`/`down`**; resync with mocks (levels
       pushed with correct args, `completed` carries AutoReset, dangling ignored, HUD
       open/close ordering); close event → unbind → supervisor stopped when the last binding
       goes; agterm-absent → single log, recovery path re-reconciles and resyncs
-- [ ] run `make check` — must pass before Task 11
+- [x] run `make check` — must pass before Task 11
 
 ### Task 11: `internal/remotescript/agr.sh` — POSIX script, tmux backend, shim harness
 
