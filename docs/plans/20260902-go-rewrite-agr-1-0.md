@@ -158,26 +158,26 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 **Files:**
 - Create: `internal/token/token.go`, `internal/token/token_test.go`
 
-- [ ] `Valid(s)` — `[A-Za-z0-9_.-]`, **rejects** empty, a leading `-` or `.`, and exactly
+- [x] `Valid(s)` — `[A-Za-z0-9_.-]`, **rejects** empty, a leading `-` or `.`, and exactly
       `.`/`..` (closes `docs/backlog/valid_token-allows-leading-dash-dot.md`: 1.0 is where
       these reach `--target`/`--pane-id` argv and filenames)
-- [ ] `ValidState(s)` — exactly `idle|active|completed|blocked`
-- [ ] `ValidHost(s)` — an ssh destination, so it must accept `user@example.com` and `host-1`:
+- [x] `ValidState(s)` — exactly `idle|active|completed|blocked`
+- [x] `ValidHost(s)` — an ssh destination, so it must accept `user@example.com` and `host-1`:
       printable ASCII without whitespace, quotes, or shell metacharacters, **no leading `-`**
       (a destination like `-oProxyCommand=…` would otherwise be argument injection into
       `ssh … <host> -- …`). Every entry point rejects a failing host: the CLI's
       `open`/`ls`/`kill`/`install`/`up`/`down` argument parsing (Tasks 15–16) and the
       daemon's control `up`/`down` ops (Task 10).
-- [ ] `FileKey(host)` — the filename-safe form used for `recv-<key>.sock`,
+- [x] `FileKey(host)` — the filename-safe form used for `recv-<key>.sock`,
       `hosts/<key>.json`, `bridge-<key>.log`: `Valid`-safe characters kept, everything else
       replaced, plus a short hash suffix so two hosts can never collide (closes
       `docs/backlog/unsanitised-host-sid-in-cache-filenames.md`)
-- [ ] write tests: `Valid` table stating the verdict for each — `""` reject, `-x` **reject**,
+- [x] write tests: `Valid` table stating the verdict for each — `""` reject, `-x` **reject**,
       `.` / `..` reject, `a b` reject, `a-b_c.d` accept, unicode reject; `ValidState` four
       accepts + rejects; `ValidHost` accepts `user@host`, `h1.example.com`, rejects
       `a b`, `a;b`, `-h`; `FileKey` is stable, filename-safe, and collision-free for
       `user@h` vs `user_h`
-- [ ] run `make check` — must pass before Task 3
+- [x] run `make check` — must pass before Task 3
 
 ### Task 3: `internal/agterm` — wire types, direct socket client, version handshake, exec fallback
 
