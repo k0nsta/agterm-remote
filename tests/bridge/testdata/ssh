@@ -1,0 +1,23 @@
+#!/bin/sh
+
+if [ "${AGR_BRIDGE_SHIM_MODE:-}" = "exit-255" ]; then
+	exit 255
+fi
+
+if [ "${AGR_BRIDGE_SHIM_COUNT_FILE:-}" != "" ]; then
+	count=0
+	if [ -f "$AGR_BRIDGE_SHIM_COUNT_FILE" ]; then
+		count=$(/usr/bin/sed -n '1p' "$AGR_BRIDGE_SHIM_COUNT_FILE")
+	fi
+	case "$count" in
+		''|*[!0-9]*) count=0 ;;
+	esac
+	count=$((count + 1))
+	printf '%s\n' "$count" > "$AGR_BRIDGE_SHIM_COUNT_FILE"
+	if [ "$count" -le 2 ]; then
+		exit 255
+	fi
+fi
+
+marker=${AGR_BRIDGE_SHIM_MARKER:-agr-bridge-test}
+exec /bin/sh -c '/bin/sleep 3000 & wait' "$marker"

@@ -368,28 +368,28 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/bridge/supervisor_test.go`, `internal/bridge/backoff_test.go`
 - Create: `tests/bridge/supervisor_test.go`, `tests/bridge/testdata/ssh` (shim)
 
-- [ ] `dependency.go`: `ProcessRunner` interface `Start(ctx, argv []string, logPath string) (Process, error)`;
+- [x] `dependency.go`: `ProcessRunner` interface `Start(ctx, argv []string, logPath string) (Process, error)`;
       `Process` interface `Wait() error; Stop(grace time.Duration) error`. The concrete
       `ExecRunner` sets `Setpgid: true`; `Stop` sends **SIGTERM to the group**
       (`syscall.Kill(-pgid, …)`), waits `grace`, then SIGKILLs the group — verified to reap
       grandchildren with no orphans, and the bounded wait keeps `Stop` from hanging on an
       ssh that ignores TERM
-- [ ] `backoff.go`: `Next(prev, connectedFor) time.Duration` — 1 s → ×2 → cap 30 s, ±20 %
+- [x] `backoff.go`: `Next(prev, connectedFor) time.Duration` — 1 s → ×2 → cap 30 s, ±20 %
       jitter, reset to 1 s when `connectedFor > 30 s`
-- [ ] `supervisor.go`: `Supervisor{host, hostKey, remoteSock, localSock, sshPath string; runner}`
+- [x] `supervisor.go`: `Supervisor{host, hostKey, remoteSock, localSock, sshPath string; runner}`
       — `sshPath` is resolved **per supervisor** (`exec.LookPath`, `/usr/bin/ssh` fallback),
       never a process-wide `sync.Once`, so a PATH shim takes effect and cannot leak between
       tests; argv `ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o StreamLocalBindUnlink=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -R <remoteSock>:<localSock> <host>`;
       `Run(ctx)` loop start → `Up` after 5 s alive or on `MarkAlive()` → on exit `Down`,
       backoff, restart; `Stop()`; `State()`; `Changes() <-chan State`
-- [ ] write unit tests with the mock runner: restart after exit; backoff sequence; reset
+- [x] write unit tests with the mock runner: restart after exit; backoff sequence; reset
       after a long connection; `Stop` calls `Process.Stop`; argv exactness; `MarkAlive`
       promotes to `Up` before the 5 s timer
-- [ ] write integration test `tests/bridge`: PATH shim `ssh` exec'ing
+- [x] write integration test `tests/bridge`: PATH shim `ssh` exec'ing
       `sleep 3000 # agr-bridge-test-<uniq>`; assert with `pgrep -f agr-bridge-test-<uniq>`
       (never a bare `pgrep sleep`, which matches unrelated processes); `Stop` → gone;
       a shim exiting 255 immediately → restarts with growing gaps
-- [ ] run `make check` — must pass before Task 9
+- [x] run `make check` — must pass before Task 9
 
 ### Task 9: `internal/daemon` — core, lifecycle, stale-socket recovery
 
