@@ -537,12 +537,12 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Modify: `internal/remotescript/agr.sh`
 - Create: `tests/remote/shims/zmx`, `tests/remote/zmx/*.sh`
 
-- [ ] `tests/remote/shims/zmx`: an `sh` fake keeping sessions in `$ZMX_FAKE_DIR/<name>`
+- [x] `tests/remote/shims/zmx`: an `sh` fake keeping sessions in `$ZMX_FAKE_DIR/<name>`
       (pid + `k=v` label lines): `list [--short]` in the real line format (incl. `→` for
       `$ZMX_SESSION`), `set`, `get [key]`, `kill`, `attach [--labels …] <name>` (records the
       call, does not block), `attach --help` (with/without `--labels` per `ZMX_FAKE_LABELS`),
       `version` (prints `socket dir: $ZMX_FAKE_DIR`)
-- [ ] zmx backend: `attach` = `zmx set "$n" agr=1 2>/dev/null || true` (adopts an existing
+- [x] zmx backend: `attach` = `zmx set "$n" agr=1 2>/dev/null || true` (adopts an existing
       session), then `exec zmx attach --labels "agr=1" "$n"` when `AGR_ZMX_LABELS=1`, else a
       bounded background retry (10 × 200 ms `zmx set`) before `exec zmx attach "$n"` — the
       create-then-label race zmx's own help text names. `sessions` parses `zmx list` (strip
@@ -557,14 +557,14 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       zmx upgrade all make `zmx get` non-zero):
       `v=$(zmx get "$ZMX_SESSION" agr 2>/dev/null) || exit 0`, `[ -n "$v" ] || exit 0`,
       `zmx set … 2>/dev/null || exit 0`, then relay.
-- [ ] write zmx checks: attach adopts and execs with/without `--labels`; the retry path
+- [x] write zmx checks: attach adopts and execs with/without `--labels`; the retry path
       labels within 2 s; sessions parses `→`-prefixed and label-bearing lines, owned only,
       state/idle from the label; reap refuses unlabeled and emits the header; status writes
       the label and captures the line; **`ZMX_DIR` from the env file is exported before any
       `zmx` call**; **a session with no descendants still lists (the `pgrep -P` guard)**;
       **a session that vanishes mid-hook → exit 0, no capture**; the emitted rows carry the
       identical header and 5-field shape the tmux backend produces
-- [ ] `shellcheck -s sh` clean; `make check` — must pass before Task 13
+- [x] `shellcheck -s sh` clean; `make check` — must pass before Task 13
 
 ### Task 13: `internal/remote` — runner, host info, embed wiring
 

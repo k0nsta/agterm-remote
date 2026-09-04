@@ -47,7 +47,7 @@ if have nc && nc -h 2>&1 | grep -q 'U'; then
 	fi
 fi
 
-export AGR_MUX AGR_SOCK AGR_RELAY
+export AGR_MUX AGR_SOCK AGR_RELAY ZMX_DIR
 
 header() {
 	printf 'agr\t%s\n' "$AGR_VERSION"
@@ -225,6 +225,160 @@ tmux_status() {
 	exit 0
 }
 
+zmx_value() {
+	line=$1
+	key=$2
+	tab=$(printf '\t')
+	while [ -n "$line" ]; do
+		case "$line" in
+			*"$tab"*)
+				field=${line%%"$tab"*}
+				line=${line#*"$tab"}
+				;;
+			*)
+				field=$line
+				line=
+				;;
+		esac
+		case "$field" in
+			"$key"=*)
+				printf '%s\n' "${field#*=}"
+				return 0
+				;;
+		esac
+	done
+	return 1
+}
+
+zmx_state() {
+	line=$1
+	label=$(zmx_value "$line" agr_state 2>/dev/null || :)
+	if [ -z "$label" ]; then
+		printf '%s|%s\n' - -
+		return 0
+	fi
+
+	case "$label" in
+		*@*)
+			state=${label%@*}
+			epoch=${label##*@}
+			;;
+		*)
+			printf '%s|%s\n' - -
+			return 0
+			;;
+	esac
+	if ! valid_state "$state"; then
+		printf '%s|%s\n' - -
+		return 0
+	fi
+	case "$epoch" in
+		''|*[!0-9]*)
+			printf '%s|%s\n' - -
+			return 0
+			;;
+		*) ;;
+	esac
+	now=$(date +%s)
+	idle=$((now - epoch))
+	[ "$idle" -ge 0 ] || idle=0
+	printf '%s|%s\n' "$state" "$idle"
+}
+
+zmx_command() {
+	current=$1
+	deepest=
+	depth=0
+	while [ "$depth" -lt 8 ]; do
+		children=$(pgrep -P "$current" 2>/dev/null || :)
+		[ -n "$children" ] || break
+		child=$(printf '%s\n' "$children" | sed -n '1p')
+		[ -n "$child" ] || break
+		deepest=$child
+		current=$child
+		depth=$((depth + 1))
+	done
+	if [ -n "$deepest" ]; then
+		command=$(ps -p "$deepest" -o comm= 2>/dev/null || :)
+		[ -n "$command" ] && { printf '%s' "$command"; return 0; }
+	fi
+	printf '%s' -
+}
+
+zmx_sessions() {
+	list=$(zmx list 2>/dev/null || :)
+	tab=$(printf '\t')
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		case "$line" in
+			'→ '*) line=${line#'→ '};;
+		esac
+		name=${line%%"$tab"*}
+		name=${name#name=}
+		valid_token "$name" || continue
+		[ "$(zmx_value "$line" agr 2>/dev/null || :)" = 1 ] || continue
+		attached=$(zmx_value "$line" clients 2>/dev/null || :)
+		[ -n "$attached" ] || attached=0
+		state_idle=$(zmx_state "$line")
+		state=${state_idle%|*}
+		idle=${state_idle#*|}
+		pid=$(zmx_value "$line" pid 2>/dev/null || :)
+		cmds=-
+		[ -n "$pid" ] && cmds=$(zmx_command "$pid")
+		printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$attached" "$idle" "$cmds" "$state"
+		done <<EOF
+$list
+EOF
+}
+
+zmx_label_retry() {
+	n=$1
+	i=0
+	while [ "$i" -lt 10 ]; do
+		if zmx set "$n" agr=1 2>/dev/null; then
+			return 0
+		fi
+		i=$((i + 1))
+		sleep 0.2
+	done
+	return 0
+}
+
+zmx_attach() {
+	n=$1
+	zmx set "$n" agr=1 2>/dev/null || true
+	if [ "${AGR_ZMX_LABELS:-0}" = 1 ]; then
+		exec zmx attach --labels "agr=1" "$n"
+	fi
+	zmx_label_retry "$n" &
+	exec zmx attach "$n"
+}
+
+zmx_reap() {
+	n=$1
+	agr=$(zmx get "$n" agr 2>/dev/null || :)
+	if [ -z "$agr" ]; then
+		printf "agr: '%s' exists but is not agr-managed\n" "$n" >&2
+		return 1
+	fi
+	zmx kill "$n"
+	printf 'killed %s\n' "$n"
+}
+
+zmx_status() {
+	state=$1
+	shift
+	[ -n "${ZMX_SESSION:-}" ] || exit 0
+	v=$(zmx get "$ZMX_SESSION" agr 2>/dev/null) || exit 0
+	[ -n "$v" ] || exit 0
+	label="$state@$(date +%s)"
+	if ! zmx set "$ZMX_SESSION" "agr_state=$label" 2>/dev/null; then
+		exit 0
+	fi
+	relay "$ZMX_SESSION" "$state" "$@"
+	exit 0
+}
+
 dispatch() {
 	sub=${1:-}
 	shift || :
@@ -234,6 +388,7 @@ dispatch() {
 			valid_token "$1" || { printf '%s\n' 'agr: invalid session name' >&2; exit 2; }
 			case "$AGR_MUX" in
 				tmux) tmux_attach "$1" ;;
+				zmx) zmx_attach "$1" ;;
 				*) printf 'agr: unsupported multiplexer %s\n' "$AGR_MUX" >&2; exit 2 ;;
 			esac
 			;;
@@ -242,6 +397,7 @@ dispatch() {
 			header
 			case "$AGR_MUX" in
 				tmux) tmux_sessions ;;
+				zmx) zmx_sessions ;;
 				*) printf 'agr: unsupported multiplexer %s\n' "$AGR_MUX" >&2; exit 2 ;;
 			esac
 			;;
@@ -251,6 +407,7 @@ dispatch() {
 			header
 			case "$AGR_MUX" in
 				tmux) tmux_reap "$1" ;;
+				zmx) zmx_reap "$1" ;;
 				*) printf 'agr: unsupported multiplexer %s\n' "$AGR_MUX" >&2; exit 2 ;;
 			esac
 			;;
@@ -273,6 +430,7 @@ dispatch() {
 			[ "$valid_args" -eq 1 ] || exit 2
 			case "$AGR_MUX" in
 				tmux) tmux_status "$state" "$@" ;;
+				zmx) zmx_status "$state" "$@" ;;
 				*) exit 2 ;;
 			esac
 			;;

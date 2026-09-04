@@ -1,0 +1,165 @@
+#!/bin/sh
+set -eu
+
+fake_dir=${ZMX_FAKE_DIR:?ZMX_FAKE_DIR is not set}
+calls=${ZMX_FAKE_CALLS:-$fake_dir/calls}
+mkdir -p "$fake_dir"
+
+record="ZMX_DIR=${ZMX_DIR-<unset>} argv="
+for arg do
+	record="$record $arg"
+done
+printf '%s\n' "$record" >> "$calls"
+
+session_file() {
+	printf '%s/%s\n' "$fake_dir" "$1"
+}
+
+read_value() {
+	file=$1
+	key=$2
+	awk -v key="$key" '
+		index($0, key "=") == 1 {
+			print substr($0, length(key) + 2)
+			exit
+		}
+	' "$file"
+}
+
+create_session() {
+	name=$1
+	file=$(session_file "$name")
+	if [ ! -f "$file" ]; then
+		{
+			printf 'pid=%s\n' "${ZMX_FAKE_PID:-$$}"
+			printf 'created=%s\n' "$(date +%s)"
+		} > "$file"
+	fi
+}
+
+set_label() {
+	name=$1
+	assignment=$2
+	key=${assignment%%=*}
+	value=${assignment#*=}
+	file=$(session_file "$name")
+	tmp=$file.tmp.$$
+	awk -v key="$key" -v value="$value" '
+		index($0, key "=") == 1 {
+			if (value != "") print key "=" value
+			found = 1
+			next
+		}
+		{ print }
+		END {
+			if (value != "" && !found) print key "=" value
+		}
+	' "$file" > "$tmp"
+	mv "$tmp" "$file"
+}
+
+case "${1:-}" in
+	list)
+		[ "$#" -le 2 ] || exit 2
+		[ "$#" -eq 1 ] || [ "$2" = --short ] || exit 2
+		for file in "$fake_dir"/*; do
+			[ -f "$file" ] || continue
+			name=${file##*/}
+			case "$name" in
+				calls|*.tmp.*) continue ;;
+			esac
+			pid=$(read_value "$file" pid || :)
+			created=$(read_value "$file" created || :)
+			[ -n "$pid" ] || pid=0
+			[ -n "$created" ] || created=0
+			prefix=
+			[ "${ZMX_SESSION-}" = "$name" ] && prefix='→ '
+			printf '%sname=%s\tpid=%s\tclients=0\tcreated=%s' "$prefix" "$name" "$pid" "$created"
+			while IFS= read -r label; do
+				[ -n "$label" ] || continue
+				case "$label" in
+					pid=*|created=*) continue ;;
+					esac
+				printf '\t%s' "$label"
+			done < "$file"
+			printf '\n'
+		done
+		;;
+	set)
+		[ "$#" -ge 3 ] || exit 2
+		name=$2
+		file=$(session_file "$name")
+		[ -f "$file" ] || exit 1
+		if [ "${ZMX_FAKE_VANISH_ON_SET-}" = "$name" ]; then
+			rm -f "$file"
+			exit 1
+		fi
+		shift 2
+		for assignment do
+			case "$assignment" in
+				*=*) set_label "$name" "$assignment" ;;
+				*) exit 2 ;;
+			esac
+		done
+		;;
+	get)
+		[ "$#" -eq 2 ] || [ "$#" -eq 3 ] || exit 2
+		file=$(session_file "$2")
+		[ -f "$file" ] || exit 1
+		if [ "$#" -eq 2 ]; then
+			awk '/^(pid|created)=/ { next } { print }' "$file"
+			exit 0
+		fi
+		value=$(read_value "$file" "$3")
+		[ -n "$value" ] || exit 1
+		printf '%s\n' "$value"
+		;;
+	kill)
+		[ "$#" -eq 2 ] || exit 2
+		file=$(session_file "$2")
+		[ -f "$file" ] || exit 1
+		rm -f "$file"
+		;;
+	attach)
+		if [ "${2:-}" = --help ]; then
+			if [ "${ZMX_FAKE_LABELS:-0}" = 1 ]; then
+				printf '%s\n' 'usage: zmx attach [--labels k=v] name'
+				printf '%s\n' '  --labels k=v'
+			else
+				printf '%s\n' 'usage: zmx attach name'
+			fi
+			exit 0
+		fi
+		shift
+		labels=
+		while [ "$#" -gt 1 ]; do
+			case "$1" in
+				--labels)
+					[ "$#" -gt 2 ] || exit 2
+					if [ -n "$labels" ]; then labels="$labels
+$2"; else labels=$2; fi
+					shift 2
+					;;
+				*) exit 2 ;;
+			esac
+		done
+		name=$1
+		create_session "$name"
+		if [ -n "$labels" ]; then
+			while IFS= read -r label; do
+				[ -n "$label" ] || continue
+				set_label "$name" "$label"
+			done <<EOF
+$labels
+EOF
+		fi
+		;;
+	version)
+		[ "$#" -eq 1 ] || exit 2
+		printf 'socket dir: %s\n' "$fake_dir"
+		;;
+	*)
+		printf 'fake zmx: unsupported command\n' >&2
+		exit 2
+		;;
+esac
