@@ -679,20 +679,20 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/cli/open_test.go`, `internal/cli/install_test.go`
 - Modify: `cmd/agr/run.go` (register every subcommand)
 
-- [ ] `run.go` registers every subcommand this task can satisfy —
+- [x] `run.go` registers every subcommand this task can satisfy —
       `open ls kill up down install daemon` — and `doctor` as a stub returning
       "not implemented yet" so `make check` passes at the end of this task; Task 17 replaces
       the stub. `install` and `daemon` are required by the daemon client and by
       Post-Completion step 1, and neither existed before this task.
-- [ ] `install.go`: `agr install <host> [--mux zmx|tmux]` → `remote.Install`
-- [ ] `open.go`: `<host> [name]`; no name → `Sessions` + `ItemsFor` + `Pick` (no `agtermctl`
+- [x] `install.go`: `agr install <host> [--mux zmx|tmux]` → `remote.Install`
+- [x] `open.go`: `<host> [name]`; no name → `Sessions` + `ItemsFor` + `Pick` (no `agtermctl`
       → print `ls` then usage); validate the name; **inside agterm** (`AGTERM_SESSION_ID`
       set) bind `{Row, PaneID: $AGTERM_PANE_ID, Pane: $AGTERM_PANE, Host, Name, Mux: HostInfo.Mux}`
       → `ReloadBindings` → `Up(host)` → `Rename` + `Context` (both best-effort);
       **outside agterm** no binding, no rename/context, still `Up` and attach; then
       `mosh host -- <agrPath> attach name` (marker present) or `ssh -t host -- <argv>` via
       `TTY.Interactive`; terminal reset on return only when stdout is a tty
-- [ ] `cmd/agr/wire.go`: build the concrete `agterm.Ctl`, `remote.Runner`, `bindings.Store`
+- [x] `cmd/agr/wire.go`: build the concrete `agterm.Ctl`, `remote.Runner`, `bindings.Store`
       and hand them to the daemon and CLI; carry the compile-time assertions
       `var _ daemon.Remote = (*remote.Runner)(nil)`, `var _ daemon.UI = (*agterm.Ctl)(nil)`,
       `var _ daemon.EventSource = (*agterm.Ctl)(nil)`, `var _ daemon.Rows = (*agterm.Ctl)(nil)`,
@@ -700,11 +700,11 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `var _ cli.Picker`, `cli.Rows`, `cli.Labeler` = `(*agterm.Ctl)(nil)` and
       `var _ cli.Sessions = (*remote.Runner)(nil)`, so a mismatch fails in this task
       rather than three tasks later
-- [ ] write tests: `run` dispatches every registered subcommand (table over argv → handler);
+- [x] write tests: `run` dispatches every registered subcommand (table over argv → handler);
       `open` with mocks — binding written before `Up`, argv exactness for the mosh and ssh
       paths, picker cancel → exit 1 with no side effects, outside agterm writes no binding
       and still attaches, a failing `Context` (agterm 0.25) does not fail `open`
-- [ ] run `make check` — must pass before Task 17
+- [x] run `make check` — must pass before Task 17
 
 ### Task 17: `doctor`
 

@@ -31,3 +31,8 @@ type Sessions interface {
 	Sessions(ctx context.Context, host string) ([]remote.Session, error)
 	Reap(ctx context.Context, host, name string) error
 }
+
+// Installer installs the embedded remote agr script and its hooks.
+type Installer interface {
+	Install(ctx context.Context, host, mux string) error
+}
