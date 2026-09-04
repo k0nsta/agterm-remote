@@ -765,13 +765,14 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 
 ### Task 20: [Final] Update documentation
 
-- [ ] README reflects everything shipped (re-read once end to end)
-- [ ] `docs/backlog/` reconciled — **delete** `no-bats-or-ci.md` (CI + two test suites ship),
+- [x] README reflects everything shipped (re-read once end to end; corrected the Mac-side
+      picker requirement)
+- [x] `docs/backlog/` reconciled — **delete** `no-bats-or-ci.md` (CI + two test suites ship),
       `no-doctor-relay-probe.md` (doctor reports the relay tool and bridge socket),
       `relay-uses-python-not-nc-socat.md` (nc-U preferred), `valid_token-allows-leading-dash-dot.md`
       and `unsanitised-host-sid-in-cache-filenames.md` (Task 2); **keep**
       `no-agr-uninstall.md` and `no-zombie-session-cleanup.md`, which 1.0 does not address
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Technical Details
 

@@ -118,8 +118,7 @@ Mac side:
 
 - macOS, agterm, and `agtermctl` (agterm 0.25 or newer; 0.26 recommended);
 - OpenSSH 6.7 or newer with Unix-domain socket forwarding;
-- `python3` for the native picker and `autossh`/`mosh` are optional
-  conveniences (`brew install autossh mosh`).
+- `autossh`/`mosh` are optional conveniences (`brew install autossh mosh`).
 
 Remote side:
 
