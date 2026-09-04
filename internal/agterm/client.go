@@ -169,6 +169,12 @@ func contextError(ctx context.Context, err error) error {
 	if contextErr := ctx.Err(); contextErr != nil {
 		return contextErr
 	}
+	// A socket deadline and the context timer can become observable in either
+	// order. Once the deadline has passed, report the context error expected by
+	// callers even if the timer goroutine has not yet published ctx.Err().
+	if deadline, ok := ctx.Deadline(); ok && time.Now().After(deadline) {
+		return context.DeadlineExceeded
+	}
 	return err
 }
 

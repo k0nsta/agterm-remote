@@ -236,7 +236,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/agterm/exec.go`, `internal/agterm/exec_test.go`
 - Modify: `internal/agterm/dependency.go` (if any interface needs widening), `internal/agterm/mocks/dependency_mock.go` (regenerate)
 
-- [ ] `Ctl{path, sock string; run Runner; out Outputter; stream Streamer}` — one type
+- [x] `Ctl{path, sock string; run Runner; out Outputter; stream Streamer}` — one type
       providing every non-hot-path call (each method uses the interface that carries what it
       needs: `Run` for hud/rename/context, `Outputter` for `Tree`/`Pick`, `Streamer` for
       `ClosedRows`), all
@@ -251,7 +251,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       stdin (`pick` alone is a subcommand *group*, and without `--allow-custom` a typed name
       is impossible and an empty item list is rejected outright — the first-run case);
       `ClosedRows(ctx) (<-chan string, error)` streaming `events --json --kind session.closed`
-- [ ] **`exec.go`: the concrete `ExecRunner` satisfying all three interfaces** — without it
+- [x] **`exec.go`: the concrete `ExecRunner` satisfying all three interfaces** — without it
       nothing can construct a `Ctl` and Task 16's wiring cannot compile. `exec.CommandContext`
       with the absolute `CtlPath()`, never a bare name (launchd `PATH` is empty); `Run`
       returns an error wrapping the captured **stderr** (so Task 4's "unknown subcommand"
@@ -259,20 +259,20 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       (`exec.ExitError.ExitCode()`), feeding stdin when non-nil; `Stream` uses
       `StdoutPipe` + `Start`, and its stop func swallows the `signal: killed` that ctx
       cancellation produces rather than surfacing it as an error
-- [ ] write `exec_test.go` against a PATH shim (a script echoing argv, exiting with a chosen
+- [x] write `exec_test.go` against a PATH shim (a script echoing argv, exiting with a chosen
       code, streaming lines): argv exactness, stdout+exit-code split, stdin delivery,
       stderr in the error text, stream stops cleanly on ctx cancel with no error
-- [ ] `PickItem{ID,Label,Subtitle}`; `PickResult{Kind string; ID, Query string}` (`Kind` is
+- [x] `PickItem{ID,Label,Subtitle}`; `PickResult{Kind string; ID, Query string}` (`Kind` is
       `picked`|`custom`|`cancelled`); `DecodePick(out []byte, exit int) (PickResult, error)` →
       `picked`→id, `custom`→query verbatim, exit 2 or `cancelled`→`ErrCancelled`, other→error
       naming the exit
-- [ ] write tests asserting exact argv for every method against the mock it actually uses
+- [x] write tests asserting exact argv for every method against the mock it actually uses
       (`Runner` / `Outputter` / `Streamer` — name which per method); `DecodePick`
       table (picked / custom / cancelled / exit 1 / malformed / empty id); **`Pick` sends
       `pick open … --allow-custom` and an empty item list still opens**; `Context` failing
       with "unknown subcommand" returns nil (best-effort); `ClosedRows` yields rows from
       canned JSON lines and closes cleanly on ctx cancel
-- [ ] run `make check` — must pass before Task 5
+- [x] run `make check` — must pass before Task 5
 
 ### Task 5: `internal/paths` and `internal/bindings` — injectable dirs, row ↔ (host, name, mux) store
 
