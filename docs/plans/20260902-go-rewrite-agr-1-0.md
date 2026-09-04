@@ -137,21 +137,21 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `Makefile`, `.golangci.yml`, `.github/workflows/ci.yml`
 - Modify: `.gitignore` (add `dist/`, `bin/`, `coverage.out`)
 
-- [ ] `go mod init github.com/k0nsta/agterm-remote`; `run.go` exposes
+- [x] `go mod init github.com/k0nsta/agterm-remote`; `run.go` exposes
       `run(args []string, out, errw io.Writer) int` with a package-level `version` var
       (`-ldflags -X main.version=…`, default `dev`); `main.go` is `os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))`
       so every CLI test calls `run` directly instead of exec'ing a binary
-- [ ] `Makefile`: `build`, `test` (`go test -race ./...`), `cover`
+- [x] `Makefile`: `build`, `test` (`go test -race ./...`), `cover`
       (`go test -coverprofile=coverage.out ./... && go tool cover -func`), `lint`,
       `shellcheck` and `check-remote` (both `[ -f … ] || { echo "skip (not yet)"; exit 0; }`
       guarded until Tasks 11/12 create their targets), `check` = all
-- [ ] `.golangci.yml`: default linters plus `depguard` forbidding `internal/remote` from
+- [x] `.golangci.yml`: default linters plus `depguard` forbidding `internal/remote` from
       importing `internal/daemon` (the cycle guard the type-ownership rule exists to keep)
-- [ ] `.github/workflows/ci.yml`: matrix `macos-latest` + `ubuntu-latest`, installs
+- [x] `.github/workflows/ci.yml`: matrix `macos-latest` + `ubuntu-latest`, installs
       `golangci-lint` (official action), `shellcheck`, `tmux`, then runs `make check`
-- [ ] write tests: `run` with `--version` prints the injected version to `out`; unknown
+- [x] write tests: `run` with `--version` prints the injected version to `out`; unknown
       subcommand → usage on `errw`, exit 2; no args → usage, exit 0
-- [ ] run `make check` — must pass before Task 2
+- [x] run `make check` — must pass before Task 2
 
 ### Task 2: `internal/token` — validation for names, states and hosts
 

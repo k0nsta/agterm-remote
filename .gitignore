@@ -1,3 +1,6 @@
 *.log
 .DS_Store
 .revmux/tasks/
+dist/
+bin/
+coverage.out
