@@ -398,7 +398,7 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/daemon/mocks/dependency_mock.go`
 - Create: `internal/daemon/daemon_test.go`, `internal/daemon/sockets_test.go`
 
-- [ ] `dependency.go` — every interface consumer-defined, speaking the producers' data types
+- [x] `dependency.go` — every interface consumer-defined, speaking the producers' data types
       (no package imports `internal/daemon`): `UI` `HudOpen(ctx,row,msg) error; HudClose(ctx,row) error`;
       `Remote` `Home(ctx,host) (string,error); Sessions(ctx,host) ([]remote.Session,error); EnsureDirs(ctx,host) error`;
       `EventSource` `ClosedRows(ctx) (<-chan string,error)`; `Rows` `Tree(ctx) ([]string,error)`;
@@ -407,11 +407,11 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `Supervisor` `Run(ctx) error; Stop()` pair — the daemon must never construct
       `bridge.Supervisor` concretely, or Tasks 9/10's `up`/`down`/close-event tests would
       exec real `ssh`. Generate mocks.
-- [ ] `sockets.go`: `ListenClean(path)` — before `net.Listen`, dial the existing socket file;
+- [x] `sockets.go`: `ListenClean(path)` — before `net.Listen`, dial the existing socket file;
       if the dial fails it is stale → unlink, then listen. Without this a `SIGKILL`ed or
       crashed daemon can never restart (`bind: address already in use`), since the SIGTERM
       path is otherwise the only cleanup.
-- [ ] `daemon.go`: single instance (flock on `dirs.Lock()`, pidfile); on start resolve
+- [x] `daemon.go`: single instance (flock on `dirs.Lock()`, pidfile); on start resolve
       `agterm.SocketPath()`/`CtlPath()`, `Version()` handshake logged (warn below
       `MinTestedVersion`), load bindings, **reconcile them against `Rows.Tree`** (rows that
       vanished while the daemon was down — e.g. an agterm relaunch — are unbound here, so
@@ -429,11 +429,11 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       tunnel), start its listener via `ListenClean` and its supervisor, wiring the listener's
       `MarkAlive` to that supervisor; log to `dirs.Log()`; SIGTERM/SIGINT → stop supervisors,
       close listeners, remove sockets + pidfile
-- [ ] write tests: single-instance lock refuses a second daemon; a **leftover** socket file
+- [x] write tests: single-instance lock refuses a second daemon; a **leftover** socket file
       does not block startup while a **live** one does; SIGTERM removes sockets and pidfile;
       `EnsureDirs` called once per host per lifetime; **a `Tree` result never unbinds
       anything**; a push answering `ErrUnknownTarget` unbinds exactly that row
-- [ ] run `make check` — must pass before Task 10
+- [x] run `make check` — must pass before Task 10
 
 ### Task 10: `internal/daemon` — control socket, resync, close events, agterm-absent recovery
 
