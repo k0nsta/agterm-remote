@@ -574,20 +574,20 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
 - Create: `internal/remote/dependency.go`, `internal/remote/mocks/dependency_mock.go`
 - Create: `internal/remote/runner_test.go`, `internal/remote/hostinfo_test.go`
 
-- [ ] `dependency.go`: `SSH` interface `Run(ctx, host string, stdin []byte, argv ...string) ([]byte, error)`
+- [x] `dependency.go`: `SSH` interface `Run(ctx, host string, stdin []byte, argv ...string) ([]byte, error)`
       (argv-only; the concrete impl execs `ssh -o BatchMode=yes host -- <argv…>`, mapping a
       255 exit to `ErrUnreachable`); `TTY` interface `Interactive(ctx, argv ...string) error`
       for `ssh -t`/`mosh` — **`TTY` must NOT set `Setpgid`**, since an interactive attach
       needs the terminal's foreground process group
-- [ ] **`ssh.go`: the concrete `ExecSSH` and `ExecTTY`** — nothing constructs a `Runner`
+- [x] **`ssh.go`: the concrete `ExecSSH` and `ExecTTY`** — nothing constructs a `Runner`
       without them and Task 16's wiring cannot compile. `ExecSSH` resolves `ssh` once via
       `exec.LookPath` (`/usr/bin/ssh` fallback), returns **stdout** as the body with stderr
       wrapped into the error (a combined stream would put an ssh banner or motd ahead of the
       `agr\t<ver>` header), maps exit 255 to `ErrUnreachable` and any other non-zero to a
       typed `ExitError{Code}`. `ExecTTY` inherits stdio and sets no `Setpgid`.
-- [ ] `hostinfo.go`: `HostInfo{Home, Mux, Relay string; Mosh bool; AgrVersion, ZmxVersion, TmuxVersion string; ZmxLabels bool; ProbedAt time.Time}`
+- [x] `hostinfo.go`: `HostInfo{Home, Mux, Relay string; Mosh bool; AgrVersion, ZmxVersion, TmuxVersion string; ZmxLabels bool; ProbedAt time.Time}`
       at `dirs.HostInfo(token.FileKey(host))`; replaces 0.4's `home-<host>`/`mosh-<host>` files
-- [ ] `runner.go`: `Runner{ssh; dirs}` with `Home(ctx,host)` (from `HostInfo`, probing once
+- [x] `runner.go`: `Runner{ssh; dirs}` with `Home(ctx,host)` (from `HostInfo`, probing once
       when absent), `EnsureDirs(ctx,host)` = constant argv
       `mkdir -p ~/.cache/agr ~/.config/agr ~/.local/bin`, `AgrPath(host)`,
       `Data(ctx,host,verb,args…)` = run, then in this order: **`ErrUnreachable` short-circuits
@@ -596,17 +596,17 @@ any agr↔agr protocol, `golang.org/x/crypto/ssh`, and Linux builds of the Mac b
       `agr\t<ver>` header (missing → `ErrNotInstalled` with the install hint; mismatch →
       warning), then propagate an `ExitError` from the remote verb, then return the body; `Sessions` = `Data` + `ParseSessions`;
       `Reap(ctx,host,name)` = `Data` (so it needs the header Task 11 adds)
-- [ ] the compile-time assertion `var _ daemon.Remote = (*Runner)(nil)` is **not written
+- [x] the compile-time assertion `var _ daemon.Remote = (*Runner)(nil)` is **not written
       here** — `internal/remote` must never import `internal/daemon` (depguard enforces it),
       and `cmd/agr/wire.go` does not exist until Task 16. **All wiring assertions live in
       Task 16**, which is the first point at which every interface and implementation exists.
-- [ ] write tests: header parse table (missing / mismatch / ok / non-zero after header,
+- [x] write tests: header parse table (missing / mismatch / ok / non-zero after header,
       **unreachable → `ErrUnreachable` not `ErrNotInstalled`**); `ExecSSH` against the PATH
       shim — argv exactness, stdout-only body, stderr in the error, 255 → `ErrUnreachable`,
       other non-zero → `ExitError{Code}`;
       `Home` caches and probes once; `EnsureDirs` argv exactness; `Reap` surfaces the remote
       refusal text; `HostInfo` round-trip
-- [ ] run `make check` — must pass before Task 14
+- [x] run `make check` — must pass before Task 14
 
 ### Task 14: `internal/remote` — probe, install, hooks merge
 

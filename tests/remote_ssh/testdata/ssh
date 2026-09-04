@@ -1,0 +1,28 @@
+#!/bin/sh
+
+if [ -n "${REMOTE_SSH_SHIM_RECORD:-}" ]; then
+	: > "$REMOTE_SSH_SHIM_RECORD"
+	for arg do
+		printf '%s\n' "$arg" >> "$REMOTE_SSH_SHIM_RECORD"
+	done
+fi
+
+case "${REMOTE_SSH_SHIM_MODE:-success}" in
+	success)
+		printf '%s\n' 'login banner' >&2
+		printf 'agr\t1.0.0\npayload\n'
+		;;
+	unreachable)
+		printf '%s\n' 'partial stdout'
+		printf '%s\n' 'network is down' >&2
+		exit 255
+		;;
+	exit)
+		printf '%s\n' 'remote refusal' >&2
+		exit 42
+		;;
+	*)
+		printf '%s\n' 'unknown shim mode' >&2
+		exit 1
+		;;
+esac
