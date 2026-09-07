@@ -91,8 +91,8 @@ func (d *Daemon) serveControlConn(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	reader := bufio.NewReader(conn)
 	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > maxControlLine {
+		line, err := readControlLine(reader)
+		if errors.Is(err, errControlLineTooLong) {
 			_ = writeControlResponse(conn, controlResponse{Error: "control request exceeds 1 MiB"})
 			return
 		}
@@ -301,5 +301,28 @@ func (d *Daemon) closeControlConns() {
 	d.controlMu.Unlock()
 	for _, conn := range conns {
 		_ = conn.Close()
+	}
+}
+
+var errControlLineTooLong = errors.New("control request exceeds 1 MiB")
+
+// readControlLine reads one newline-terminated request, enforcing the size cap
+// AS IT READS. bufio.Reader.ReadBytes would grow its own buffer until it saw a
+// newline, so a length check on the returned slice cannot bound what a client
+// that never sends one may allocate — the cap has to be applied per chunk.
+// The bound is per request, not per connection, because one connection may
+// carry several.
+func readControlLine(reader *bufio.Reader) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		line = append(line, chunk...)
+		if len(line) > maxControlLine {
+			return nil, errControlLineTooLong
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		return line, err
 	}
 }

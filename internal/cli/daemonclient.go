@@ -62,6 +62,10 @@ func NewDaemonClient(dirs paths.Dirs) *DaemonClient {
 }
 
 // Up asks the daemon to start or retain the bridge for host.
+// ErrDaemonNotRunning reports that no daemon was reachable for an operation
+// that deliberately does not start one.
+var ErrDaemonNotRunning = errors.New("daemon is not running")
+
 func (c *DaemonClient) Up(ctx context.Context, host string) error {
 	_, err := c.call(ctx, "up", host)
 	return err
@@ -103,6 +107,12 @@ func (c *DaemonClient) ReloadBindings(ctx context.Context) error {
 	return err
 }
 
+// autoStartOps are the operations that may spawn a daemon. Everything else is
+// observational or a teardown: `agr doctor` must stay read-only, and
+// `agr down` starting the daemon it was asked to stop is the opposite of the
+// request. Those report a not-running daemon instead.
+var autoStartOps = map[string]bool{"up": true, "reload-bindings": true}
+
 func (c *DaemonClient) call(ctx context.Context, op, host string) (json.RawMessage, error) {
 	if c == nil {
 		return nil, errors.New("nil daemon client")
@@ -113,7 +123,7 @@ func (c *DaemonClient) call(ctx context.Context, op, host string) (json.RawMessa
 	if host != "" && !token.ValidHost(host) {
 		return nil, fmt.Errorf("invalid remote host %q", host)
 	}
-	conn, err := c.open(ctx)
+	conn, err := c.open(ctx, autoStartOps[op])
 	if err != nil {
 		return nil, err
 	}
@@ -147,17 +157,19 @@ func (c *DaemonClient) call(ctx context.Context, op, host string) (json.RawMessa
 	return response.Result, nil
 }
 
-func (c *DaemonClient) open(ctx context.Context) (net.Conn, error) {
+func (c *DaemonClient) open(ctx context.Context, autoStart bool) (net.Conn, error) {
 	conn, err := dialDaemon(ctx, c.dirs.Sock())
 	if err == nil {
 		return conn, nil
+	}
+	if !autoStart {
+		return nil, fmt.Errorf("%w: %v", ErrDaemonNotRunning, err)
 	}
 	// A failed dial is not evidence that a daemon is running: after SIGKILL,
 	// a panic or power loss the socket node survives with nothing listening,
 	// and refusing to start here left every command failing until it was
 	// removed by hand. Start regardless — the daemon's own flock decides who
 	// wins, and ListenClean reclaims the stale node.
-
 	if err := c.startOnce(); err != nil {
 		return nil, err
 	}

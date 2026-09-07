@@ -83,6 +83,10 @@ type hostRuntime struct {
 	state      string
 	since      time.Time
 	attempts   int
+	// done tracks this host's own goroutines so stopHost can wait for them.
+	// Without it, the listener's deferred os.Remove could fire after a later
+	// `up` had already bound a new socket at the same path, deleting it.
+	done sync.WaitGroup
 }
 
 type versioner interface {
@@ -515,21 +519,26 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 	}
 	d.mu.Unlock()
 
+	runtime.done.Add(2)
 	go func() {
 		defer d.children.Done()
+		defer runtime.done.Done()
 		if err := listener.Serve(hostCtx); err != nil && hostCtx.Err() == nil {
 			d.logf("warning: receiver for %s stopped: %v", host, err)
 		}
 	}()
 	go func() {
 		defer d.children.Done()
+		defer runtime.done.Done()
 		if err := supervisor.Run(hostCtx); err != nil && hostCtx.Err() == nil {
 			d.logf("warning: supervisor for %s stopped: %v", host, err)
 		}
 	}()
 	if hasStateSource {
+		runtime.done.Add(1)
 		go func() {
 			defer d.children.Done()
+			defer runtime.done.Done()
 			d.watchHostStates(hostCtx, host, stateSource.Changes())
 		}()
 	}
@@ -552,6 +561,16 @@ func (d *Daemon) stopHost(host string) {
 	}
 	if runtime.supervisor != nil {
 		runtime.supervisor.Stop()
+	}
+	// Wait for this host's goroutines before removing the socket: the
+	// listener removes its own path on the way out, so returning early lets
+	// that deferred removal race a later `up` that has re-bound the path.
+	waited := make(chan struct{})
+	go func() { runtime.done.Wait(); close(waited) }()
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		d.logf("warning: host %s teardown did not finish within 5s", host)
 	}
 	_ = os.Remove(runtime.localSock)
 }

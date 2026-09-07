@@ -207,7 +207,11 @@ sock.sendall(sys.stdin.buffer.read())
 			# Bounded like the nc (-w1) and python3 (settimeout) relays: a
 			# forwarded socket whose ssh peer has stopped accepting would
 			# otherwise block this hook, and a blocked hook stalls the agent turn.
-			if printf '%s' "$payload" | socat -T1 - "UNIX-CONNECT:$AGR_SOCK"; then :; fi
+			# -T bounds inactivity AFTER the address is set up; the connect
+			# itself needs its own bound, or a present socket whose accept
+			# backlog is full blocks the hook — and a blocked hook stalls the
+			# agent turn, which is the one thing this script must never do.
+			if printf '%s' "$payload" | socat -T2 - "UNIX-CONNECT:$AGR_SOCK,connect-timeout=1"; then :; fi
 			;;
 		*) : ;;
 	esac

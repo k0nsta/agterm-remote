@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"strings"
 	"sync"
@@ -110,11 +111,47 @@ func TestDaemonClientStartsOnceAndGivesUpWhenSocketNeverAppears(t *testing.T) {
 	if err := client.Up(ctx, "home"); err == nil || !strings.Contains(err.Error(), "socket did not appear") {
 		t.Fatalf("Up() error = %v, want bounded missing-socket error", err)
 	}
-	if err := client.Down(ctx, "home"); err == nil || !strings.Contains(err.Error(), "socket did not appear") {
-		t.Fatalf("Down() error = %v, want bounded missing-socket error", err)
+	// A second auto-starting operation must reuse the one detached start.
+	if err := client.ReloadBindings(ctx); err == nil || !strings.Contains(err.Error(), "socket did not appear") {
+		t.Fatalf("ReloadBindings() error = %v, want bounded missing-socket error", err)
 	}
 	if starts != 1 {
 		t.Fatalf("daemon starts = %d, want one detached start", starts)
+	}
+}
+
+// TestDaemonClientDoesNotStartDaemonForReadOnlyOrStopOps pins the contract that
+// only `up` and `reload-bindings` may spawn a daemon: `agr doctor` has to stay
+// read-only, and `agr down` starting the daemon it was asked to stop is the
+// opposite of the request.
+func TestDaemonClientDoesNotStartDaemonForReadOnlyOrStopOps(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		call func(*DaemonClient, context.Context) error
+	}{
+		{"down", func(c *DaemonClient, ctx context.Context) error { return c.Down(ctx, "home") }},
+		{"status", func(c *DaemonClient, ctx context.Context) error {
+			_, err := c.Status(ctx, "home")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewDaemonClient(paths.TestDirs(t))
+			client.wait = 40 * time.Millisecond
+			started := false
+			client.start = func() error {
+				started = true
+				return nil
+			}
+			err := tc.call(client, context.Background())
+			if !errors.Is(err, ErrDaemonNotRunning) {
+				t.Fatalf("%s error = %v, want ErrDaemonNotRunning", tc.name, err)
+			}
+			if started {
+				t.Fatalf("%s started a daemon; only up and reload-bindings may", tc.name)
+			}
+		})
 	}
 }
 
