@@ -176,7 +176,8 @@ func chooseOpenName(ctx context.Context, host string, deps OpenDependencies, out
 	if deps.Rows != nil {
 		tree, _ = deps.Rows.Tree(ctx)
 	}
-	result, err := deps.Picker.Pick(ctx, ItemsFor(sessions, bound, tree), "tmux session on "+host+" — or type a new name")
+	result, err := deps.Picker.Pick(ctx, ItemsFor(host, sessions, bound, tree),
+		"session on "+host+" — or type a new name")
 	if err != nil {
 		return "", err
 	}

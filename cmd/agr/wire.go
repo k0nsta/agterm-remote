@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
@@ -77,7 +76,10 @@ func newApplication() *application {
 	app.daemon = daemon.New(daemon.Config{
 		Dirs: dirs, UI: control, Remote: remoteRunner, Events: control,
 		Rows: control, Sink: status, Supervisors: bridgeFactory{}, Bindings: store,
-		Logger: log.Default(),
+		// No Logger: injecting one makes Daemon.openLog return early, so
+		// dirs.Log() is never created. The daemon is normally started detached
+		// with stdio on /dev/null, so a stderr logger discards every
+		// diagnostic it writes. Leaving this nil is what puts the log on disk.
 	})
 	return app
 }

@@ -36,7 +36,10 @@ func TestExecSSHUsesPathShimAndExactArgv(t *testing.T) {
 		t.Fatalf("read argv record: %v", err)
 	}
 	gotArgs := strings.Split(strings.TrimSuffix(string(got), "\n"), "\n")
-	wantArgs := []string{"-o", "BatchMode=yes", "user@example.com", "--", "printf", "%s", "$HOME"}
+	// One quoted command string, not separate argv: OpenSSH joins everything
+	// after the destination with spaces, so the boundaries have to survive as
+	// shell quoting instead.
+	wantArgs := []string{"-o", "BatchMode=yes", "user@example.com", "--", `'printf' '%s' '$HOME'`}
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("ssh argv = %#v, want %#v", gotArgs, wantArgs)
 	}
@@ -103,5 +106,52 @@ func TestExecTTYValidatesArgv(t *testing.T) {
 	t.Helper()
 	if err := (&remote.ExecTTY{}).Interactive(context.Background()); err == nil {
 		t.Fatal("ExecTTY.Interactive() error = nil, want empty-argv error")
+	}
+}
+
+// TestExecSSHSurvivesRemoteLoginShellReparsing runs the shim in login-shell
+// mode, which reproduces OpenSSH's real behaviour: it joins everything after
+// the destination with single spaces and lets the remote login shell re-parse
+// the result. Asserting argv against a mock cannot catch a loss of argv
+// boundaries, because a mock never performs that join; this test does.
+func TestExecSSHSurvivesRemoteLoginShellReparsing(t *testing.T) {
+	t.Helper()
+	client := newShimClient(t, "login-shell")
+
+	// A multi-command script is the case that breaks when boundaries are lost:
+	// the login shell splits on `;`, so only the first fragment stays inside
+	// `sh -c` and the rest run outside it with none of its variables set.
+	script := `p=one; q=two; printf '%s-%s\n' "$p" "$q"`
+	body, err := client.Run(context.Background(), "host", nil, "sh", "-c", script)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := string(body), "one-two\n"; got != want {
+		t.Fatalf("remote saw %q, want %q — argv boundaries were lost in transit", got, want)
+	}
+}
+
+// TestExecSSHQuotesShellMetacharacters covers the values that reach argv from
+// probed or user-supplied data: a home directory with a space, and a single
+// quote, which is the one character POSIX single-quoting cannot nest.
+func TestExecSSHQuotesShellMetacharacters(t *testing.T) {
+	t.Helper()
+	client := newShimClient(t, "login-shell")
+
+	for _, tc := range []struct{ name, arg string }{
+		{"space", "/srv/user data/bin/agr"},
+		{"single quote", "/srv/o'brien/bin/agr"},
+		{"semicolon", "/srv/a;rm -rf x/bin/agr"},
+		{"dollar", "/srv/$HOME/bin/agr"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := client.Run(context.Background(), "host", nil, "printf", "%s", tc.arg)
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if got := string(body); got != tc.arg {
+				t.Fatalf("remote saw %q, want %q", got, tc.arg)
+			}
+		})
 	}
 }

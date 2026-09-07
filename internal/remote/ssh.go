@@ -85,10 +85,15 @@ func (e *ExecSSH) Run(ctx context.Context, host string, stdin []byte, argv ...st
 		return nil, fmt.Errorf("%w: empty remote argv", ErrInvalidSSHCommand)
 	}
 
-	commandArgs := make([]string, 0, 5+len(argv))
-	commandArgs = append(commandArgs, "-o", "BatchMode=yes", host, "--")
-	commandArgs = append(commandArgs, argv...)
-	command := exec.CommandContext(ctx, e.executable(), commandArgs...)
+	// OpenSSH does not preserve argv boundaries: it joins everything after the
+	// destination with single spaces and hands one string to the remote login
+	// shell, which re-parses it. Passing argv elements separately therefore lets
+	// any `;`, quote or glob inside them split the command apart — a script like
+	// `sh -c 'a; b'` would run only `a` inside sh and `b` in the login shell.
+	// Quote each element into one command string so the remote shell rebuilds
+	// exactly the argv intended here.
+	command := exec.CommandContext(ctx, e.executable(),
+		"-o", "BatchMode=yes", host, "--", shellQuoteArgv(argv))
 	if stdin != nil {
 		command.Stdin = bytes.NewReader(stdin)
 	}
@@ -154,3 +159,15 @@ func resolveExecutable(name string) string {
 
 var _ SSH = (*ExecSSH)(nil)
 var _ TTY = (*ExecTTY)(nil)
+
+// shellQuoteArgv renders argv as a single POSIX-shell command string in which
+// every element survives one round of shell parsing intact. Single quotes are
+// the only fully literal quoting in sh, so an embedded single quote is closed,
+// escaped and reopened.
+func shellQuoteArgv(argv []string) string {
+	quoted := make([]string, 0, len(argv))
+	for _, a := range argv {
+		quoted = append(quoted, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
+	}
+	return strings.Join(quoted, " ")
+}

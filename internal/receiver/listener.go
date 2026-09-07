@@ -54,6 +54,41 @@ func New(host, hostKey string, dirs paths.Dirs, sink StatusSink, resolver Resolv
 }
 
 // Serve listens until ctx is canceled or the socket fails.
+// Bind creates the listening socket and returns any bind failure to the
+// caller. Serve calls it too, so it stays optional — but a caller that reports
+// a host as started needs the failure synchronously: binding inside the Serve
+// goroutine meant an unusable socket path (one over the 104-byte sun_path
+// limit, say) only reached a log line while `agr up` reported success and the
+// SSH tunnel ran on with nothing to receive events.
+func (l *Listener) Bind() error {
+	if l == nil {
+		return errors.New("nil receiver listener")
+	}
+	_, err := l.bind()
+	return err
+}
+
+// bind is idempotent: a listener already bound returns its existing socket, so
+// Serve after Bind does not re-listen.
+func (l *Listener) bind() (net.Listener, error) {
+	l.mu.Lock()
+	if l.ln != nil {
+		existing := l.ln
+		l.mu.Unlock()
+		return existing, nil
+	}
+	l.mu.Unlock()
+
+	listener, err := listenClean(l.path)
+	if err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	l.ln = listener
+	l.mu.Unlock()
+	return listener, nil
+}
+
 func (l *Listener) Serve(ctx context.Context) error {
 	if l == nil {
 		return errors.New("nil receiver listener")
@@ -61,14 +96,10 @@ func (l *Listener) Serve(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("nil receiver context")
 	}
-	listener, err := listenClean(l.path)
+	listener, err := l.bind()
 	if err != nil {
 		return err
 	}
-
-	l.mu.Lock()
-	l.ln = listener
-	l.mu.Unlock()
 	defer func() {
 		l.closeResources()
 		_ = os.Remove(l.path)

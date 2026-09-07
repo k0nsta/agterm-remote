@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/token"
@@ -58,6 +59,11 @@ func (d *Daemon) serveControl(ctx context.Context, listener net.Listener) {
 		select {
 		case <-ctx.Done():
 			_ = listener.Close()
+			// serveControlConn blocks in ReadBytes with no deadline, so a
+			// client that connects and never completes a request would hold a
+			// children.WaitGroup slot forever and Close would wait on it.
+			// Closing the accepted connections unblocks those reads.
+			d.closeControlConns()
 		case <-closeDone:
 		}
 	}()
@@ -71,9 +77,11 @@ func (d *Daemon) serveControl(ctx context.Context, listener net.Listener) {
 			}
 			return
 		}
+		d.trackControlConn(conn)
 		d.children.Add(1)
 		go func() {
 			defer d.children.Done()
+			defer d.untrackControlConn(conn)
 			d.serveControlConn(ctx, conn)
 		}()
 	}
@@ -198,10 +206,19 @@ func (d *Daemon) reloadBindings(ctx context.Context) error {
 			d.stopHost(host)
 		}
 	}
+	// Same per-host isolation as startup: reload-bindings runs on every `agr
+	// open`, so one unreachable host must not fail the reload for the rest.
+	var failed []string
 	for host := range desired {
 		if err := d.startHost(ctx, host); err != nil {
-			return err
+			d.logf("warning: host %s not started on reload: %v", host, err)
+			failed = append(failed, host)
 		}
+	}
+	if len(failed) > 0 {
+		sort.Strings(failed)
+		d.logf("reload-bindings: %d of %d hosts unavailable: %s",
+			len(failed), len(desired), strings.Join(failed, ", "))
 	}
 	return nil
 }
@@ -258,4 +275,31 @@ func bytesTrimSpace(value []byte) []byte {
 		value = value[:len(value)-1]
 	}
 	return value
+}
+
+func (d *Daemon) trackControlConn(conn net.Conn) {
+	d.controlMu.Lock()
+	if d.controlConns == nil {
+		d.controlConns = make(map[net.Conn]struct{})
+	}
+	d.controlConns[conn] = struct{}{}
+	d.controlMu.Unlock()
+}
+
+func (d *Daemon) untrackControlConn(conn net.Conn) {
+	d.controlMu.Lock()
+	delete(d.controlConns, conn)
+	d.controlMu.Unlock()
+}
+
+func (d *Daemon) closeControlConns() {
+	d.controlMu.Lock()
+	conns := make([]net.Conn, 0, len(d.controlConns))
+	for conn := range d.controlConns {
+		conns = append(conns, conn)
+	}
+	d.controlMu.Unlock()
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
 }

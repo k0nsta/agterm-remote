@@ -152,9 +152,11 @@ func (c *DaemonClient) open(ctx context.Context) (net.Conn, error) {
 	if err == nil {
 		return conn, nil
 	}
-	if !socketAbsent(c.dirs.Sock()) {
-		return nil, err
-	}
+	// A failed dial is not evidence that a daemon is running: after SIGKILL,
+	// a panic or power loss the socket node survives with nothing listening,
+	// and refusing to start here left every command failing until it was
+	// removed by hand. Start regardless — the daemon's own flock decides who
+	// wins, and ListenClean reclaims the stale node.
 
 	if err := c.startOnce(); err != nil {
 		return nil, err
@@ -225,11 +227,6 @@ func (c *DaemonClient) startDetached() error {
 func dialDaemon(ctx context.Context, path string) (net.Conn, error) {
 	dialer := net.Dialer{}
 	return dialer.DialContext(ctx, "unix", path)
-}
-
-func socketAbsent(path string) bool {
-	_, err := os.Stat(path)
-	return errors.Is(err, os.ErrNotExist)
 }
 
 func readDaemonLine(reader *bufio.Reader) ([]byte, error) {

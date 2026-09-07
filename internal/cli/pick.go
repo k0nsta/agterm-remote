@@ -10,7 +10,7 @@ import (
 // The state component is the agterm row state (bound, stale, or -), matching
 // the table's ROW column; the remote agent level remains in the session data
 // and is shown by ls's STATE column.
-func ItemsFor(sessions []remote.Session, bound []bindings.Binding, tree []string) []agterm.PickItem {
+func ItemsFor(host string, sessions []remote.Session, bound []bindings.Binding, tree []string) []agterm.PickItem {
 	liveSet := make(map[string]struct{}, len(tree))
 	for _, row := range tree {
 		liveSet[row] = struct{}{}
@@ -20,7 +20,10 @@ func ItemsFor(sessions []remote.Session, bound []bindings.Binding, tree []string
 	for _, session := range sessions {
 		state := "-"
 		for _, binding := range bound {
-			if binding.Name != session.Name {
+			// Name alone is ambiguous: the same session name exists on many
+			// hosts, so matching without the host shows another host's row
+			// state against this host's session.
+			if binding.Name != session.Name || binding.Host != host {
 				continue
 			}
 			if !treeAvailable {

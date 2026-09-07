@@ -57,10 +57,15 @@ type Daemon struct {
 	lockFile *os.File
 	logFile  *os.File
 	children sync.WaitGroup
-	hosts    map[string]*hostRuntime
-	ensured  map[string]bool
-	ensureMu sync.Mutex
-	control  net.Listener
+
+	// Accepted control connections, closed on shutdown so a client that never
+	// finishes a request cannot hold Close open on children.
+	controlMu    sync.Mutex
+	controlConns map[net.Conn]struct{}
+	hosts        map[string]*hostRuntime
+	ensured      map[string]bool
+	ensureMu     sync.Mutex
+	control      net.Listener
 
 	recoveryRunning bool
 	recoveryLogged  bool
@@ -342,9 +347,14 @@ func (d *Daemon) initialize(ctx context.Context) error {
 	for _, binding := range bound {
 		hosts[binding.Host] = struct{}{}
 	}
+	// Per-host isolation: startHost does an SSH round trip (EnsureDirs, Home),
+	// so one asleep or unreachable host used to abort the whole batch and take
+	// the bridge down for every other host. A host that fails here is logged
+	// and skipped; `agr up <host>` retries it, and nothing else is affected.
 	for host := range hosts {
 		if err := d.startHost(ctx, host); err != nil {
-			return err
+			d.logf("warning: host %s not started: %v", host, err)
+			continue
 		}
 	}
 	d.startEvents(ctx)
@@ -454,6 +464,16 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		liveness = marker
 	}
 	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness)
+	// Bind before the host is published: Serve binds asynchronously, so a bind
+	// failure used to surface only as a log line while startHost returned
+	// success and the supervisor kept running — a tunnel with no receiver,
+	// silently dropping every status event until the host was restarted.
+	// Nothing has been started yet at this point — the supervisor is created
+	// but not running and the host context does not exist — so returning is
+	// the whole rollback.
+	if err := listener.Bind(); err != nil {
+		return fmt.Errorf("bind receiver socket for %s: %w", host, err)
+	}
 	hostCtx, cancel := newHostContext(ctx)
 	stateSource, hasStateSource := supervisor.(interface{ Changes() <-chan bridge.State })
 	runtime := &hostRuntime{

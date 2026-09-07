@@ -12,6 +12,24 @@ case "${REMOTE_SSH_SHIM_MODE:-success}" in
 		printf '%s\n' 'login banner' >&2
 		printf 'agr\t1.0.0\npayload\n'
 		;;
+	login-shell)
+		# Emulate what OpenSSH actually does with a remote command: every
+		# argument after the destination is joined with single spaces and the
+		# resulting STRING is handed to the remote login shell, which re-parses
+		# it. Any mode that echoes argv back verbatim cannot catch argv
+		# boundaries being lost, which is exactly how the joining bug shipped.
+		for arg do
+			case "$arg" in
+				-o|BatchMode=yes|--) continue ;;
+			esac
+			if [ -z "${seen_host:-}" ]; then
+				seen_host=1
+				continue
+			fi
+			joined="${joined:+$joined }$arg"
+		done
+		sh -c "$joined"
+		;;
 	unreachable)
 		printf '%s\n' 'partial stdout'
 		printf '%s\n' 'network is down' >&2

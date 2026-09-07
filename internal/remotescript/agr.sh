@@ -36,7 +36,10 @@ fi
 : "${AGR_SOCK:=$HOME/.cache/agr/bridge.sock}"
 
 if [ -z "${AGR_RELAY:-}" ]; then
-if have nc && nc -h 2>&1 | grep -q 'U'; then
+# Match the -U flag itself: a bare 'U' also matches words like "UDP" or
+	# "Usage" in help text, which would select nc on a build that cannot do
+	# Unix sockets at all.
+	if have nc && nc -h 2>&1 | grep -q -- '-U'; then
 		AGR_RELAY=nc
 	elif have python3; then
 		AGR_RELAY=python3
@@ -201,7 +204,10 @@ sock.sendall(sys.stdin.buffer.read())
 ' "$AGR_SOCK"; then :; fi
 			;;
 		socat)
-			if printf '%s' "$payload" | socat - "UNIX-CONNECT:$AGR_SOCK"; then :; fi
+			# Bounded like the nc (-w1) and python3 (settimeout) relays: a
+			# forwarded socket whose ssh peer has stopped accepting would
+			# otherwise block this hook, and a blocked hook stalls the agent turn.
+			if printf '%s' "$payload" | socat -T1 - "UNIX-CONNECT:$AGR_SOCK"; then :; fi
 			;;
 		*) : ;;
 	esac
@@ -356,8 +362,11 @@ zmx_attach() {
 
 zmx_reap() {
 	n=$1
+	# Must match zmx_sessions' test exactly (= 1, not merely non-empty): a
+	# session labelled agr=0 is hidden from `agr ls`, so accepting it here
+	# would let `agr kill` destroy a session the tool never claimed to own.
 	agr=$(zmx get "$n" agr 2>/dev/null || :)
-	if [ -z "$agr" ]; then
+	if [ "$agr" != 1 ]; then
 		printf "agr: '%s' exists but is not agr-managed\n" "$n" >&2
 		return 1
 	fi
@@ -370,7 +379,7 @@ zmx_status() {
 	shift
 	[ -n "${ZMX_SESSION:-}" ] || exit 0
 	v=$(zmx get "$ZMX_SESSION" agr 2>/dev/null) || exit 0
-	[ -n "$v" ] || exit 0
+	[ "$v" = 1 ] || exit 0
 	label="$state@$(date +%s)"
 	if ! zmx set "$ZMX_SESSION" "agr_state=$label" 2>/dev/null; then
 		exit 0
