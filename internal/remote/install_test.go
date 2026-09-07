@@ -42,7 +42,7 @@ func TestInstallDefaultChoicesAndWriteOrder(t *testing.T) {
 	if got, want := calls[0].argv, []string{"sh"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("probe argv = %#v, want %#v", got, want)
 	}
-	if got, want := calls[1].argv, []string{"mkdir", "-p", "~/.cache/agr", "~/.config/agr", "~/.local/bin"}; !reflect.DeepEqual(got, want) {
+	if got, want := calls[1].argv, []string{"sh", "-c", `mkdir -p "$HOME/.cache/agr" "$HOME/.config/agr" "$HOME/.local/bin"`}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("EnsureDirs argv = %#v, want %#v", got, want)
 	}
 	for index := 2; index < len(calls); index++ {

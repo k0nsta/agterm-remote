@@ -77,7 +77,12 @@ func (r *Runner) Home(ctx context.Context, host string) (string, error) {
 		return "", err
 	}
 
-	body, err := r.sshClient().Run(ctx, host, nil, "printf", "%s", "$HOME")
+	// Expansion has to be asked for explicitly. ExecSSH quotes every argv
+	// element so a remote path can never be re-parsed as shell syntax, which
+	// means a bare "$HOME" argument now arrives literally; the probe therefore
+	// runs its own shell, where the expansion is intentional rather than a
+	// side effect of how ssh happens to join arguments.
+	body, err := r.sshClient().Run(ctx, host, nil, "sh", "-c", `printf %s "$HOME"`)
 	if err != nil {
 		return "", err
 	}
@@ -85,14 +90,21 @@ func (r *Runner) Home(ctx context.Context, host string) (string, error) {
 	if home == "" {
 		return "", fmt.Errorf("remote host %q returned an empty home", host)
 	}
+	// A probe that returns anything but an absolute path would otherwise be
+	// cached and then used to build every remote path for this host.
+	if !strings.HasPrefix(home, "/") {
+		return "", fmt.Errorf("remote host %q returned a non-absolute home %q", host, home)
+	}
 	if err := SaveHostInfo(r.dirs, host, HostInfo{Home: home, ProbedAt: time.Now()}); err != nil {
 		return "", err
 	}
 	return home, nil
 }
 
-// EnsureDirs creates the remote directories required by the reverse socket
-// and installation. These are argv values, not a shell command string.
+// EnsureDirs creates the remote directories required by the reverse socket and
+// installation. It runs an explicit shell because the paths are $HOME-relative
+// and ExecSSH quotes argv: a bare "~/.cache/agr" argument would be created as
+// a directory literally named "~".
 func (r *Runner) EnsureDirs(ctx context.Context, host string) error {
 	if err := validateHost(host); err != nil {
 		return err
@@ -100,7 +112,8 @@ func (r *Runner) EnsureDirs(ctx context.Context, host string) error {
 	if ctx == nil {
 		return errors.New("nil remote context")
 	}
-	_, err := r.sshClient().Run(ctx, host, nil, "mkdir", "-p", "~/.cache/agr", "~/.config/agr", "~/.local/bin")
+	_, err := r.sshClient().Run(ctx, host, nil, "sh", "-c",
+		`mkdir -p "$HOME/.cache/agr" "$HOME/.config/agr" "$HOME/.local/bin"`)
 	return err
 }
 

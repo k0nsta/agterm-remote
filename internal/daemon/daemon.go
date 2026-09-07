@@ -464,16 +464,6 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		liveness = marker
 	}
 	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness)
-	// Bind before the host is published: Serve binds asynchronously, so a bind
-	// failure used to surface only as a log line while startHost returned
-	// success and the supervisor kept running — a tunnel with no receiver,
-	// silently dropping every status event until the host was restarted.
-	// Nothing has been started yet at this point — the supervisor is created
-	// but not running and the host context does not exist — so returning is
-	// the whole rollback.
-	if err := listener.Bind(); err != nil {
-		return fmt.Errorf("bind receiver socket for %s: %w", host, err)
-	}
 	hostCtx, cancel := newHostContext(ctx)
 	stateSource, hasStateSource := supervisor.(interface{ Changes() <-chan bridge.State })
 	runtime := &hostRuntime{
@@ -495,7 +485,30 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		supervisor.Stop()
 		return nil
 	}
+	// Claim the host under the lock BEFORE binding. The duplicate check above
+	// is the authoritative one — the early check races across the seconds of
+	// SSH round trips above — so binding before it would make the loser of a
+	// concurrent cold start fail hard on an address already in use, where it
+	// used to return nil idempotently.
 	d.hosts[host] = runtime
+	d.mu.Unlock()
+
+	// Bind before the host is announced started: Serve binds asynchronously,
+	// so a bind failure used to surface only as a log line while startHost
+	// returned success and the supervisor kept running — a tunnel with no
+	// receiver, silently dropping every status event.
+	if err := listener.Bind(); err != nil {
+		d.mu.Lock()
+		if d.hosts[host] == runtime {
+			delete(d.hosts, host)
+		}
+		d.mu.Unlock()
+		cancel()
+		supervisor.Stop()
+		return fmt.Errorf("bind receiver socket for %s: %w", host, err)
+	}
+
+	d.mu.Lock()
 	d.children.Add(2)
 	if hasStateSource {
 		d.children.Add(1)

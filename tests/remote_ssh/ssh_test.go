@@ -155,3 +155,32 @@ func TestExecSSHQuotesShellMetacharacters(t *testing.T) {
 		})
 	}
 }
+
+// TestExecSSHRequiresExplicitShellForExpansion pins the other half of the
+// quoting contract. Quoting argv is what stops a remote path being re-parsed
+// as shell syntax, but it also means a caller that WANTS expansion must ask
+// for it: a bare "$HOME" argument arrives literally. Both behaviours are load
+// bearing — the first blocks injection, the second is why Home() and
+// EnsureDirs run their own shell.
+func TestExecSSHRequiresExplicitShellForExpansion(t *testing.T) {
+	t.Helper()
+	client := newShimClient(t, "login-shell")
+
+	// A bare argument is NOT expanded — this is what protects remote paths.
+	body, err := client.Run(context.Background(), "host", nil, "printf", "%s", "$HOME")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := string(body), "$HOME"; got != want {
+		t.Fatalf("bare argv expanded: got %q, want the literal %q", got, want)
+	}
+
+	// An explicit shell expands, which is how the $HOME probe and EnsureDirs work.
+	body, err = client.Run(context.Background(), "host", nil, "sh", "-c", `printf %s "$HOME"`)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if string(body) == "$HOME" || string(body) == "" {
+		t.Fatalf("explicit shell did not expand $HOME: got %q", body)
+	}
+}

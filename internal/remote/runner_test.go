@@ -75,7 +75,7 @@ func TestRunnerHomeCachesProbeAndUsesArgv(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("SSH calls = %d, want one probe", len(calls))
 	}
-	want := runnerSSHCall{host: "user@example.com", argv: []string{"printf", "%s", "$HOME"}}
+	want := runnerSSHCall{host: "user@example.com", argv: []string{"sh", "-c", `printf %s "$HOME"`}}
 	if !reflect.DeepEqual(calls[0], want) {
 		t.Fatalf("home probe call = %#v, want %#v", calls[0], want)
 	}
@@ -109,7 +109,7 @@ func TestRunnerEnsureDirsUsesConstantArgv(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("SSH calls = %d, want one", len(calls))
 	}
-	want := []string{"mkdir", "-p", "~/.cache/agr", "~/.config/agr", "~/.local/bin"}
+	want := []string{"sh", "-c", `mkdir -p "$HOME/.cache/agr" "$HOME/.config/agr" "$HOME/.local/bin"`}
 	if !reflect.DeepEqual(calls[0].argv, want) {
 		t.Fatalf("EnsureDirs() argv = %#v, want %#v", calls[0].argv, want)
 	}
