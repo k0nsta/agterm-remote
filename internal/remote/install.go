@@ -67,6 +67,12 @@ func (r *Runner) InstallResult(ctx context.Context, host, muxOverride string) (I
 		return InstallResult{}, fmt.Errorf("write remote agr script: %w", err)
 	}
 
+	// The same validation Home() applies: install is the other producer of a
+	// cached home, and a non-absolute value here would be persisted and then
+	// used to build every remote path for this host.
+	if !strings.HasPrefix(probe.Home, "/") {
+		return InstallResult{}, fmt.Errorf("remote host %q reported a non-absolute home %q", host, probe.Home)
+	}
 	info := HostInfo{
 		Home:        probe.Home,
 		Mux:         mux,

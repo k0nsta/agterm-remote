@@ -128,8 +128,14 @@ func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
 		}
 	}
 
-	argv := []string{"ssh", "-t", host, "--", agrPath, "attach", name}
+	// ssh hands its remote command to the login shell, which re-parses it, so
+	// the remote argv has to be quoted here the same way ExecSSH.Run quotes
+	// it — a home like `/srv/user data` or one containing `;` would otherwise
+	// break the attach or execute as a separate remote command.
+	argv := []string{"ssh", "-t", host, "--", remote.QuoteRemoteCommand(agrPath, "attach", name)}
 	if info.Mosh && localMoshPath(deps) != "" {
+		// mosh-server execs argv directly — no remote shell — so these stay
+		// separate and unquoted.
 		argv = []string{"mosh", host, "--", agrPath, "attach", name}
 	}
 	if isTerminalWriter(out) {

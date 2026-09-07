@@ -151,7 +151,11 @@ func TestOpenBindsBeforeReloadAndUpAndUsesSSHArgv(t *testing.T) {
 	if len(bound) != 1 || bound[0].Row != wantBinding.Row || bound[0].PaneID != wantBinding.PaneID || bound[0].Pane != wantBinding.Pane || bound[0].Host != wantBinding.Host || bound[0].Name != wantBinding.Name || bound[0].Mux != wantBinding.Mux {
 		t.Fatalf("binding = %#v, want %#v", bound, wantBinding)
 	}
-	wantArgv := []string{"ssh", "-t", "user@example.com", "--", "/home/remote/.local/bin/agr", "attach", "api"}
+	// The ssh remote command is one quoted string: the remote login shell
+	// re-parses whatever ssh sends, so a path with a space or `;` must not
+	// arrive as separate words. The mosh case below stays unquoted, because
+	// mosh-server execs argv directly.
+	wantArgv := []string{"ssh", "-t", "user@example.com", "--", `'/home/remote/.local/bin/agr' 'attach' 'api'`}
 	if !reflect.DeepEqual(tty.argv, wantArgv) {
 		t.Fatalf("TTY argv = %#v, want %#v", tty.argv, wantArgv)
 	}

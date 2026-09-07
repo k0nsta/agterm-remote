@@ -160,6 +160,16 @@ func resolveExecutable(name string) string {
 var _ SSH = (*ExecSSH)(nil)
 var _ TTY = (*ExecTTY)(nil)
 
+// QuoteRemoteCommand renders argv as one POSIX-shell command string for a
+// transport that hands its remote command to a shell — i.e. ssh. It is
+// exported because the interactive path builds its own argv and must apply the
+// same quoting: `ssh -t host -- <agrPath> attach <name>` is re-parsed by the
+// remote login shell exactly like a non-interactive command is.
+//
+// Do NOT use it for mosh: mosh-server execs argv directly with no remote
+// shell, so quoting there would make the quotes part of the path.
+func QuoteRemoteCommand(argv ...string) string { return shellQuoteArgv(argv) }
+
 // shellQuoteArgv renders argv as a single POSIX-shell command string in which
 // every element survives one round of shell parsing intact. Single quotes are
 // the only fully literal quoting in sh, so an embedded single quote is closed,
