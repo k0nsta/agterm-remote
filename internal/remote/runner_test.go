@@ -236,3 +236,34 @@ func TestRunnerAgrPathUsesCachedHome(t *testing.T) {
 		t.Fatalf("AgrPath() = %q, want %q", got, want)
 	}
 }
+
+// TestNoExpansionDependentArgvReachesSSH guards the class rather than the site.
+// Three separate fixes in this codebase have quoted argv correctly and then
+// broken a caller that silently depended on the remote shell expanding it
+// ($HOME probe, EnsureDirs, and AgrPath's fallback). ExecSSH quotes every argv
+// element, so any value carrying $HOME or a leading ~ MUST be inside an
+// explicit `sh -c` script, never a bare argument.
+func TestNoExpansionDependentArgvReachesSSH(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{"home probe", []string{"sh", "-c", `printf %s "$HOME"`}},
+		{"ensure dirs", []string{"sh", "-c", `mkdir -p "$HOME/.cache/agr" "$HOME/.config/agr" "$HOME/.local/bin"`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for i, arg := range tc.argv {
+				needsShell := strings.Contains(arg, "$HOME") || strings.HasPrefix(arg, "~")
+				if !needsShell {
+					continue
+				}
+				// An expansion-dependent value is only safe as the script
+				// operand of an explicit shell: argv[0]=="sh", argv[1]=="-c".
+				if i < 2 || tc.argv[0] != "sh" || tc.argv[1] != "-c" {
+					t.Fatalf("argv[%d]=%q depends on shell expansion but is not the operand of an explicit `sh -c`; ExecSSH quotes argv, so it would arrive literally", i, arg)
+				}
+			}
+		})
+	}
+}

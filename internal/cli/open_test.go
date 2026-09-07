@@ -14,10 +14,11 @@ import (
 )
 
 type openRemoteFake struct {
-	items []remote.Session
-	path  string
-	calls []string
-	err   error
+	items   []remote.Session
+	path    string
+	calls   []string
+	err     error
+	pathErr error
 }
 
 func (f *openRemoteFake) Sessions(_ context.Context, host string) ([]remote.Session, error) {
@@ -27,9 +28,12 @@ func (f *openRemoteFake) Sessions(_ context.Context, host string) ([]remote.Sess
 
 func (f *openRemoteFake) Reap(context.Context, string, string) error { return nil }
 
-func (f *openRemoteFake) AgrPath(host string) string {
+func (f *openRemoteFake) ResolveAgrPath(_ context.Context, host string) (string, error) {
 	f.calls = append(f.calls, "path "+host)
-	return f.path
+	if f.pathErr != nil {
+		return "", f.pathErr
+	}
+	return f.path, nil
 }
 
 type openBridgeFake struct {

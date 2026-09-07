@@ -91,7 +91,13 @@ func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
 			}
 		}
 	}
-	agrPath := deps.Remote.AgrPath(host)
+	// Resolved, never AgrPath: the uncached fallback is "$HOME/..." and reaches
+	// argv, where neither transport expands it — ssh because the argv is quoted
+	// (that is what stops injection), mosh because it execs argv with no shell.
+	agrPath, err := deps.Remote.ResolveAgrPath(ctx, host)
+	if err != nil {
+		return fmt.Errorf("resolve remote agr path for %q: %w", host, err)
+	}
 	if agrPath == "" {
 		return fmt.Errorf("remote agr path is unavailable for %q", host)
 	}

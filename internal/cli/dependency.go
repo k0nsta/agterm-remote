@@ -63,7 +63,7 @@ type DaemonStatus interface {
 // OpenerRemote contains the remote runner behavior needed by open.
 type OpenerRemote interface {
 	Sessions
-	AgrPath(host string) string
+	ResolveAgrPath(ctx context.Context, host string) (string, error)
 }
 
 // OpenBridge contains the daemon operations needed by open.

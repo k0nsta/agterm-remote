@@ -130,6 +130,19 @@ func (r *Runner) AgrPath(host string) string {
 	return "$HOME/" + remoteAgrPath
 }
 
+// ResolveAgrPath returns an ABSOLUTE remote agr path, probing $HOME when host
+// info is not cached. Callers that put the result into argv must use this, not
+// AgrPath: AgrPath's uncached fallback is the expansion-dependent
+// "$HOME/.local/bin/agr", which neither ssh (whose argv is quoted, so nothing
+// expands) nor mosh (which execs argv with no remote shell at all) will expand.
+func (r *Runner) ResolveAgrPath(ctx context.Context, host string) (string, error) {
+	home, err := r.Home(ctx, host)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, remoteAgrPath), nil
+}
+
 // Data invokes a data-producing remote verb, verifies agr's handshake header,
 // and returns only the body after that header. An unreachable host is checked
 // before header parsing so offline hosts never receive an installation hint.

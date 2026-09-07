@@ -28,7 +28,9 @@ func (f *dispatchRemoteFake) Reap(_ context.Context, host, name string) error {
 	return nil
 }
 
-func (f *dispatchRemoteFake) AgrPath(string) string { return f.path }
+func (f *dispatchRemoteFake) ResolveAgrPath(context.Context, string) (string, error) {
+	return f.path, nil
+}
 
 type dispatchBridgeFake struct {
 	calls []string
