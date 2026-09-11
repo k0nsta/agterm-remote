@@ -93,6 +93,11 @@ type hostRuntime struct {
 	// teardown then unlinked. torndown closes when the slot is finally free.
 	stopping bool
 	torndown chan struct{}
+	// bound is set once this runtime's Bind succeeded, so it owns the socket
+	// path. Teardown unlinks localSock only when bound: a runtime whose bind
+	// failed with "already in use" never owned the path, and removing it
+	// would unlink whatever live listener does.
+	bound bool
 }
 
 type versioner interface {
@@ -209,19 +214,21 @@ func (d *Daemon) Close() error {
 		d.cancel()
 	}
 	hosts := make([]*hostRuntime, 0, len(d.hosts))
+	bound := make([]bool, 0, len(d.hosts))
 	for _, host := range d.hosts {
 		hosts = append(hosts, host)
+		bound = append(bound, host.bound)
 	}
 	d.mu.Unlock()
 
-	for _, host := range hosts {
+	for i, host := range hosts {
 		if host.cancel != nil {
 			host.cancel()
 		}
 		if host.supervisor != nil {
 			host.supervisor.Stop()
 		}
-		if host.listener != nil {
+		if bound[i] {
 			_ = os.Remove(host.localSock)
 		}
 	}
@@ -233,8 +240,18 @@ func (d *Daemon) Close() error {
 		_ = control.Close()
 	}
 	d.children.Wait()
-	for _, host := range hosts {
-		_ = os.Remove(host.localSock)
+	// A start that was mid-Bind when the snapshot was taken has unwound by
+	// now (its children were reserved before publish); re-read which
+	// runtimes ended up owning their path.
+	d.mu.Lock()
+	for i, host := range hosts {
+		bound[i] = host.bound
+	}
+	d.mu.Unlock()
+	for i, host := range hosts {
+		if bound[i] {
+			_ = os.Remove(host.localSock)
+		}
 	}
 
 	var closeErr error
@@ -507,10 +524,18 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 	runtime.done.Add(goroutines)
 
 	d.mu.Lock()
-	abandon := func() {
-		// The goroutines this runtime armed will never start.
+	// release unwinds a runtime whose goroutines will never start. Every call
+	// happens with d.mu held continuously since the runtime was last checked
+	// or published, so no stopHost can have claimed it: this startHost is the
+	// sole owner of the torndown close. reservedChildren is true only after
+	// the publish below, where the d.children slots are taken; the
+	// pre-publish exits never reserved them.
+	release := func(reservedChildren bool) {
 		for i := 0; i < goroutines; i++ {
 			runtime.done.Done()
+			if reservedChildren {
+				d.children.Done()
+			}
 		}
 		close(runtime.torndown)
 		cancel()
@@ -519,7 +544,7 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 	for {
 		if !d.started || d.closing {
 			d.mu.Unlock()
-			abandon()
+			release(false)
 			return errors.New("daemon is stopping")
 		}
 		existing, exists := d.hosts[host]
@@ -529,7 +554,7 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		if !existing.stopping {
 			// A live host is already running: idempotent success.
 			d.mu.Unlock()
-			abandon()
+			release(false)
 			return nil
 		}
 		// A teardown holds the slot. Waiting for it is what makes an
@@ -545,24 +570,36 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 	// SSH round trips above — so binding before it would make the loser of a
 	// concurrent cold start fail hard on an address already in use, where it
 	// used to return nil idempotently.
+	// Reserve the children slots in the same critical section: Close flips
+	// d.closing under d.mu before it calls children.Wait, and the loop above
+	// read d.closing under d.mu, so Close either refuses this start or waits
+	// for it to unwind. Reserving after Bind let Close return with this
+	// host's goroutines about to launch behind it.
+	d.children.Add(goroutines)
 	d.hosts[host] = runtime
-	d.mu.Unlock()
 
 	// Bind before the host is announced started: Serve binds asynchronously,
 	// so a bind failure used to surface only as a log line while startHost
 	// returned success and the supervisor kept running — a tunnel with no
 	// receiver, silently dropping every status event.
+	//
+	// Bind with d.mu STILL HELD from the publish above. That serializes the
+	// bind with slot release: a stopHost cannot claim this runtime, hit its
+	// teardown timeout and free the slot to a successor while this bind is
+	// in flight, so no successor can ever find the path taken by a
+	// predecessor that is already going away — and no teardown can be
+	// racing this bind's failure path for the runtime. Bind is a handful of
+	// local syscalls, so the lock is held for microseconds.
 	if err := listener.Bind(); err != nil {
-		d.mu.Lock()
-		if d.hosts[host] == runtime {
-			delete(d.hosts, host)
-		}
+		// Nothing has seen this runtime as bound and the lock has been held
+		// since publish, so this startHost still owns the whole unwind.
+		delete(d.hosts, host)
 		d.mu.Unlock()
-		abandon()
+		release(true)
 		return fmt.Errorf("bind receiver socket for %s: %w", host, err)
 	}
-
-	d.children.Add(goroutines)
+	runtime.bound = true
+	d.mu.Unlock()
 	go func() {
 		defer d.children.Done()
 		defer runtime.done.Done()
@@ -607,7 +644,9 @@ func (d *Daemon) stopHost(host string) {
 	}
 	d.mu.Unlock()
 	if !ok {
-		_ = os.Remove(d.dirs.Recv(token.FileKey(host)))
+		// Nothing to tear down. Do not unlink the path either: a start for
+		// this host may be binding it right now, and a stale path is
+		// reclaimed by ListenClean on the next start anyway.
 		return
 	}
 	if runtime.cancel != nil {
@@ -626,9 +665,15 @@ func (d *Daemon) stopHost(host string) {
 	case <-time.After(5 * time.Second):
 		d.logf("warning: host %s teardown did not finish within 5s", host)
 	}
-	_ = os.Remove(runtime.localSock)
+	// The listener never unlinks its path; the daemon does, here, in the one
+	// section where ownership is known: this runtime bound the path AND
+	// still holds the slot, so no successor can have bound it. Removing and
+	// releasing the slot under one lock keeps that true.
 	d.mu.Lock()
 	if d.hosts[host] == runtime {
+		if runtime.bound {
+			_ = os.Remove(runtime.localSock)
+		}
 		delete(d.hosts, host)
 	}
 	d.mu.Unlock()

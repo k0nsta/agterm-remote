@@ -244,3 +244,72 @@ func receiveCall(t *testing.T, calls <-chan statusCall) statusCall {
 func boolValue(value *bool) bool {
 	return value != nil && *value
 }
+
+// blockingSink holds every Status call until released, standing in for a
+// handler wedged on a slow agterm socket.
+type blockingSink struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingSink) Status(_ context.Context, _ string, _ agterm.StatusArgs) error {
+	s.entered <- struct{}{}
+	<-s.release
+	return nil
+}
+
+// TestServeLateExitDoesNotUnlinkSuccessorSocket pins the ownership rule: a
+// listener whose Serve is still draining a wedged handler after cancellation
+// must not remove the socket path, because by then a successor may have bound
+// it. Before the rule, Serve's deferred os.Remove (and Go's unlink-on-close)
+// took the successor's socket with it — a host with a live tunnel and no
+// reachable receiver.
+func TestServeLateExitDoesNotUnlinkSuccessorSocket(t *testing.T) {
+	t.Helper()
+	dirs := paths.TestDirs(t)
+	path := dirs.Recv("host-a")
+	sink := &blockingSink{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	first := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{}, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- first.Serve(ctx) }()
+	waitForSocket(t, path)
+
+	// Wedge one handler inside the sink, then cancel: the first listener is
+	// closed but Serve cannot return until the handler does.
+	writeConnection(t, path, `{"cmd":"session-status","state":"active","session_id":"row-1"}`+"\n")
+	select {
+	case <-sink.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler never reached the sink")
+	}
+	cancel()
+
+	// A successor binds the same path while the first Serve is still alive.
+	second := NewListener("host-a", "host-a", dirs, &recordingSink{calls: make(chan statusCall, 1)}, &recordingResolver{}, nil)
+	if err := second.Bind(); err != nil {
+		t.Fatalf("successor Bind() error = %v", err)
+	}
+	defer second.closeResources()
+
+	// Let the wedged handler go; the first Serve now exits late.
+	close(sink.release)
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("first Serve() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first Serve() did not return after its handler was released")
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("successor socket gone after the predecessor's late exit: %v", err)
+	}
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("successor socket not reachable after the predecessor's late exit: %v", err)
+	}
+	_ = conn.Close()
+}

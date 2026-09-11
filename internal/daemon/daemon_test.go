@@ -418,3 +418,73 @@ func TestStopHostIsIdempotentAndConcurrencySafe(t *testing.T) {
 		t.Fatalf("receiver socket still present after teardown: %v", err)
 	}
 }
+
+// TestBindFailureRacingStopHostUnwindsCleanly covers the shape behind the
+// eighth review round's critical: a runtime that is published but never gets
+// to run its goroutines, with stopHost racing it. The bind now happens under
+// d.mu, so no teardown can claim the runtime mid-bind; what remains to hold
+// is that the failed start unwinds every reservation it made — the host slot,
+// runtime.done, d.children, torndown — so concurrent stops return, a restart
+// does not block on a torndown that never closes, and Close does not hang on
+// children that never launched.
+func TestBindFailureRacingStopHostUnwindsCleanly(t *testing.T) {
+	t.Helper()
+	dirs := paths.TestDirs(t)
+	r := newTask10Remote(t, nil)
+	d := New(task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{}, nil))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+
+	// A NON-EMPTY directory at the socket path makes Bind fail
+	// deterministically: ListenClean reclaims a stale path with os.Remove,
+	// which succeeds on an empty directory but not on one with contents.
+	sock := dirs.Recv(token.FileKey("host-x"))
+	if err := os.MkdirAll(sock, 0o700); err != nil {
+		t.Fatalf("occupy socket path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sock, "occupied"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("occupy socket path: %v", err)
+	}
+
+	var stops sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		stops.Add(1)
+		go func() { defer stops.Done(); d.stopHost("host-x") }()
+	}
+	if err := d.startHost(context.Background(), "host-x"); err == nil {
+		t.Fatal("startHost() error = nil, want bind failure")
+	}
+	stopped := make(chan struct{})
+	go func() { stops.Wait(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stopHost did not return after a failed bind")
+	}
+
+	d.mu.Lock()
+	_, running := d.hosts["host-x"]
+	d.mu.Unlock()
+	if running {
+		t.Fatal("host still registered after a failed bind")
+	}
+	// A restart must not wait on a torndown the failed start never closed.
+	_ = os.RemoveAll(sock)
+	if err := d.startHost(context.Background(), "host-x"); err != nil {
+		t.Fatalf("restart after failed bind error = %v", err)
+	}
+	// Close must not wait on children the failed start reserved but never
+	// launched.
+	closed := make(chan error, 1)
+	go func() { closed <- d.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close() hung: a failed start left children reserved")
+	}
+}

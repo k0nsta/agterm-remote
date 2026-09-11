@@ -22,6 +22,13 @@ const maxEventLine = 64 << 10
 
 // Listener receives events for one remote host. Each host has its own socket
 // because the forwarded socket itself supplies the host identity.
+//
+// The Listener never unlinks its socket path — not on Close, not when Serve
+// returns. Only its owner (the daemon's host lifecycle) knows whether the path
+// still belongs to this listener or to a successor that bound it after this
+// one was closed, so only the owner removes it. A late Serve exit therefore
+// cannot unlink a successor's socket. Stale paths left by a crash are
+// reclaimed by the next bind.
 type Listener struct {
 	host     string
 	path     string
@@ -100,10 +107,7 @@ func (l *Listener) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		l.closeResources()
-		_ = os.Remove(l.path)
-	}()
+	defer l.closeResources()
 
 	ctxDone := make(chan struct{})
 	go func() {
@@ -261,6 +265,11 @@ func listenClean(path string) (net.Listener, error) {
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("listen on receiver socket: %w", err)
+	}
+	// Go unlinks a Unix socket path on Close by default. Turn that off: by the
+	// time a wedged Serve gets to close, the path may already be a successor's.
+	if unixListener, ok := listener.(*net.UnixListener); ok {
+		unixListener.SetUnlinkOnClose(false)
 	}
 	return listener, nil
 }
