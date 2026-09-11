@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -486,5 +487,79 @@ func TestBindFailureRacingStopHostUnwindsCleanly(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("Close() hung: a failed start left children reserved")
+	}
+}
+
+// TestCloseIsBoundedByAWedgedChild pins the shutdown bound: a host goroutine
+// that ignores cancellation must not hold Close open. Close returns within the
+// teardown timeout, reports it as an error, and releases the daemon socket and
+// pid file — but NOT the lock, which fences a successor off shared state until
+// the wedged goroutines are actually gone; a later Close releases it once the
+// children have drained.
+func TestCloseIsBoundedByAWedgedChild(t *testing.T) {
+	t.Helper()
+	dirs := paths.TestDirs(t)
+	r := newTask10Remote(t, nil)
+	config := task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{exitDelay: time.Second}, nil)
+	config.TeardownTimeout = 200 * time.Millisecond
+	d := New(config)
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := d.startHost(context.Background(), "host-a"); err != nil {
+		t.Fatalf("startHost() error = %v", err)
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- d.Close() }()
+	select {
+	case err := <-closed:
+		if err == nil || !strings.Contains(err.Error(), "did not stop within") {
+			t.Fatalf("Close() error = %v, want the teardown timeout reported", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close() hung on a wedged child")
+	}
+	for _, path := range []string{dirs.Sock(), dirs.Pid()} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s still present after a timed-out Close: %v", path, err)
+		}
+	}
+
+	// The wedged goroutine is still alive, so the lock must still fence a
+	// successor off the shared state it may yet write.
+	fresh := New(task10Config(t, dirs, newTask10Remote(t, nil), nil, nil, nil, &task10Supervisors{}, nil))
+	if err := fresh.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "already running") {
+		_ = fresh.Close()
+		t.Fatalf("fresh Start() while the old daemon is not quiescent: error = %v, want refused as already running", err)
+	}
+
+	// Once the children drain, a later Close finishes the job and a
+	// successor can start.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err := d.Close()
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Close() after the wedge cleared still failed: %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err := fresh.Start(context.Background()); err != nil {
+		t.Fatalf("fresh Start() after the old daemon became quiescent: %v", err)
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatalf("fresh Close() error = %v", err)
+	}
+	// The same instance restarts too: the retried Closes above must have
+	// shared ONE waiter on d.children, or a leftover Wait would now be
+	// racing this Start's Add on a reused WaitGroup.
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("same-instance Start() after a timed-out Close: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("same-instance Close() error = %v", err)
 	}
 }

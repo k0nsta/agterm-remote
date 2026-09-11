@@ -35,7 +35,15 @@ type Config struct {
 	Supervisors Supervisors
 	Bindings    *bindings.Store
 	Logger      *log.Logger
+	// TeardownTimeout bounds how long stopHost and Close wait for goroutines
+	// to exit once told to; zero selects defaultTeardownTimeout.
+	TeardownTimeout time.Duration
 }
+
+// defaultTeardownTimeout is generous for a healthy child — they exit within
+// milliseconds of cancellation — and short enough that a handler wedged on a
+// peer that never answers cannot hold `agr down` or daemon shutdown hostage.
+const defaultTeardownTimeout = 5 * time.Second
 
 // Daemon supervises all hosts represented by the persistent binding store.
 type Daemon struct {
@@ -48,6 +56,15 @@ type Daemon struct {
 	supervisors Supervisors
 	store       *bindings.Store
 	logger      *log.Logger
+	// teardownTimeout bounds every wait on goroutines that were told to stop.
+	teardownTimeout time.Duration
+	// childrenDrained is closed by the ONE goroutine that waits on children
+	// for the current shutdown generation. Close retries after a timeout
+	// share it instead of each starting another children.Wait(): with several
+	// waiters woken at once, the newest lets Close release the lock, a Start
+	// re-arms the WaitGroup, and an older waiter still returning panics with
+	// "WaitGroup is reused before previous Wait has returned".
+	childrenDrained chan struct{}
 
 	mu       sync.Mutex
 	started  bool
@@ -118,19 +135,38 @@ func New(config Config) *Daemon {
 	if store == nil {
 		store = bindings.New(dirs)
 	}
+	timeout := config.TeardownTimeout
+	if timeout <= 0 {
+		timeout = defaultTeardownTimeout
+	}
 	return &Daemon{
-		dirs:        dirs,
-		ui:          config.UI,
-		remote:      config.Remote,
-		events:      config.Events,
-		rows:        config.Rows,
-		sink:        config.Sink,
-		supervisors: config.Supervisors,
-		store:       store,
-		logger:      config.Logger,
-		hosts:       make(map[string]*hostRuntime),
-		ensured:     make(map[string]bool),
-		eventReset:  make(chan struct{}),
+		dirs:            dirs,
+		ui:              config.UI,
+		remote:          config.Remote,
+		events:          config.Events,
+		rows:            config.Rows,
+		sink:            config.Sink,
+		supervisors:     config.Supervisors,
+		store:           store,
+		logger:          config.Logger,
+		teardownTimeout: timeout,
+		hosts:           make(map[string]*hostRuntime),
+		ensured:         make(map[string]bool),
+		eventReset:      make(chan struct{}),
+	}
+}
+
+// waitWithin waits for wg with a deadline and reports whether it finished.
+// On timeout the waiting goroutine is left behind until wg drains; nothing
+// else references it, so it simply exits when the wedged child finally does.
+func waitWithin(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 
@@ -239,7 +275,35 @@ func (d *Daemon) Close() error {
 	if control != nil {
 		_ = control.Close()
 	}
-	d.children.Wait()
+	// Bounded like stopHost: a child wedged on a peer that never answers must
+	// not hold shutdown hostage. The socket and pid paths are still removed
+	// below so a successor process can start once this one exits, and the
+	// caller learns about the wedge through the returned error rather than a
+	// log line it may never read. What is NOT released while goroutines
+	// survive: the flock — it is the fence that keeps a successor from
+	// starting against shared state (the binding store, agterm rows) that a
+	// wedged handler may still write — and the logger those goroutines still
+	// use. Both go at process exit, or on a later Close once the children
+	// have drained; until then Start is refused as "already running".
+	var closeErr error
+	d.mu.Lock()
+	drained := d.childrenDrained
+	if drained == nil {
+		drained = make(chan struct{})
+		d.childrenDrained = drained
+		go func(wg *sync.WaitGroup, done chan struct{}) { wg.Wait(); close(done) }(&d.children, drained)
+	}
+	d.mu.Unlock()
+	quiescent := true
+	select {
+	case <-drained:
+	case <-time.After(d.teardownTimeout):
+		quiescent = false
+	}
+	if !quiescent {
+		d.logf("warning: daemon goroutines did not finish within %s; releasing paths but holding the lock", d.teardownTimeout)
+		closeErr = fmt.Errorf("daemon goroutines did not stop within %s", d.teardownTimeout)
+	}
 	// A start that was mid-Bind when the snapshot was taken has unwound by
 	// now (its children were reserved before publish); re-read which
 	// runtimes ended up owning their path.
@@ -254,8 +318,7 @@ func (d *Daemon) Close() error {
 		}
 	}
 
-	var closeErr error
-	if err := os.Remove(d.dirs.Sock()); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(d.dirs.Sock()); err != nil && !errors.Is(err, os.ErrNotExist) && closeErr == nil {
 		closeErr = err
 	}
 	if err := os.Remove(d.dirs.Pid()); err != nil && !errors.Is(err, os.ErrNotExist) && closeErr == nil {
@@ -263,21 +326,26 @@ func (d *Daemon) Close() error {
 	}
 
 	d.mu.Lock()
-	if d.lockFile != nil {
-		if err := syscall.Flock(int(d.lockFile.Fd()), syscall.LOCK_UN); err != nil && closeErr == nil {
-			closeErr = fmt.Errorf("unlock daemon: %w", err)
+	if quiescent {
+		if d.lockFile != nil {
+			if err := syscall.Flock(int(d.lockFile.Fd()), syscall.LOCK_UN); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("unlock daemon: %w", err)
+			}
+			if err := d.lockFile.Close(); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("close daemon lock: %w", err)
+			}
+			d.lockFile = nil
 		}
-		if err := d.lockFile.Close(); err != nil && closeErr == nil {
-			closeErr = fmt.Errorf("close daemon lock: %w", err)
+		if d.logFile != nil {
+			if err := d.logFile.Close(); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("close daemon log: %w", err)
+			}
+			d.logFile = nil
+			d.logger = nil
 		}
-		d.lockFile = nil
-	}
-	if d.logFile != nil {
-		if err := d.logFile.Close(); err != nil && closeErr == nil {
-			closeErr = fmt.Errorf("close daemon log: %w", err)
-		}
-		d.logFile = nil
-		d.logger = nil
+		// The generation's waiter has returned; the next Start may re-arm
+		// children, and the next Close starts a fresh waiter.
+		d.childrenDrained = nil
 	}
 	d.started = false
 	d.closing = false
@@ -658,12 +726,8 @@ func (d *Daemon) stopHost(host string) {
 	// Wait for this host's goroutines before removing the socket: the
 	// listener removes its own path on the way out, so returning early lets
 	// that deferred removal race a later `up` that has re-bound the path.
-	waited := make(chan struct{})
-	go func() { runtime.done.Wait(); close(waited) }()
-	select {
-	case <-waited:
-	case <-time.After(5 * time.Second):
-		d.logf("warning: host %s teardown did not finish within 5s", host)
+	if !waitWithin(&runtime.done, d.teardownTimeout) {
+		d.logf("warning: host %s teardown did not finish within %s", host, d.teardownTimeout)
 	}
 	// The listener never unlinks its path; the daemon does, here, in the one
 	// section where ownership is known: this runtime bound the path AND
