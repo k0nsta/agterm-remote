@@ -335,3 +335,86 @@ func containsText(t *testing.T, err error, want string) bool {
 	t.Helper()
 	return err != nil && bytes.Contains([]byte(err.Error()), []byte(want))
 }
+
+// TestStopHostHoldsSlotUntilTeardownCompletes pins the lifecycle invariant the
+// loop kept breaking: the host slot must stay claimed for the WHOLE of a
+// teardown. Releasing it early let a concurrent start bind a replacement
+// receiver socket at the same path, which the finishing teardown then
+// unlinked — leaving that host with a live tunnel and nothing listening.
+func TestStopHostHoldsSlotUntilTeardownCompletes(t *testing.T) {
+	t.Helper()
+	dirs := paths.TestDirs(t)
+	r := newTask10Remote(t, nil)
+	d := New(task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{exitDelay: 300 * time.Millisecond}, nil))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+
+	ctx := context.Background()
+	if err := d.startHost(ctx, "host-a"); err != nil {
+		t.Fatalf("startHost() error = %v", err)
+	}
+	sock := dirs.Recv(token.FileKey("host-a"))
+	if _, err := os.Stat(sock); err != nil {
+		t.Fatalf("receiver socket missing after start: %v", err)
+	}
+
+	// Place the start INSIDE the teardown window rather than hoping to land
+	// there: the supervisor takes 300ms to exit, so stopHost is still waiting
+	// when the start runs.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); d.stopHost("host-a") }()
+	time.Sleep(60 * time.Millisecond)
+	if err := d.startHost(ctx, "host-a"); err != nil {
+		t.Fatalf("startHost() during teardown error = %v", err)
+	}
+	wg.Wait()
+
+	// The restarted host must still own a socket on disk. With the slot
+	// released early, the finishing teardown unlinks the replacement the
+	// start just bound, and the host runs with nothing listening.
+	d.mu.Lock()
+	_, running := d.hosts["host-a"]
+	d.mu.Unlock()
+	if !running {
+		t.Fatal("host is not registered after a start during teardown")
+	}
+	if _, err := os.Stat(sock); err != nil {
+		t.Fatalf("host is running but its receiver socket was unlinked: %v", err)
+	}
+}
+
+// TestStopHostIsIdempotentAndConcurrencySafe covers a second stop arriving
+// while the first is still tearing down: it must wait, not double-free.
+func TestStopHostIsIdempotentAndConcurrencySafe(t *testing.T) {
+	t.Helper()
+	dirs := paths.TestDirs(t)
+	r := newTask10Remote(t, nil)
+	d := New(task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{}, nil))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+
+	if err := d.startHost(context.Background(), "host-b"); err != nil {
+		t.Fatalf("startHost() error = %v", err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); d.stopHost("host-b") }()
+	}
+	wg.Wait()
+
+	d.mu.Lock()
+	_, running := d.hosts["host-b"]
+	d.mu.Unlock()
+	if running {
+		t.Fatal("host still registered after stopHost returned")
+	}
+	if _, err := os.Stat(dirs.Recv(token.FileKey("host-b"))); !os.IsNotExist(err) {
+		t.Fatalf("receiver socket still present after teardown: %v", err)
+	}
+}

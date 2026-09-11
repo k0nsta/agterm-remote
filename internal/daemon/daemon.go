@@ -87,6 +87,12 @@ type hostRuntime struct {
 	// Without it, the listener's deferred os.Remove could fire after a later
 	// `up` had already bound a new socket at the same path, deleting it.
 	done sync.WaitGroup
+	// stopping marks a teardown in progress. The runtime STAYS in d.hosts for
+	// the whole of it, so the host slot is held until the socket is gone —
+	// releasing it early let a concurrent start bind a replacement that this
+	// teardown then unlinked. torndown closes when the slot is finally free.
+	stopping bool
+	torndown chan struct{}
 }
 
 type versioner interface {
@@ -427,9 +433,23 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		d.mu.Unlock()
 		return errors.New("daemon is stopping")
 	}
-	if _, exists := d.hosts[host]; exists {
+	// A host mid-teardown is NOT a started host. Reporting success here left
+	// the caller believing the host was up while the teardown went on to
+	// delete it, so `agr down` immediately followed by `agr open` ended with
+	// no host running at all. Wait the teardown out and start properly; only
+	// a live entry is idempotent success.
+	for {
+		existing, exists := d.hosts[host]
+		if !exists {
+			break
+		}
+		if !existing.stopping {
+			d.mu.Unlock()
+			return nil
+		}
 		d.mu.Unlock()
-		return nil
+		<-existing.torndown
+		d.mu.Lock()
 	}
 	d.mu.Unlock()
 	if d.remote == nil {
@@ -474,20 +494,51 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		host: host, hostKey: hostKey, localSock: localSock,
 		listener: listener, cancel: cancel, supervisor: supervisor,
 		state: "down", since: time.Now().UTC(), attempts: 1,
+		torndown: make(chan struct{}),
 	}
+	// Arm the WaitGroup BEFORE the runtime can be reached from d.hosts: a
+	// concurrent stopHost may call Wait as soon as it is published, and
+	// sync.WaitGroup forbids an Add that raises the counter from zero racing
+	// a Wait.
+	goroutines := 2
+	if hasStateSource {
+		goroutines = 3
+	}
+	runtime.done.Add(goroutines)
 
 	d.mu.Lock()
-	if !d.started || d.closing {
-		d.mu.Unlock()
+	abandon := func() {
+		// The goroutines this runtime armed will never start.
+		for i := 0; i < goroutines; i++ {
+			runtime.done.Done()
+		}
+		close(runtime.torndown)
 		cancel()
 		supervisor.Stop()
-		return errors.New("daemon is stopping")
 	}
-	if _, exists := d.hosts[host]; exists {
+	for {
+		if !d.started || d.closing {
+			d.mu.Unlock()
+			abandon()
+			return errors.New("daemon is stopping")
+		}
+		existing, exists := d.hosts[host]
+		if !exists {
+			break
+		}
+		if !existing.stopping {
+			// A live host is already running: idempotent success.
+			d.mu.Unlock()
+			abandon()
+			return nil
+		}
+		// A teardown holds the slot. Waiting for it is what makes an
+		// immediate down/up safe — proceeding here would bind a socket the
+		// predecessor is about to unlink, and treating the entry as started
+		// would report success for a host that is going away.
 		d.mu.Unlock()
-		cancel()
-		supervisor.Stop()
-		return nil
+		<-existing.torndown
+		d.mu.Lock()
 	}
 	// Claim the host under the lock BEFORE binding. The duplicate check above
 	// is the authoritative one — the early check races across the seconds of
@@ -507,19 +558,11 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 			delete(d.hosts, host)
 		}
 		d.mu.Unlock()
-		cancel()
-		supervisor.Stop()
+		abandon()
 		return fmt.Errorf("bind receiver socket for %s: %w", host, err)
 	}
 
-	d.mu.Lock()
-	d.children.Add(2)
-	if hasStateSource {
-		d.children.Add(1)
-	}
-	d.mu.Unlock()
-
-	runtime.done.Add(2)
+	d.children.Add(goroutines)
 	go func() {
 		defer d.children.Done()
 		defer runtime.done.Done()
@@ -535,7 +578,6 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		}
 	}()
 	if hasStateSource {
-		runtime.done.Add(1)
 		go func() {
 			defer d.children.Done()
 			defer runtime.done.Done()
@@ -548,8 +590,20 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 func (d *Daemon) stopHost(host string) {
 	d.mu.Lock()
 	runtime, ok := d.hosts[host]
+	if ok && runtime.stopping {
+		// Another stopHost owns this teardown; wait for it so callers see a
+		// stopped host on return.
+		d.mu.Unlock()
+		<-runtime.torndown
+		return
+	}
 	if ok {
-		delete(d.hosts, host)
+		// Keep the entry in place for the whole teardown. Deleting it here
+		// released the host slot while the old listener was still running,
+		// so a concurrent start could bind a replacement socket at the same
+		// path that the os.Remove below then unlinked — leaving that host
+		// with a live tunnel and no reachable receiver.
+		runtime.stopping = true
 	}
 	d.mu.Unlock()
 	if !ok {
@@ -573,6 +627,12 @@ func (d *Daemon) stopHost(host string) {
 		d.logf("warning: host %s teardown did not finish within 5s", host)
 	}
 	_ = os.Remove(runtime.localSock)
+	d.mu.Lock()
+	if d.hosts[host] == runtime {
+		delete(d.hosts, host)
+	}
+	d.mu.Unlock()
+	close(runtime.torndown)
 }
 
 func isConnectionRefused(err error) bool {

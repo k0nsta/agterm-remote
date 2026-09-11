@@ -97,15 +97,20 @@ type task10Supervisor struct {
 	changes  chan bridge.State
 	stop     chan struct{}
 	stopOnce sync.Once
+	// exitDelay makes teardown take observable time, so a test can place a
+	// concurrent start inside the teardown window instead of hoping to hit it.
+	exitDelay time.Duration
 }
 
 func (s *task10Supervisor) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
-		return nil
 	case <-s.stop:
-		return nil
 	}
+	if s.exitDelay > 0 {
+		time.Sleep(s.exitDelay)
+	}
+	return nil
 }
 
 func (s *task10Supervisor) Stop() {
@@ -115,14 +120,16 @@ func (s *task10Supervisor) Stop() {
 func (s *task10Supervisor) Changes() <-chan bridge.State { return s.changes }
 
 type task10Supervisors struct {
-	mu      sync.Mutex
-	created []*task10Supervisor
+	mu        sync.Mutex
+	created   []*task10Supervisor
+	exitDelay time.Duration
 }
 
 func (f *task10Supervisors) New(string, string, string, string) Supervisor {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	supervisor := newTask10SupervisorForFactory()
+	supervisor.exitDelay = f.exitDelay
 	f.created = append(f.created, supervisor)
 	return supervisor
 }

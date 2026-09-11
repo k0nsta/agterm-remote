@@ -245,25 +245,101 @@ func TestRunnerAgrPathUsesCachedHome(t *testing.T) {
 // explicit `sh -c` script, never a bare argument.
 func TestNoExpansionDependentArgvReachesSSH(t *testing.T) {
 	t.Helper()
+	// Drive the REAL callers and inspect the argv they actually send. An
+	// earlier version of this test walked literals written inside the test,
+	// so it asserted against its own fixture and could not fail if production
+	// reintroduced a bare "$HOME" argument — which is the whole defect class
+	// it exists to guard.
 	for _, tc := range []struct {
-		name string
-		argv []string
+		name   string
+		invoke func(*testing.T, *Runner) //nolint:thelper // invoked as the subtest body
 	}{
-		{"home probe", []string{"sh", "-c", `printf %s "$HOME"`}},
-		{"ensure dirs", []string{"sh", "-c", `mkdir -p "$HOME/.cache/agr" "$HOME/.config/agr" "$HOME/.local/bin"`}},
+		{"Home", func(t *testing.T, r *Runner) {
+			t.Helper()
+			if _, err := r.Home(context.Background(), "user@example.com"); err != nil {
+				t.Fatalf("Home() error = %v", err)
+			}
+		}},
+		{"EnsureDirs", func(t *testing.T, r *Runner) {
+			t.Helper()
+			if err := r.EnsureDirs(context.Background(), "user@example.com"); err != nil {
+				t.Fatalf("EnsureDirs() error = %v", err)
+			}
+		}},
+		{"ResolveAgrPath", func(t *testing.T, r *Runner) {
+			t.Helper()
+			if _, err := r.ResolveAgrPath(context.Background(), "user@example.com"); err != nil {
+				t.Fatalf("ResolveAgrPath() error = %v", err)
+			}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for i, arg := range tc.argv {
-				needsShell := strings.Contains(arg, "$HOME") || strings.HasPrefix(arg, "~")
-				if !needsShell {
-					continue
-				}
-				// An expansion-dependent value is only safe as the script
-				// operand of an explicit shell: argv[0]=="sh", argv[1]=="-c".
-				if i < 2 || tc.argv[0] != "sh" || tc.argv[1] != "-c" {
-					t.Fatalf("argv[%d]=%q depends on shell expansion but is not the operand of an explicit `sh -c`; ExecSSH quotes argv, so it would arrive literally", i, arg)
-				}
+			ssh := &runnerSSH{body: []byte("/home/remote\n")}
+			tc.invoke(t, NewRunner(ssh, paths.TestDirs(t)))
+			calls := ssh.Calls(t)
+			if len(calls) == 0 {
+				t.Fatal("caller made no SSH call, so the invariant was never exercised")
 			}
+			for _, call := range calls {
+				assertExpansionIsExplicit(t, call.argv)
+			}
+		})
+	}
+}
+
+// assertExpansionIsExplicit enforces the invariant on one real argv: ExecSSH
+// quotes every element, so a value carrying $HOME or a leading ~ only expands
+// when it is the script operand of an explicit `sh -c`.
+func assertExpansionIsExplicit(t *testing.T, argv []string) {
+	t.Helper()
+	for i, arg := range argv {
+		if !strings.Contains(arg, "$HOME") && !strings.HasPrefix(arg, "~") {
+			continue
+		}
+		if i < 2 || argv[0] != "sh" || argv[1] != "-c" {
+			t.Fatalf("argv %q element %d depends on shell expansion but is not the operand of an explicit `sh -c`; ExecSSH quotes argv, so it would arrive literally", argv, i)
+		}
+	}
+}
+
+// TestResolveAgrPathReturnsAbsolutePathAndRejectsBadHome covers the two
+// behaviours that replaced AgrPath's expansion-dependent fallback. Neither was
+// exercised before: ResolveAgrPath had no test at all, and the non-absolute
+// guard was added without one.
+func TestResolveAgrPathReturnsAbsolutePathAndRejectsBadHome(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name    string
+		probe   string
+		want    string
+		wantErr string
+	}{
+		{name: "absolute home", probe: "/home/remote\n", want: "/home/remote/.local/bin/agr"},
+		{name: "home with spaces", probe: "/srv/user data\n", want: "/srv/user data/.local/bin/agr"},
+		// A relative or empty probe must never be cached: every remote path
+		// for the host is built from it.
+		{name: "relative home", probe: "relative/home\n", wantErr: "non-absolute"},
+		{name: "empty home", probe: "\n", wantErr: "empty home"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ssh := &runnerSSH{body: []byte(tc.probe)}
+			runner := NewRunner(ssh, paths.TestDirs(t))
+			got, err := runner.ResolveAgrPath(context.Background(), "user@example.com")
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("ResolveAgrPath() error = %v, want one containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveAgrPath() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("ResolveAgrPath() = %q, want %q", got, tc.want)
+			}
+			// The returned path must be usable as argv, i.e. carry no value
+			// that needs a remote shell to expand.
+			assertExpansionIsExplicit(t, []string{got})
 		})
 	}
 }
