@@ -286,8 +286,24 @@ func TestServeLateExitDoesNotUnlinkSuccessorSocket(t *testing.T) {
 		t.Fatal("handler never reached the sink")
 	}
 	cancel()
+	// Cancellation closes the first listener from a goroutine; wait until the
+	// path stops accepting (ECONNREFUSED on a node that is still there) before
+	// the successor probes it, or ListenClean rightly reports it in use.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		probe, dialErr := net.Dial("unix", path)
+		if dialErr != nil {
+			break
+		}
+		_ = probe.Close()
+		if time.Now().After(deadline) {
+			t.Fatal("first listener never stopped accepting after cancellation")
+		}
+		time.Sleep(time.Millisecond)
+	}
 
-	// A successor binds the same path while the first Serve is still alive.
+	// A successor binds the same path while the first Serve is still alive
+	// (its handler is still wedged in the sink).
 	second := NewListener("host-a", "host-a", dirs, &recordingSink{calls: make(chan statusCall, 1)}, &recordingResolver{}, nil)
 	if err := second.Bind(); err != nil {
 		t.Fatalf("successor Bind() error = %v", err)
