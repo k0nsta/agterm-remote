@@ -1,4 +1,4 @@
-package daemon
+package unixsock
 
 import (
 	"errors"
@@ -12,6 +12,12 @@ import (
 // ListenClean opens a Unix socket, removing a path left behind by a crashed
 // process. A successful probe means another process owns the socket and the
 // path is preserved.
+//
+// The listener returned never unlinks its path — not on Close either, which is
+// Go's default for Unix listeners. Only the caller knows whether the path still
+// belongs to this listener or to a successor that bound it after this one was
+// closed, so the caller removes it. Stale paths left by a crash are reclaimed
+// by the next ListenClean.
 func ListenClean(path string) (net.Listener, error) {
 	if path == "" {
 		return nil, errors.New("empty Unix socket path")
@@ -36,6 +42,9 @@ func ListenClean(path string) (net.Listener, error) {
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("listen on socket: %w", err)
+	}
+	if unixListener, ok := listener.(*net.UnixListener); ok {
+		unixListener.SetUnlinkOnClose(false)
 	}
 	return listener, nil
 }

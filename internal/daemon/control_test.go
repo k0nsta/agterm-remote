@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/bridge"
 	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -49,6 +52,7 @@ type task10Remote struct {
 	home      map[string]string
 	sessions  map[string][]remote.Session
 	ensured   map[string]int
+	ensureErr map[string]error
 	trace     *task10Trace
 	sessionCh chan string
 }
@@ -59,6 +63,7 @@ func newTask10Remote(t *testing.T, trace *task10Trace) *task10Remote {
 		home:      make(map[string]string),
 		sessions:  make(map[string][]remote.Session),
 		ensured:   make(map[string]int),
+		ensureErr: make(map[string]error),
 		trace:     trace,
 		sessionCh: make(chan string, 16),
 	}
@@ -88,9 +93,9 @@ func (r *task10Remote) Sessions(_ context.Context, host string) ([]remote.Sessio
 
 func (r *task10Remote) EnsureDirs(_ context.Context, host string) error {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.ensured[host]++
-	r.mu.Unlock()
-	return nil
+	return r.ensureErr[host]
 }
 
 type task10Supervisor struct {
@@ -128,14 +133,9 @@ type task10Supervisors struct {
 func (f *task10Supervisors) New(string, string, string, string) Supervisor {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	supervisor := newTask10SupervisorForFactory()
-	supervisor.exitDelay = f.exitDelay
+	supervisor := &task10Supervisor{changes: make(chan bridge.State, 8), stop: make(chan struct{}), exitDelay: f.exitDelay}
 	f.created = append(f.created, supervisor)
 	return supervisor
-}
-
-func newTask10SupervisorForFactory() *task10Supervisor {
-	return &task10Supervisor{changes: make(chan bridge.State, 8), stop: make(chan struct{})}
 }
 
 func (f *task10Supervisors) latest(t *testing.T) *task10Supervisor {
@@ -302,7 +302,7 @@ func waitForTask10Call(t *testing.T, calls <-chan task10UICall, kind, row string
 
 func TestDaemonControlRoundTripAndInvalidHosts(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	r := newTask10Remote(t, nil)
 	factory := &task10Supervisors{}
 	d := New(task10Config(t, dirs, r, nil, nil, nil, factory, nil))
@@ -341,7 +341,7 @@ func TestDaemonControlRoundTripAndInvalidHosts(t *testing.T) {
 
 func TestDaemonControlMalformedLineGetsErrorResponse(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	d := New(task10Config(t, dirs, nil, nil, nil, nil, nil, nil))
 	if err := d.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -360,7 +360,7 @@ func TestDaemonControlMalformedLineGetsErrorResponse(t *testing.T) {
 		t.Fatalf("read malformed response: %v", err)
 	}
 	var response controlResponse
-	if err := json.Unmarshal(bytesTrimSpace(line), &response); err != nil {
+	if err := json.Unmarshal(bytes.TrimSpace(line), &response); err != nil {
 		t.Fatalf("decode malformed response: %v", err)
 	}
 	if response.OK || response.Error == "" {
@@ -370,7 +370,7 @@ func TestDaemonControlMalformedLineGetsErrorResponse(t *testing.T) {
 
 func TestDaemonControlUsesListenCleanForLeftoverSocket(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	if err := os.WriteFile(dirs.Sock(), []byte("stale"), 0o600); err != nil {
 		t.Fatalf("write stale control socket: %v", err)
 	}
@@ -381,5 +381,138 @@ func TestDaemonControlUsesListenCleanForLeftoverSocket(t *testing.T) {
 	defer func() { _ = d.Close() }()
 	if _, err := os.Stat(dirs.Sock()); err != nil {
 		t.Fatalf("control socket after Start(): %v", err)
+	}
+}
+
+// TestReloadBindingsIsolatesUnreachableHost pins the per-host isolation of
+// reload-bindings, which runs on every `agr open`: one host whose SSH setup
+// fails must not fail the reload or keep the other hosts from starting. The
+// daemon starts EMPTY and the bindings appear afterwards, so it is the reload
+// — not startup — that has to start the reachable host.
+func TestReloadBindingsIsolatesUnreachableHost(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	r := newTask10Remote(t, nil)
+	r.ensureErr["host-bad"] = errors.New("ssh: connect: no route to host")
+	store := bindings.New(dirs)
+	d := New(task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{}, store))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	d.mu.Lock()
+	running := len(d.hosts)
+	d.mu.Unlock()
+	if running != 0 {
+		t.Fatalf("hosts running after an empty start = %d, want 0", running)
+	}
+
+	for _, b := range []bindings.Binding{
+		{Row: "row-good", Host: "host-good", Name: "main"},
+		{Row: "row-bad", Host: "host-bad", Name: "main"},
+	} {
+		if err := store.Bind(b); err != nil {
+			t.Fatalf("Bind(%s) error = %v", b.Host, err)
+		}
+	}
+	reload := controlExchange(t, dirs.Sock(), controlRequest{Op: "reload-bindings"})
+	if !reload.OK {
+		t.Fatalf("reload-bindings with one unreachable host = %#v, want ok", reload)
+	}
+	d.mu.Lock()
+	_, good := d.hosts["host-good"]
+	_, bad := d.hosts["host-bad"]
+	d.mu.Unlock()
+	if !good {
+		t.Fatal("reachable host not started by a reload with an unreachable sibling")
+	}
+	if bad {
+		t.Fatal("unreachable host registered as running")
+	}
+	r.mu.Lock()
+	attempted := r.ensured["host-bad"]
+	r.mu.Unlock()
+	if attempted == 0 {
+		t.Fatal("unreachable host was never attempted, so the isolation was not exercised")
+	}
+}
+
+// TestDaemonControlOversizedRequestGetsErrorResponse pins the per-request
+// line cap: a client that never sends a newline gets a bounded error response
+// instead of growing the daemon's buffer without limit.
+func TestDaemonControlOversizedRequestGetsErrorResponse(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	d := New(task10Config(t, dirs, newTask10Remote(t, nil), nil, nil, nil, &task10Supervisors{}, nil))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+
+	conn, err := net.Dial("unix", dirs.Sock())
+	if err != nil {
+		t.Fatalf("dial daemon control socket: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	// Well past the cap: the reader checks it per buffered chunk, so a
+	// payload one byte over would still be waiting for its next chunk.
+	go func() {
+		_, _ = conn.Write(bytes.Repeat([]byte("a"), maxControlLine+64<<10))
+	}()
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read oversized-request response: %v", err)
+	}
+	var response controlResponse
+	if err := json.Unmarshal(line, &response); err != nil {
+		t.Fatalf("decode response %q: %v", line, err)
+	}
+	if response.OK || !strings.Contains(response.Error, "exceeds 1 MiB") {
+		t.Fatalf("oversized request response = %#v, want the 1 MiB error", response)
+	}
+}
+
+// TestCloseUnblocksIdleControlConnection pins that shutdown closes accepted
+// control connections: a client that connected and never sent a request must
+// not hold Close open — Close returns promptly and clean, not on its timeout.
+func TestCloseUnblocksIdleControlConnection(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	d := New(task10Config(t, dirs, newTask10Remote(t, nil), nil, nil, nil, &task10Supervisors{}, nil))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	idle, err := net.Dial("unix", dirs.Sock())
+	if err != nil {
+		t.Fatalf("dial daemon control socket: %v", err)
+	}
+	defer func() { _ = idle.Close() }()
+	// A successful Dial only means the kernel queued the connection; wait
+	// until the daemon has accepted and registered it, or Close could run
+	// before there is an idle handler to unblock.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		d.controlMu.Lock()
+		tracked := len(d.controlConns)
+		d.controlMu.Unlock()
+		if tracked == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("daemon never registered the idle control connection (tracked = %d)", tracked)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- d.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("Close() with an idle control connection = %v, want nil (the connection is closed, not timed out)", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close() hung on an idle control connection")
 	}
 }

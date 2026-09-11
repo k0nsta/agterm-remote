@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 )
 
 func TestParseProbe(t *testing.T) {
@@ -41,21 +41,21 @@ func TestParseProbe(t *testing.T) {
 	}
 }
 
-func TestParseProbeMissingAndAliases(t *testing.T) {
+// TestParseProbeMissingValuesAndUnknownKeys pins the two lenient parts of the
+// wire format: MISSING and the boolean spellings the script uses, and unknown
+// keys being ignored so an older client survives a newer script.
+func TestParseProbeMissingValuesAndUnknownKeys(t *testing.T) {
 	t.Helper()
-	body := []byte("zmx_version\tMISSING\nzmx_labels\t0\nzmx_dir\t\n" +
-		"tmux_version\tMISSING\nnc_u\tfalse\npython3\tmissing\nsocat\t0\n" +
-		"mosh_server\t0\nhome\t/home/x\nagr_version\tMISSING\n" +
-		"sock_present\tpresent\nlegacy\ttargets=4,agr_target=5\n")
+	body := []byte("zmx\tMISSING\nzmx_labels\t0\nzmx_dir\t\n" +
+		"tmux\tMISSING\nnc_u\tfalse\npython3\tmissing\nsocat\t0\n" +
+		"mosh_server\t0\nhome\t/home/x\nagr\tMISSING\n" +
+		"sock\tpresent\nfuture_key\twhatever\n")
 	got, err := ParseProbe(body)
 	if err != nil {
 		t.Fatalf("ParseProbe() error = %v", err)
 	}
 	if got.ZmxVersion != "" || got.TmuxVersion != "" || got.AgrVersion != "" || got.ZmxLabels || got.NCU || got.Python3 || got.Socat || got.MoshServer || !got.Sock {
 		t.Fatalf("ParseProbe() missing values = %#v", got)
-	}
-	if got.LegacyTargets != 4 || got.LegacyAgrTarget != 5 {
-		t.Fatalf("ParseProbe() legacy counts = %d/%d, want 4/5", got.LegacyTargets, got.LegacyAgrTarget)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestParseProbeRejectsMalformedValues(t *testing.T) {
 func TestRunnerProbeUsesConstantScriptOnStdin(t *testing.T) {
 	t.Helper()
 	ssh := &runnerSSH{body: []byte("home\t/home/remote\n")}
-	runner := NewRunner(ssh, paths.TestDirs(t))
+	runner := NewRunner(ssh, pathstest.Dirs(t))
 	if _, err := runner.Probe(context.Background(), "host"); err != nil {
 		t.Fatalf("Probe() error = %v", err)
 	}
@@ -102,7 +102,7 @@ func TestRunnerProbeUsesConstantScriptOnStdin(t *testing.T) {
 func TestRunnerProbePropagatesSSHFailure(t *testing.T) {
 	t.Helper()
 	ssh := &runnerSSH{err: errors.New("offline")}
-	if _, err := NewRunner(ssh, paths.TestDirs(t)).Probe(context.Background(), "host"); err == nil {
+	if _, err := NewRunner(ssh, pathstest.Dirs(t)).Probe(context.Background(), "host"); err == nil {
 		t.Fatal("Probe() error = nil, want SSH error")
 	}
 }

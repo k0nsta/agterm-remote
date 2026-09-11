@@ -25,7 +25,7 @@ type OpenDependencies struct {
 	Remote   OpenerRemote
 	Picker   Picker
 	Rows     Rows
-	Store    *bindings.Store
+	Store    BindingStore
 	Bridge   OpenBridge
 	Labeler  Labeler
 	HostInfo HostInfoReader
@@ -43,6 +43,7 @@ var ErrPickerUnavailable = errors.New("picker unavailable")
 // Open attaches to a remote agr session, optionally adopting the current
 // agterm row. A blank name invokes the native picker before any side effects.
 func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
+	deps.Store = storeOrNil(deps.Store)
 	if ctx == nil {
 		return errors.New("nil open context")
 	}
@@ -91,9 +92,9 @@ func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
 			}
 		}
 	}
-	// Resolved, never AgrPath: the uncached fallback is "$HOME/..." and reaches
-	// argv, where neither transport expands it — ssh because the argv is quoted
-	// (that is what stops injection), mosh because it execs argv with no shell.
+	// The path goes into argv, where neither transport expands a "$HOME/..."
+	// — ssh because the argv is quoted (that is what stops injection), mosh
+	// because it execs argv with no shell — so it must be absolute.
 	agrPath, err := deps.Remote.ResolveAgrPath(ctx, host)
 	if err != nil {
 		return fmt.Errorf("resolve remote agr path for %q: %w", host, err)
@@ -254,3 +255,13 @@ func RunOpen(ctx context.Context, host, name string, deps OpenDependencies, errw
 }
 
 var _ OpenerRemote = (*remote.Runner)(nil)
+
+// storeOrNil folds a typed-nil *bindings.Store into a nil interface, so the
+// "no store wired" checks below keep skipping the optional binding work the
+// way they did when the field was the concrete pointer.
+func storeOrNil(store BindingStore) BindingStore {
+	if concrete, ok := store.(*bindings.Store); ok && concrete == nil {
+		return nil
+	}
+	return store
+}

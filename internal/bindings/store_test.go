@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 )
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
-	return New(paths.TestDirs(t))
+	return New(pathstest.Dirs(t))
 }
 
 func binding(t *testing.T, row, host, name string) Binding {
@@ -125,39 +125,6 @@ func TestStoreLookupsAndUnbind(t *testing.T) {
 	}
 	if err := store.UnbindRow("missing"); err != nil {
 		t.Fatalf("idempotent UnbindRow() error = %v", err)
-	}
-}
-
-func TestDanglingAndReconcile(t *testing.T) {
-	t.Helper()
-	store := testStore(t)
-	items := []Binding{
-		binding(t, "live", "host-a", "api"),
-		binding(t, "gone-a", "host-a", "web"),
-		binding(t, "gone-b", "host-a", "worker"),
-		binding(t, "other", "host-b", "api"),
-	}
-	if err := store.Save(items); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-
-	if got := store.Dangling("host-a", []string{"live", "other"}); !reflect.DeepEqual(got, items[1:3]) {
-		t.Fatalf("Dangling() = %#v, want %#v", got, items[1:3])
-	}
-	removed, err := store.Reconcile([]string{"live", "other"})
-	if err != nil {
-		t.Fatalf("Reconcile() error = %v", err)
-	}
-	if removed != 2 {
-		t.Fatalf("Reconcile() removed = %d, want 2", removed)
-	}
-	got, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	want := []Binding{items[0], items[3]}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Load() after Reconcile = %#v, want %#v", got, want)
 	}
 }
 

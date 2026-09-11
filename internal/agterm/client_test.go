@@ -218,7 +218,11 @@ func TestClientStatusConnectionRefusedDoesNotFallBack(t *testing.T) {
 	}
 }
 
-func TestClientVersionParsesAndWarnsOnceBelowMinimum(t *testing.T) {
+// TestClientVersionParsesAndStaysSilent pins that Version only parses: the
+// "older than the tested minimum" diagnostic belongs to the daemon's handshake,
+// so the client must not log it too — that used to produce two warnings for
+// the same condition.
+func TestClientVersionParsesAndStaysSilent(t *testing.T) {
 	t.Helper()
 	var logs bytes.Buffer
 	previousWriter := log.Writer()
@@ -232,17 +236,36 @@ func TestClientVersionParsesAndWarnsOnceBelowMinimum(t *testing.T) {
 		return agterm.Response{OK: true, Result: json.RawMessage(`{"app":{"version":"0.24.9"}}`)}
 	})
 	client := agterm.NewClient(sock, "/fake/agtermctl", time.Second, nil)
-	for i := 0; i < 2; i++ {
-		got, err := client.Version(context.Background())
-		if err != nil {
-			t.Fatalf("Version() call %d error = %v", i+1, err)
-		}
-		if got != "0.24.9" {
-			t.Fatalf("Version() = %q, want 0.24.9", got)
-		}
+	got, err := client.Version(context.Background())
+	if err != nil {
+		t.Fatalf("Version() error = %v", err)
 	}
-	if count := strings.Count(logs.String(), "older than the tested minimum"); count != 1 {
-		t.Fatalf("version warning count = %d, want 1; logs: %s", count, logs.String())
+	if got != "0.24.9" {
+		t.Fatalf("Version() = %q, want 0.24.9", got)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("Version() logged %q, want silence (the daemon owns the version warning)", logs.String())
+	}
+}
+
+func TestVersionLess(t *testing.T) {
+	t.Helper()
+	tests := []struct {
+		got, minimum string
+		want         bool
+	}{
+		{"0.24.9", "0.25.0", true},
+		{"v0.24.9", "0.25.0", true},
+		{"0.25.0", "0.25.0", false},
+		{"0.26.1-beta", "0.25.0", false},
+		{"1.0.0", "0.25.0", false},
+		{"garbage", "0.25.0", false},
+		{"0.24", "0.25.0", false},
+	}
+	for _, tt := range tests {
+		if got := agterm.VersionLess(tt.got, tt.minimum); got != tt.want {
+			t.Errorf("VersionLess(%q, %q) = %v, want %v", tt.got, tt.minimum, got, tt.want)
+		}
 	}
 }
 

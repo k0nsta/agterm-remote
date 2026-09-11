@@ -4,7 +4,6 @@ package paths
 import (
 	"os"
 	"path/filepath"
-	"testing"
 )
 
 // Dirs contains the root directory used by agr for runtime state and cache
@@ -27,22 +26,6 @@ func New() Dirs {
 		}
 	}
 	return Dirs{Cache: filepath.Join(cacheHome, "agr")}
-}
-
-// TestDirs returns a short-lived directory suitable for tests that create
-// Unix sockets. It deliberately uses /tmp instead of t.TempDir: macOS limits
-// Unix socket paths to 104 bytes, and the testing package's temp path can
-// already consume most of that budget.
-func TestDirs(t *testing.T) Dirs {
-	t.Helper()
-	root, err := os.MkdirTemp("/tmp", "agr-")
-	if err != nil {
-		t.Fatalf("create test directory: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.RemoveAll(root)
-	})
-	return Dirs{Cache: root}
 }
 
 // Sock is the daemon's control socket.

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
+	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -50,4 +51,18 @@ type Supervisor interface {
 // bridge.Supervisor's concrete implementation.
 type Supervisors interface {
 	New(host, hostKey, remoteSock, localSock string) Supervisor
+}
+
+// BindingStore is the slice of the binding store the daemon uses: reads for the
+// control listing and resync, ByHostName for the receivers it wires up, and
+// per-row removal — on agterm's session.closed event and lazily when a status
+// push answers "no such session". There is deliberately no bulk removal here:
+// agterm's tree can be window-scoped, so a tree result must never be able to
+// delete bindings.
+type BindingStore interface {
+	Load() ([]bindings.Binding, error)
+	ByRow(row string) (bindings.Binding, bool)
+	ByHostName(host, name string) (bindings.Binding, bool)
+	ForHost(host string) []bindings.Binding
+	UnbindRow(row string) error
 }

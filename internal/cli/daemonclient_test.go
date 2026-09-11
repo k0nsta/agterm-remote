@@ -6,18 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/daemon"
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 )
 
 func TestDaemonClientControlRoundTripAndStatus(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	listener, err := net.Listen("unix", dirs.Sock())
 	if err != nil {
 		t.Fatalf("listen daemon socket: %v", err)
@@ -99,7 +100,7 @@ func TestDaemonClientControlRoundTripAndStatus(t *testing.T) {
 
 func TestDaemonClientStartsOnceAndGivesUpWhenSocketNeverAppears(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	client := NewDaemonClient(dirs)
 	client.wait = 40 * time.Millisecond
 	starts := 0
@@ -137,7 +138,7 @@ func TestDaemonClientDoesNotStartDaemonForReadOnlyOrStopOps(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			client := NewDaemonClient(paths.TestDirs(t))
+			client := NewDaemonClient(pathstest.Dirs(t))
 			client.wait = 40 * time.Millisecond
 			started := false
 			client.start = func() error {
@@ -157,7 +158,7 @@ func TestDaemonClientDoesNotStartDaemonForReadOnlyOrStopOps(t *testing.T) {
 
 func TestDaemonClientRejectsInvalidHostWithoutStarting(t *testing.T) {
 	t.Helper()
-	client := NewDaemonClient(paths.TestDirs(t))
+	client := NewDaemonClient(pathstest.Dirs(t))
 	started := false
 	client.start = func() error {
 		started = true
@@ -188,4 +189,68 @@ func mustJSON(t *testing.T, value any) json.RawMessage {
 		t.Fatalf("marshal test JSON: %v", err)
 	}
 	return data
+}
+
+// TestDaemonClientStartsDaemonDespiteStaleSocketNode pins the removal of the
+// socket-absent gate: after SIGKILL or power loss the socket node survives
+// with nothing listening, and `up` must still start a daemon rather than
+// failing until the node is removed by hand.
+func TestDaemonClientStartsDaemonDespiteStaleSocketNode(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	stale, err := net.Listen("unix", dirs.Sock())
+	if err != nil {
+		t.Fatalf("create stale socket node: %v", err)
+	}
+	stale.(*net.UnixListener).SetUnlinkOnClose(false)
+	_ = stale.Close()
+	if _, err := os.Stat(dirs.Sock()); err != nil {
+		t.Fatalf("stale socket node missing: %v", err)
+	}
+
+	client := NewDaemonClient(dirs)
+	client.wait = 40 * time.Millisecond
+	starts := 0
+	client.start = func() error {
+		starts++
+		return nil
+	}
+	if err := client.Up(context.Background(), "home"); err == nil || !strings.Contains(err.Error(), "socket did not appear") {
+		t.Fatalf("Up() error = %v, want bounded missing-socket error", err)
+	}
+	if starts != 1 {
+		t.Fatalf("daemon starts with a stale socket node = %d, want 1", starts)
+	}
+}
+
+// TestDaemonClientNotRunningOnlyForAbsentDaemon pins the classification behind
+// `agr down` exiting 0: a missing socket node or a stale one with nothing
+// listening is "not running"; a dial that fails for any other reason — here a
+// cancelled context — is not, or down would report success while a daemon and
+// its bridge are still up.
+func TestDaemonClientNotRunningOnlyForAbsentDaemon(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	client := NewDaemonClient(dirs)
+	client.start = func() error { t.Fatal("down must not start a daemon"); return nil }
+
+	stale, err := net.Listen("unix", dirs.Sock())
+	if err != nil {
+		t.Fatalf("create stale socket node: %v", err)
+	}
+	stale.(*net.UnixListener).SetUnlinkOnClose(false)
+	_ = stale.Close()
+	if err := client.Down(context.Background(), "home"); !errors.Is(err, ErrDaemonNotRunning) {
+		t.Fatalf("Down() against a stale socket node = %v, want ErrDaemonNotRunning", err)
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = client.Down(cancelled, "home")
+	if err == nil {
+		t.Fatal("Down() with a cancelled context = nil, want an error")
+	}
+	if errors.Is(err, ErrDaemonNotRunning) {
+		t.Fatalf("Down() with a cancelled context = %v, must not read as not running", err)
+	}
 }

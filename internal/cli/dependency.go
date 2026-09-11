@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
+	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/daemon"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
@@ -76,4 +77,11 @@ type OpenBridge interface {
 type Bridge interface {
 	Up(ctx context.Context, host string) error
 	Down(ctx context.Context, host string) error
+}
+
+// BindingStore is the slice of the binding store the CLI uses: the listing
+// reads it, and open records the binding it just made.
+type BindingStore interface {
+	Load() ([]bindings.Binding, error)
+	Bind(binding bindings.Binding) error
 }

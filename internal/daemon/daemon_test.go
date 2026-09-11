@@ -18,6 +18,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 	"github.com/k0nsta/agterm-remote/internal/token"
 )
@@ -131,7 +132,7 @@ func daemonBinding(t *testing.T, row, host, name string) bindings.Binding {
 
 func TestDaemonSingleInstanceLockRefusesSecondDaemon(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	first := New(Config{Dirs: dirs, Logger: log.New(io.Discard, "", 0)})
 	second := New(Config{Dirs: dirs, Logger: log.New(io.Discard, "", 0)})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -151,7 +152,7 @@ func TestDaemonSingleInstanceLockRefusesSecondDaemon(t *testing.T) {
 
 func TestDaemonStartsListenerAndSupervisorWithExpectedRemoteSocket(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	host := "user@example.com"
 	remote := &daemonRemote{
 		ensureCalls: map[string]int{},
@@ -206,7 +207,7 @@ func TestDaemonStartsListenerAndSupervisorWithExpectedRemoteSocket(t *testing.T)
 
 func TestDaemonEnsureDirsOncePerHostAcrossRestart(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	host := "host-a"
 	remote := &daemonRemote{ensureCalls: map[string]int{}, homeCalls: map[string]int{}, home: map[string]string{host: "/home/a"}}
 	supervisors := &daemonSupervisors{}
@@ -233,7 +234,7 @@ func TestDaemonEnsureDirsOncePerHostAcrossRestart(t *testing.T) {
 
 func TestDaemonSIGTERMRemovesPidfileAndReceiverSocket(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	host := "host-a"
 	remote := &daemonRemote{ensureCalls: map[string]int{}, homeCalls: map[string]int{}, home: map[string]string{host: "/home/a"}}
 	supervisors := &daemonSupervisors{}
@@ -267,7 +268,7 @@ func TestDaemonSIGTERMRemovesPidfileAndReceiverSocket(t *testing.T) {
 
 func TestDaemonTreeResultNeverUnbindsBindings(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	host := "host-a"
 	store := bindings.New(dirs)
 	want := daemonBinding(t, "row-1", host, "api")
@@ -298,7 +299,7 @@ func TestDaemonTreeResultNeverUnbindsBindings(t *testing.T) {
 
 func TestDaemonUnknownTargetUnbindsExactlyThatRow(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	store := bindings.New(dirs)
 	first := daemonBinding(t, "row-1", "host-a", "api")
 	second := daemonBinding(t, "row-2", "host-b", "web")
@@ -344,7 +345,7 @@ func containsText(t *testing.T, err error, want string) bool {
 // unlinked — leaving that host with a live tunnel and nothing listening.
 func TestStopHostHoldsSlotUntilTeardownCompletes(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	r := newTask10Remote(t, nil)
 	d := New(task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{exitDelay: 300 * time.Millisecond}, nil))
 	if err := d.Start(context.Background()); err != nil {
@@ -391,7 +392,7 @@ func TestStopHostHoldsSlotUntilTeardownCompletes(t *testing.T) {
 // while the first is still tearing down: it must wait, not double-free.
 func TestStopHostIsIdempotentAndConcurrencySafe(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	r := newTask10Remote(t, nil)
 	d := New(task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{}, nil))
 	if err := d.Start(context.Background()); err != nil {
@@ -430,7 +431,7 @@ func TestStopHostIsIdempotentAndConcurrencySafe(t *testing.T) {
 // children that never launched.
 func TestBindFailureRacingStopHostUnwindsCleanly(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	r := newTask10Remote(t, nil)
 	d := New(task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{}, nil))
 	if err := d.Start(context.Background()); err != nil {
@@ -498,7 +499,7 @@ func TestBindFailureRacingStopHostUnwindsCleanly(t *testing.T) {
 // children have drained.
 func TestCloseIsBoundedByAWedgedChild(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	r := newTask10Remote(t, nil)
 	config := task10Config(t, dirs, r, nil, nil, nil, &task10Supervisors{exitDelay: time.Second}, nil)
 	config.TeardownTimeout = 200 * time.Millisecond

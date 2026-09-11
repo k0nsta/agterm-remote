@@ -154,58 +154,6 @@ func (s *Store) ForHost(host string) []Binding {
 	return result
 }
 
-// Dangling returns this host's bindings whose agterm rows are absent from
-// live. The input is treated as a set and result order follows the database.
-func (s *Store) Dangling(host string, live []string) []Binding {
-	bindings, err := s.Load()
-	if err != nil {
-		return nil
-	}
-	liveSet := make(map[string]struct{}, len(live))
-	for _, row := range live {
-		liveSet[row] = struct{}{}
-	}
-	result := make([]Binding, 0)
-	for _, binding := range bindings {
-		if binding.Host != host {
-			continue
-		}
-		if _, ok := liveSet[binding.Row]; !ok {
-			result = append(result, binding)
-		}
-	}
-	return result
-}
-
-// Reconcile removes bindings whose rows are not in liveRows and returns the
-// number removed. It is an explicit destructive operation; unlike a listing
-// read, it is persisted under the same transaction lock as Bind.
-func (s *Store) Reconcile(liveRows []string) (removed int, err error) {
-	if s == nil {
-		return 0, errors.New("nil binding store")
-	}
-	err = s.withLock(func() error {
-		current, loadErr := s.loadUnlocked()
-		if loadErr != nil {
-			return loadErr
-		}
-		liveSet := make(map[string]struct{}, len(liveRows))
-		for _, row := range liveRows {
-			liveSet[row] = struct{}{}
-		}
-		filtered := current[:0]
-		for _, binding := range current {
-			if _, ok := liveSet[binding.Row]; ok {
-				filtered = append(filtered, binding)
-			} else {
-				removed++
-			}
-		}
-		return s.writeUnlocked(filtered)
-	})
-	return removed, err
-}
-
 func upsert(current []Binding, next Binding) []Binding {
 	filtered := make([]Binding, 0, len(current)+1)
 	for _, binding := range current {

@@ -132,13 +132,13 @@ func ParseProbe(body []byte) (ProbeResult, error) {
 
 		var err error
 		switch key {
-		case "zmx", "zmx_version":
+		case "zmx":
 			result.ZmxVersion = parseMissing(value)
 		case "zmx_labels":
 			result.ZmxLabels, err = parseProbeBool(value)
 		case "zmx_dir":
 			result.ZmxDir = value
-		case "tmux", "tmux_version":
+		case "tmux":
 			result.TmuxVersion = parseMissing(value)
 		case "nc_u":
 			result.NCU, err = parseProbeBool(value)
@@ -150,16 +150,14 @@ func ParseProbe(body []byte) (ProbeResult, error) {
 			result.MoshServer, err = parseProbeBool(value)
 		case "home":
 			result.Home = value
-		case "agr", "agr_version":
+		case "agr":
 			result.AgrVersion = parseMissing(value)
-		case "sock", "sock_present":
+		case "sock":
 			result.Sock, err = parseProbeBool(value)
 		case "legacy_targets":
 			result.LegacyTargets, err = parseProbeCount(value)
-		case "legacy_agr_target", "legacy_agr_targets":
+		case "legacy_agr_target":
 			result.LegacyAgrTarget, err = parseProbeCount(value)
-		case "legacy":
-			result.LegacyTargets, result.LegacyAgrTarget, err = parseLegacyCounts(value)
 		}
 		if err != nil {
 			return ProbeResult{}, fmt.Errorf("parse probe key %q: %w", key, err)
@@ -192,28 +190,6 @@ func parseProbeCount(value string) (int, error) {
 		return 0, fmt.Errorf("invalid count %q", value)
 	}
 	return count, nil
-}
-
-func parseLegacyCounts(value string) (targets, agrTargets int, err error) {
-	for _, field := range strings.Split(value, ",") {
-		parts := strings.SplitN(field, "=", 2)
-		if len(parts) != 2 {
-			return 0, 0, fmt.Errorf("invalid legacy counts %q", value)
-		}
-		count, countErr := parseProbeCount(parts[1])
-		if countErr != nil {
-			return 0, 0, countErr
-		}
-		switch parts[0] {
-		case "targets":
-			targets = count
-		case "agr_target", "agr_targets":
-			agrTargets = count
-		default:
-			return 0, 0, fmt.Errorf("unknown legacy count %q", parts[0])
-		}
-	}
-	return targets, agrTargets, nil
 }
 
 func (p ProbeResult) hasZmx() bool {

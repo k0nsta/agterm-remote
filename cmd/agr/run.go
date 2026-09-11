@@ -99,10 +99,6 @@ func runList(ctx context.Context, app *application, args []string, out, errw io.
 }
 
 func runKill(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
-	if len(args) < 1 {
-		_, _ = fmt.Fprintln(errw, "usage: agr kill <host> <name>…")
-		return 2
-	}
 	if len(args) < 2 {
 		_, _ = fmt.Fprintln(errw, "usage: agr kill <host> <name>…")
 		return 2

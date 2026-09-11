@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/k0nsta/agterm-remote/internal/bindings"
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -78,7 +78,7 @@ func (f *dispatchTTYFake) Interactive(context.Context, ...string) error {
 func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 	t.Helper()
 	t.Setenv("AGTERM_SESSION_ID", "")
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	remoteFake := &dispatchRemoteFake{path: "/agr"}
 	bridgeFake := &dispatchBridgeFake{}
 	installer := &dispatchInstallerFake{}

@@ -13,7 +13,7 @@ import (
 
 // List loads remote sessions, persistent row bindings, and the live agterm
 // tree, then renders the user-facing ls table.
-func List(ctx context.Context, host string, sessions Sessions, store *bindings.Store, rows Rows) (string, error) {
+func List(ctx context.Context, host string, sessions Sessions, store BindingStore, rows Rows) (string, error) {
 	if !token.ValidHost(host) {
 		return "", fmt.Errorf("invalid remote host %q", host)
 	}

@@ -43,11 +43,6 @@ func LoadHostInfo(dirs paths.Dirs, host string) (HostInfo, error) {
 	return info, nil
 }
 
-// ReadHostInfo is an alias kept for callers that prefer a read-oriented name.
-func ReadHostInfo(dirs paths.Dirs, host string) (HostInfo, error) {
-	return LoadHostInfo(dirs, host)
-}
-
 // SaveHostInfo atomically persists host's probe information below dirs.
 func SaveHostInfo(dirs paths.Dirs, host string, info HostInfo) error {
 	if !token.ValidHost(host) {
@@ -91,12 +86,6 @@ func SaveHostInfo(dirs paths.Dirs, host string, info HostInfo) error {
 	}
 	removeTemp = false
 	return nil
-}
-
-// WriteHostInfo is an alias kept for callers that prefer a write-oriented
-// name.
-func WriteHostInfo(dirs paths.Dirs, host string, info HostInfo) error {
-	return SaveHostInfo(dirs, host, info)
 }
 
 func hostInfoMissing(err error) bool {

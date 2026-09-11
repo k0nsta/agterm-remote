@@ -109,11 +109,6 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	if result.App.Version == "" {
 		return "", errors.New("agterm version response has no app.version")
 	}
-	if versionLess(result.App.Version, MinTestedVersion) {
-		versionWarningOnce.Do(func() {
-			log.Printf("warning: agterm %s is older than the tested minimum %s", result.App.Version, MinTestedVersion)
-		})
-	}
 	return result.App.Version, nil
 }
 
@@ -155,7 +150,6 @@ func (c *Client) Status(ctx context.Context, target string, args StatusArgs) err
 
 var (
 	fallbackWarningOnce sync.Once
-	versionWarningOnce  sync.Once
 )
 
 func (c *Client) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -206,17 +200,13 @@ func readControlLine(reader *bufio.Reader) ([]byte, error) {
 			continue
 		}
 		if err == nil {
-			return bytesTrimSpace(line), nil
+			return bytes.TrimSpace(line), nil
 		}
 		if errors.Is(err, io.EOF) && len(line) > 0 {
-			return bytesTrimSpace(line), nil
+			return bytes.TrimSpace(line), nil
 		}
 		return nil, err
 	}
-}
-
-func bytesTrimSpace(value []byte) []byte {
-	return bytes.TrimSpace(value)
 }
 
 func responseError(message string) error {
@@ -232,7 +222,12 @@ func responseError(message string) error {
 	return errors.New(message)
 }
 
-func versionLess(got, minimum string) bool {
+// VersionLess reports whether got is an older semantic version than minimum.
+// Either value failing to parse as MAJOR.MINOR.PATCH (an optional "v" prefix
+// and a "-suffix" on the patch are tolerated) compares as not less, so an
+// unparseable agterm version never triggers an "older than" warning. The
+// daemon's handshake is the one caller that turns this into a diagnostic.
+func VersionLess(got, minimum string) bool {
 	gotParts, gotOK := versionParts(got)
 	minParts, minOK := versionParts(minimum)
 	if !gotOK || !minOK {

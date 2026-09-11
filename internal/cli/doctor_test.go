@@ -9,7 +9,7 @@ import (
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/daemon"
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -57,7 +57,7 @@ func (f doctorStatusFake) Status(context.Context, string) ([]daemon.HostStatus, 
 
 func TestDoctorCollectsAllBlocksWithoutLiveNetwork(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	listener, err := net.Listen("unix", dirs.Sock())
 	if err != nil {
 		t.Fatalf("listen fake agterm socket: %v", err)

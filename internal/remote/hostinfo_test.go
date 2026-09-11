@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 )
 
 func TestHostInfoRoundTrip(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	want := HostInfo{
 		Home:        "/Users/remote",
 		Mux:         "zmx",
@@ -37,7 +37,7 @@ func TestHostInfoRoundTrip(t *testing.T) {
 
 func TestHostInfoUsesFileKeyAndMissingIsDistinct(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	if _, err := LoadHostInfo(dirs, "user@example.com"); err == nil {
 		t.Fatal("LoadHostInfo() error = nil, want missing-file error")
 	}

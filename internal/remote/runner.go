@@ -117,24 +117,10 @@ func (r *Runner) EnsureDirs(ctx context.Context, host string) error {
 	return err
 }
 
-// AgrPath returns the absolute path to the installed remote script when host
-// information is cached. Before installation, it returns the shell-expanded
-// fallback used by the remote login shell.
-func (r *Runner) AgrPath(host string) string {
-	if !token.ValidHost(host) {
-		return ""
-	}
-	if info, err := LoadHostInfo(r.dirs, host); err == nil && info.Home != "" {
-		return filepath.Join(info.Home, remoteAgrPath)
-	}
-	return "$HOME/" + remoteAgrPath
-}
-
 // ResolveAgrPath returns an ABSOLUTE remote agr path, probing $HOME when host
-// info is not cached. Callers that put the result into argv must use this, not
-// AgrPath: AgrPath's uncached fallback is the expansion-dependent
-// "$HOME/.local/bin/agr", which neither ssh (whose argv is quoted, so nothing
-// expands) nor mosh (which execs argv with no remote shell at all) will expand.
+// info is not cached. The result is safe to place in argv: an unexpanded
+// "$HOME/..." would reach the remote literally, because ssh's argv is quoted
+// (that is what stops injection) and mosh execs argv with no remote shell.
 func (r *Runner) ResolveAgrPath(ctx context.Context, host string) (string, error) {
 	home, err := r.Home(ctx, host)
 	if err != nil {

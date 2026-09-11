@@ -14,7 +14,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/agterm/agtermtest"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -66,7 +66,7 @@ func TestDaemonAgtermRecoveryLogsOnceResubscribesAndResyncs(t *testing.T) {
 	agtermRecoveryInterval = 10 * time.Millisecond
 	t.Cleanup(func() { agtermRecoveryInterval = oldInterval })
 
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	missingSocket := dirs.Cache + "/agterm-not-started.sock"
 	t.Setenv("AGTERM_CONTROL_SOCKET", missingSocket)
 	trace := newTask10Trace(t)
@@ -120,7 +120,7 @@ func TestDaemonAgtermRecoveryLogsOnceResubscribesAndResyncs(t *testing.T) {
 
 func TestDaemonClosedRowUnbindsAndStopsLastHost(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	host := "host-a"
 	store := bindings.New(dirs)
 	binding := daemonBinding(t, "row-1", host, "api")
@@ -155,7 +155,7 @@ func TestDaemonClosedRowUnbindsAndStopsLastHost(t *testing.T) {
 
 func TestDaemonClosedRowLeavesHostRunningWhileAnotherBindingRemains(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	host := "host-a"
 	store := bindings.New(dirs)
 	first := daemonBinding(t, "row-1", host, "api")

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remotescript"
 )
 
@@ -183,5 +184,5 @@ func TestInstallHelpers(t *testing.T) {
 
 func testDirsForInstall(t *testing.T) (dirs paths.Dirs) {
 	t.Helper()
-	return paths.TestDirs(t)
+	return pathstest.Dirs(t)
 }

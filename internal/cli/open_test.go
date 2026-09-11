@@ -9,7 +9,7 @@ import (
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -118,7 +118,7 @@ func (f *openRowsFake) Tree(context.Context) ([]string, error) {
 func newOpenDependencies(t *testing.T, remoteFake *openRemoteFake, bridgeFake *openBridgeFake, tty *openTTYFake) OpenDependencies {
 	t.Helper()
 	return OpenDependencies{
-		Dirs: paths.TestDirs(t), Remote: remoteFake, Bridge: bridgeFake, TTY: tty,
+		Dirs: pathstest.Dirs(t), Remote: remoteFake, Bridge: bridgeFake, TTY: tty,
 		HostInfo: func(string) (remote.HostInfo, error) { return remote.HostInfo{Mux: "tmux"}, nil },
 		Out:      new(strings.Builder), ErrOut: new(strings.Builder),
 	}
@@ -130,7 +130,7 @@ func TestOpenBindsBeforeReloadAndUpAndUsesSSHArgv(t *testing.T) {
 	t.Setenv("AGTERM_PANE_ID", "pane-1")
 	t.Setenv("AGTERM_PANE", "left")
 
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	store := bindings.New(dirs)
 	remoteFake := &openRemoteFake{path: "/home/remote/.local/bin/agr"}
 	bridgeFake := &openBridgeFake{store: store}
@@ -171,7 +171,7 @@ func TestOpenBindsBeforeReloadAndUpAndUsesSSHArgv(t *testing.T) {
 func TestOpenUsesMoshWhenBothSidesSupportIt(t *testing.T) {
 	t.Helper()
 	t.Setenv("AGTERM_SESSION_ID", "")
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	store := bindings.New(dirs)
 	remoteFake := &openRemoteFake{path: "/home/remote/.local/bin/agr"}
 	bridgeFake := &openBridgeFake{store: store}
@@ -198,7 +198,7 @@ func TestOpenUsesMoshWhenBothSidesSupportIt(t *testing.T) {
 func TestOpenPickerCancelHasNoSideEffects(t *testing.T) {
 	t.Helper()
 	t.Setenv("AGTERM_SESSION_ID", "row-1")
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	store := bindings.New(dirs)
 	remoteFake := &openRemoteFake{items: []remote.Session{{Name: "api", Cmds: "claude"}}, path: "/agr"}
 	bridgeFake := &openBridgeFake{store: store}
@@ -227,7 +227,7 @@ func TestOpenPickerCancelHasNoSideEffects(t *testing.T) {
 func TestOpenOutsideAgtermDoesNotBindOrLabel(t *testing.T) {
 	t.Helper()
 	t.Setenv("AGTERM_SESSION_ID", "")
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	store := bindings.New(dirs)
 	remoteFake := &openRemoteFake{path: "/agr"}
 	bridgeFake := &openBridgeFake{store: store}
@@ -257,7 +257,7 @@ func TestOpenOutsideAgtermDoesNotBindOrLabel(t *testing.T) {
 func TestOpenContextFailureIsBestEffort(t *testing.T) {
 	t.Helper()
 	t.Setenv("AGTERM_SESSION_ID", "row-1")
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	store := bindings.New(dirs)
 	bridgeFake := &openBridgeFake{store: store}
 	labeler := &openLabelerFake{contextErr: errors.New("unknown subcommand context")}

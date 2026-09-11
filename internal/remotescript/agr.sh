@@ -36,7 +36,7 @@ fi
 : "${AGR_SOCK:=$HOME/.cache/agr/bridge.sock}"
 
 if [ -z "${AGR_RELAY:-}" ]; then
-# Match the -U flag itself: a bare 'U' also matches words like "UDP" or
+	# Match the -U flag itself: a bare 'U' also matches words like "UDP" or
 	# "Usage" in help text, which would select nc on a build that cannot do
 	# Unix sockets at all.
 	if have nc && nc -h 2>&1 | grep -q -- '-U'; then
@@ -204,12 +204,11 @@ sock.sendall(sys.stdin.buffer.read())
 ' "$AGR_SOCK"; then :; fi
 			;;
 		socat)
-			# Bounded like the nc (-w1) and python3 (settimeout) relays: a
-			# forwarded socket whose ssh peer has stopped accepting would
-			# otherwise block this hook, and a blocked hook stalls the agent turn.
-			# -T bounds inactivity AFTER the address is set up; the connect
-			# itself needs its own bound, or a present socket whose accept
-			# backlog is full blocks the hook — and a blocked hook stalls the
+			# Bounded like the nc (-w1) and python3 (settimeout) relays, in
+			# both phases: connect-timeout=1 bounds the connect itself (a
+			# present socket whose accept backlog is full would otherwise
+			# block), -T2 bounds inactivity once connected (a forwarded socket
+			# whose ssh peer stopped accepting). A blocked hook stalls the
 			# agent turn, which is the one thing this script must never do.
 			if printf '%s' "$payload" | socat -T2 - "UNIX-CONNECT:$AGR_SOCK,connect-timeout=1"; then :; fi
 			;;

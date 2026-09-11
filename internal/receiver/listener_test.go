@@ -11,7 +11,7 @@ import (
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 )
 
 type statusCall struct {
@@ -58,7 +58,7 @@ func (l *recordingLiveness) MarkAlive() {
 
 func TestListenerRoutesTwoAgrEventsAndUsesBindingPane(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 2)}
 	resolver := &recordingResolver{
 		binding: bindings.Binding{Row: "row-1", Pane: "right", PaneID: "pane-1"},
@@ -78,10 +78,10 @@ func TestListenerRoutesTwoAgrEventsAndUsesBindingPane(t *testing.T) {
 	if first.target != "row-1" || second.target != "row-1" {
 		t.Fatalf("status targets = %q, %q; want row-1 for both", first.target, second.target)
 	}
-	if first.args.Status != "active" || first.args.Pane != "right" || first.args.PaneID != "pane-1" || !boolValue(first.args.Blink) {
+	if first.args.Status != "active" || first.args.Pane != "right" || first.args.PaneID != "pane-1" || !boolValue(t, first.args.Blink) {
 		t.Fatalf("first status args = %#v, want active/right/pane-1/blink", first.args)
 	}
-	if second.args.Status != "completed" || second.args.Pane != "right" || second.args.PaneID != "pane-1" || !boolValue(second.args.AutoReset) {
+	if second.args.Status != "completed" || second.args.Pane != "right" || second.args.PaneID != "pane-1" || !boolValue(t, second.args.AutoReset) {
 		t.Fatalf("second status args = %#v, want completed/right/pane-1/auto-reset", second.args)
 	}
 	for range 2 {
@@ -101,7 +101,7 @@ func TestListenerRoutesTwoAgrEventsAndUsesBindingPane(t *testing.T) {
 
 func TestListenerRoutesCookbookEventWithoutBindingLookup(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 1)}
 	resolver := &recordingResolver{}
 	liveness := &recordingLiveness{calls: make(chan struct{}, 1)}
@@ -114,7 +114,7 @@ func TestListenerRoutesCookbookEventWithoutBindingLookup(t *testing.T) {
 	if call.target != "row-42" {
 		t.Fatalf("cookbook target = %q, want row-42", call.target)
 	}
-	if call.args.Status != "blocked" || call.args.Pane != "scratch" || call.args.PaneID != "surface-42" || !boolValue(call.args.Blink) || !boolValue(call.args.AutoReset) {
+	if call.args.Status != "blocked" || call.args.Pane != "scratch" || call.args.PaneID != "surface-42" || !boolValue(t, call.args.Blink) || !boolValue(t, call.args.AutoReset) {
 		t.Fatalf("cookbook args = %#v, want blocked/scratch/surface-42/blink/auto-reset", call.args)
 	}
 	if got := resolver.calls(); got != 0 {
@@ -129,7 +129,7 @@ func TestListenerRoutesCookbookEventWithoutBindingLookup(t *testing.T) {
 
 func TestListenerMalformedAndUnknownEventsDoNotBreakConnection(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 2)}
 	resolver := &recordingResolver{binding: bindings.Binding{Row: "row-1"}, found: true}
 	listener := NewListener("host-a", "host-a", dirs, sink, resolver, nil)
@@ -150,7 +150,7 @@ func TestListenerMalformedAndUnknownEventsDoNotBreakConnection(t *testing.T) {
 
 func TestListenerUnknownSessionIsLoggedAndNotPushed(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 1)}
 	listener := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{}, nil)
 	stop := startListener(t, listener, dirs.Recv("host-a"))
@@ -166,7 +166,7 @@ func TestListenerUnknownSessionIsLoggedAndNotPushed(t *testing.T) {
 
 func TestListenerSkipsOversizedLineAndReadsNextEvent(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 1)}
 	resolver := &recordingResolver{binding: bindings.Binding{Row: "row-1"}, found: true}
 	listener := NewListener("host-a", "host-a", dirs, sink, resolver, nil)
@@ -241,7 +241,8 @@ func receiveCall(t *testing.T, calls <-chan statusCall) statusCall {
 	}
 }
 
-func boolValue(value *bool) bool {
+func boolValue(t *testing.T, value *bool) bool {
+	t.Helper()
 	return value != nil && *value
 }
 
@@ -266,7 +267,7 @@ func (s *blockingSink) Status(_ context.Context, _ string, _ agterm.StatusArgs) 
 // reachable receiver.
 func TestServeLateExitDoesNotUnlinkSuccessorSocket(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	path := dirs.Recv("host-a")
 	sink := &blockingSink{entered: make(chan struct{}, 1), release: make(chan struct{})}
 	first := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{}, nil)

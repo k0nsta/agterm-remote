@@ -8,14 +8,13 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/unixsock"
 )
 
 const maxEventLine = 64 << 10
@@ -24,11 +23,10 @@ const maxEventLine = 64 << 10
 // because the forwarded socket itself supplies the host identity.
 //
 // The Listener never unlinks its socket path — not on Close, not when Serve
-// returns. Only its owner (the daemon's host lifecycle) knows whether the path
-// still belongs to this listener or to a successor that bound it after this
-// one was closed, so only the owner removes it. A late Serve exit therefore
-// cannot unlink a successor's socket. Stale paths left by a crash are
-// reclaimed by the next bind.
+// returns (see unixsock.ListenClean). Only its owner (the daemon's host
+// lifecycle) knows whether the path still belongs to this listener or to a
+// successor that bound it after this one was closed, so only the owner removes
+// it. A late Serve exit therefore cannot unlink a successor's socket.
 type Listener struct {
 	host     string
 	path     string
@@ -54,13 +52,6 @@ func NewListener(host, hostKey string, dirs paths.Dirs, sink StatusSink, resolve
 	}
 }
 
-// New is an alias for NewListener for callers that use the package's usual
-// constructor naming convention.
-func New(host, hostKey string, dirs paths.Dirs, sink StatusSink, resolver Resolver, liveness Liveness) *Listener {
-	return NewListener(host, hostKey, dirs, sink, resolver, liveness)
-}
-
-// Serve listens until ctx is canceled or the socket fails.
 // Bind creates the listening socket and returns any bind failure to the
 // caller. Serve calls it too, so it stays optional — but a caller that reports
 // a host as started needs the failure synchronously: binding inside the Serve
@@ -86,7 +77,7 @@ func (l *Listener) bind() (net.Listener, error) {
 	}
 	l.mu.Unlock()
 
-	listener, err := listenClean(l.path)
+	listener, err := unixsock.ListenClean(l.path)
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +87,8 @@ func (l *Listener) bind() (net.Listener, error) {
 	return listener, nil
 }
 
+// Serve listens until ctx is canceled or the socket fails. A socket already
+// created by Bind is reused rather than re-listened.
 func (l *Listener) Serve(ctx context.Context) error {
 	if l == nil {
 		return errors.New("nil receiver listener")
@@ -244,34 +237,6 @@ func (l *Listener) closeResources() {
 	for conn := range l.conns {
 		_ = conn.Close()
 	}
-}
-
-func listenClean(path string) (net.Listener, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create receiver socket directory: %w", err)
-	}
-	if _, err := os.Stat(path); err == nil {
-		conn, dialErr := net.DialTimeout("unix", path, 100*time.Millisecond)
-		if dialErr == nil {
-			_ = conn.Close()
-			return nil, fmt.Errorf("receiver socket already in use: %s", path)
-		}
-		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			return nil, fmt.Errorf("remove stale receiver socket: %w", removeErr)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect receiver socket: %w", err)
-	}
-	listener, err := net.Listen("unix", path)
-	if err != nil {
-		return nil, fmt.Errorf("listen on receiver socket: %w", err)
-	}
-	// Go unlinks a Unix socket path on Close by default. Turn that off: by the
-	// time a wedged Serve gets to close, the path may already be a successor's.
-	if unixListener, ok := listener.(*net.UnixListener); ok {
-		unixListener.SetUnlinkOnClose(false)
-	}
-	return listener, nil
 }
 
 // readEventLine reads one complete line while retaining the connection after

@@ -9,22 +9,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 )
 
 func TestRunnerValidationAndFallbackPaths(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	ssh := &runnerSSH{body: []byte("\n")}
 	runner := NewRunner(ssh, dirs)
 	var nilContext context.Context
 
-	if got := runner.AgrPath("bad host"); got != "" {
-		t.Fatalf("AgrPath() for invalid host = %q, want empty", got)
-	}
-	if got := runner.AgrPath("host"); got != "$HOME/.local/bin/agr" {
-		t.Fatalf("AgrPath() without host info = %q, want shell fallback", got)
-	}
 	if _, err := runner.Home(context.Background(), "bad host"); err == nil {
 		t.Fatal("Home() invalid host error = nil")
 	}
@@ -63,7 +57,7 @@ func TestRunnerValidationAndFallbackPaths(t *testing.T) {
 
 func TestRunnerSessionsAndDataMissingHeader(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
 		t.Fatalf("SaveHostInfo() error = %v", err)
 	}
@@ -83,19 +77,19 @@ func TestRunnerSessionsAndDataMissingHeader(t *testing.T) {
 	}
 }
 
-func TestRunnerHostInfoAliasesAndDefaultVersion(t *testing.T) {
+func TestRunnerHostInfoRoundTripAndDefaultVersion(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	want := HostInfo{Home: "/home/remote"}
-	if err := WriteHostInfo(dirs, "host", want); err != nil {
-		t.Fatalf("WriteHostInfo() error = %v", err)
+	if err := SaveHostInfo(dirs, "host", want); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
 	}
-	got, err := ReadHostInfo(dirs, "host")
+	got, err := LoadHostInfo(dirs, "host")
 	if err != nil {
-		t.Fatalf("ReadHostInfo() error = %v", err)
+		t.Fatalf("LoadHostInfo() error = %v", err)
 	}
 	if got.Home != want.Home {
-		t.Fatalf("ReadHostInfo() = %#v, want %#v", got, want)
+		t.Fatalf("LoadHostInfo() = %#v, want %#v", got, want)
 	}
 	if got := NewRunnerWithVersion(&runnerSSH{}, dirs, "").version; got != defaultVersion {
 		t.Fatalf("default runner version = %q, want %q", got, defaultVersion)
@@ -137,7 +131,7 @@ func TestChooseMuxCoversSelectionAndFailures(t *testing.T) {
 
 func TestRunnerProbeAndInstallWrappersValidateInputs(t *testing.T) {
 	t.Helper()
-	runner := NewRunner(&runnerSSH{}, paths.TestDirs(t))
+	runner := NewRunner(&runnerSSH{}, pathstest.Dirs(t))
 	var nilContext context.Context
 	if _, err := runner.Probe(nilContext, "host"); err == nil {
 		t.Fatal("Probe() nil context error = nil")

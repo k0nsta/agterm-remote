@@ -33,7 +33,7 @@ type Config struct {
 	Rows        Rows
 	Sink        StatusSink
 	Supervisors Supervisors
-	Bindings    *bindings.Store
+	Bindings    BindingStore
 	Logger      *log.Logger
 	// TeardownTimeout bounds how long stopHost and Close wait for goroutines
 	// to exit once told to; zero selects defaultTeardownTimeout.
@@ -54,7 +54,7 @@ type Daemon struct {
 	rows        Rows
 	sink        StatusSink
 	supervisors Supervisors
-	store       *bindings.Store
+	store       BindingStore
 	logger      *log.Logger
 	// teardownTimeout bounds every wait on goroutines that were told to stop.
 	teardownTimeout time.Duration
@@ -79,10 +79,11 @@ type Daemon struct {
 	// finishes a request cannot hold Close open on children.
 	controlMu    sync.Mutex
 	controlConns map[net.Conn]struct{}
-	hosts        map[string]*hostRuntime
-	ensured      map[string]bool
-	ensureMu     sync.Mutex
-	control      net.Listener
+
+	hosts    map[string]*hostRuntime
+	ensured  map[string]bool
+	ensureMu sync.Mutex
+	control  net.Listener
 
 	recoveryRunning bool
 	recoveryLogged  bool
@@ -135,6 +136,11 @@ func New(config Config) *Daemon {
 	if store == nil {
 		store = bindings.New(dirs)
 	}
+	// A typed nil (*bindings.Store)(nil) passes the check above and would
+	// panic on first use; treat it as "not provided" too.
+	if concrete, ok := store.(*bindings.Store); ok && concrete == nil {
+		store = bindings.New(dirs)
+	}
 	timeout := config.TeardownTimeout
 	if timeout <= 0 {
 		timeout = defaultTeardownTimeout
@@ -169,9 +175,6 @@ func waitWithin(wg *sync.WaitGroup, timeout time.Duration) bool {
 		return false
 	}
 }
-
-// NewDaemon is a descriptive alias for New.
-func NewDaemon(config Config) *Daemon { return New(config) }
 
 // Start acquires the instance lock, writes the pidfile, performs startup
 // checks, and starts one listener and bridge per bound host. Start is useful
@@ -428,8 +431,10 @@ func (d *Daemon) initialize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Tree is an informational startup check only. It is deliberately never
-	// passed to Store.Reconcile: agterm's tree can be window-scoped.
+	// Tree is an informational startup check only: agterm's tree can be
+	// window-scoped, so a tree result must never be used to delete bindings.
+	// Bindings go one row at a time: on agterm's session.closed event, and
+	// lazily when a status push answers "no such session".
 	if d.rows != nil {
 		if live, treeErr := d.rows.Tree(ctx); treeErr != nil {
 			d.logf("warning: list agterm rows during startup: %v", treeErr)
@@ -466,47 +471,12 @@ func (d *Daemon) handshake(ctx context.Context) bool {
 		d.logf("warning: agterm version handshake: %v", err)
 		return false
 	}
-	if olderVersion(version, agterm.MinTestedVersion) {
+	if agterm.VersionLess(version, agterm.MinTestedVersion) {
 		d.logf("warning: agterm %s is older than tested minimum %s", version, agterm.MinTestedVersion)
 		return true
 	}
 	d.logf("agterm version: %s", version)
 	return true
-}
-
-func olderVersion(got, minimum string) bool {
-	gotParts, gotOK := parseVersion(got)
-	minParts, minOK := parseVersion(minimum)
-	if !gotOK || !minOK {
-		return false
-	}
-	for i := range minParts {
-		if gotParts[i] != minParts[i] {
-			return gotParts[i] < minParts[i]
-		}
-	}
-	return false
-}
-
-func parseVersion(value string) ([3]int, bool) {
-	var result [3]int
-	value = strings.TrimPrefix(value, "v")
-	parts := strings.SplitN(value, ".", 4)
-	if len(parts) < 3 {
-		return result, false
-	}
-	for i := range result {
-		part := parts[i]
-		if i == 2 {
-			part = strings.SplitN(part, "-", 2)[0]
-		}
-		n, err := strconv.Atoi(part)
-		if err != nil || n < 0 {
-			return result, false
-		}
-		result[i] = n
-	}
-	return result, true
 }
 
 func (d *Daemon) startHost(ctx context.Context, host string) error {
@@ -573,7 +543,7 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 		liveness = marker
 	}
 	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness)
-	hostCtx, cancel := newHostContext(ctx)
+	hostCtx, cancel := context.WithCancel(ctx)
 	stateSource, hasStateSource := supervisor.(interface{ Changes() <-chan bridge.State })
 	runtime := &hostRuntime{
 		host: host, hostKey: hostKey, localSock: localSock,
@@ -723,9 +693,11 @@ func (d *Daemon) stopHost(host string) {
 	if runtime.supervisor != nil {
 		runtime.supervisor.Stop()
 	}
-	// Wait for this host's goroutines before removing the socket: the
-	// listener removes its own path on the way out, so returning early lets
-	// that deferred removal race a later `up` that has re-bound the path.
+	// Wait — bounded by teardownTimeout — for this host's goroutines before
+	// removing the socket and freeing the slot, so a successor `up` normally
+	// cannot bind the path while a Serve or supervisor of this runtime is
+	// still running. After the timeout the slot is released anyway, with a
+	// warning: a wedged handler must not hold `agr down` hostage.
 	if !waitWithin(&runtime.done, d.teardownTimeout) {
 		d.logf("warning: host %s teardown did not finish within %s", host, d.teardownTimeout)
 	}
@@ -748,10 +720,6 @@ func isConnectionRefused(err error) bool {
 	return err != nil && (errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(strings.ToLower(err.Error()), "connection refused"))
 }
 
-func newHostContext(parent context.Context) (context.Context, context.CancelFunc) {
-	return context.WithCancel(parent)
-}
-
 func (d *Daemon) logf(format string, args ...any) {
 	if d != nil && d.logger != nil {
 		d.logger.Printf(format, args...)
@@ -759,8 +727,3 @@ func (d *Daemon) logf(format string, args ...any) {
 }
 
 var _ StatusSink = (*Daemon)(nil)
-var _ receiver.Liveness = (*Daemon)(nil)
-
-// MarkAlive is present for callers that use a daemon as a liveness sink. The
-// host-specific listener normally calls its injected bridge marker directly.
-func (d *Daemon) MarkAlive() {}

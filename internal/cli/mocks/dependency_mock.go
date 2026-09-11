@@ -14,6 +14,7 @@ import (
 	reflect "reflect"
 
 	agterm "github.com/k0nsta/agterm-remote/internal/agterm"
+	bindings "github.com/k0nsta/agterm-remote/internal/bindings"
 	daemon "github.com/k0nsta/agterm-remote/internal/daemon"
 	remote "github.com/k0nsta/agterm-remote/internal/remote"
 	gomock "go.uber.org/mock/gomock"
@@ -581,4 +582,57 @@ func (m *MockBridge) Up(ctx context.Context, host string) error {
 func (mr *MockBridgeMockRecorder) Up(ctx, host any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Up", reflect.TypeOf((*MockBridge)(nil).Up), ctx, host)
+}
+
+// MockBindingStore is a mock of BindingStore interface.
+type MockBindingStore struct {
+	ctrl     *gomock.Controller
+	recorder *MockBindingStoreMockRecorder
+	isgomock struct{}
+}
+
+// MockBindingStoreMockRecorder is the mock recorder for MockBindingStore.
+type MockBindingStoreMockRecorder struct {
+	mock *MockBindingStore
+}
+
+// NewMockBindingStore creates a new mock instance.
+func NewMockBindingStore(ctrl *gomock.Controller) *MockBindingStore {
+	mock := &MockBindingStore{ctrl: ctrl}
+	mock.recorder = &MockBindingStoreMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockBindingStore) EXPECT() *MockBindingStoreMockRecorder {
+	return m.recorder
+}
+
+// Bind mocks base method.
+func (m *MockBindingStore) Bind(binding bindings.Binding) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Bind", binding)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Bind indicates an expected call of Bind.
+func (mr *MockBindingStoreMockRecorder) Bind(binding any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Bind", reflect.TypeOf((*MockBindingStore)(nil).Bind), binding)
+}
+
+// Load mocks base method.
+func (m *MockBindingStore) Load() ([]bindings.Binding, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Load")
+	ret0, _ := ret[0].([]bindings.Binding)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Load indicates an expected call of Load.
+func (mr *MockBindingStoreMockRecorder) Load() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Load", reflect.TypeOf((*MockBindingStore)(nil).Load))
 }

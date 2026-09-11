@@ -1,16 +1,16 @@
-package daemon
+package unixsock
 
 import (
 	"net"
 	"os"
 	"testing"
 
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 )
 
 func TestListenCleanRemovesLeftoverSocketPath(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	path := dirs.Sock()
 	if err := os.WriteFile(path, []byte("left by a crashed daemon"), 0o600); err != nil {
 		t.Fatalf("write leftover socket path: %v", err)
@@ -31,7 +31,7 @@ func TestListenCleanRemovesLeftoverSocketPath(t *testing.T) {
 
 func TestListenCleanRefusesLiveSocket(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	path := dirs.Sock()
 	first, err := ListenClean(path)
 	if err != nil {

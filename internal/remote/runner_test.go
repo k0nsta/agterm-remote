@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/token"
 )
 
@@ -56,7 +56,7 @@ func (s *runnerSSH) Calls(t *testing.T) []runnerSSHCall {
 
 func TestRunnerHomeCachesProbeAndUsesArgv(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	ssh := &runnerSSH{body: []byte("/home/remote\n")}
 	runner := NewRunner(ssh, dirs)
 
@@ -83,7 +83,7 @@ func TestRunnerHomeCachesProbeAndUsesArgv(t *testing.T) {
 
 func TestRunnerHomeDoesNotProbeCorruptCache(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/ok"}); err != nil {
 		t.Fatalf("SaveHostInfo() error = %v", err)
 	}
@@ -100,7 +100,7 @@ func TestRunnerHomeDoesNotProbeCorruptCache(t *testing.T) {
 
 func TestRunnerEnsureDirsUsesConstantArgv(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	ssh := &runnerSSH{}
 	if err := NewRunner(ssh, dirs).EnsureDirs(context.Background(), "host-1"); err != nil {
 		t.Fatalf("EnsureDirs() error = %v", err)
@@ -145,7 +145,7 @@ func TestRunnerDataHeaderTable(t *testing.T) {
 
 func TestRunnerDataUnreachablePrecedesNotInstalled(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
 		t.Fatalf("SaveHostInfo() error = %v", err)
 	}
@@ -161,7 +161,7 @@ func TestRunnerDataUnreachablePrecedesNotInstalled(t *testing.T) {
 
 func TestRunnerDataMismatchWarnsAndReturnsPayload(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
 		t.Fatalf("SaveHostInfo() error = %v", err)
 	}
@@ -185,7 +185,7 @@ func TestRunnerDataMismatchWarnsAndReturnsPayload(t *testing.T) {
 
 func TestRunnerDataPropagatesExitAfterValidHeader(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
 		t.Fatalf("SaveHostInfo() error = %v", err)
 	}
@@ -205,7 +205,7 @@ func TestRunnerDataPropagatesExitAfterValidHeader(t *testing.T) {
 
 func TestRunnerReapValidatesNameAndSurfacesRemoteRefusal(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
 		t.Fatalf("SaveHostInfo() error = %v", err)
 	}
@@ -222,18 +222,6 @@ func TestRunnerReapValidatesNameAndSurfacesRemoteRefusal(t *testing.T) {
 	}
 	if len(ssh.Calls(t)) != 1 {
 		t.Fatalf("SSH calls = %d, want invalid name not sent", len(ssh.Calls(t)))
-	}
-}
-
-func TestRunnerAgrPathUsesCachedHome(t *testing.T) {
-	t.Helper()
-	dirs := paths.TestDirs(t)
-	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
-		t.Fatalf("SaveHostInfo() error = %v", err)
-	}
-	runner := NewRunner(nil, dirs)
-	if got, want := runner.AgrPath("host"), "/home/remote/.local/bin/agr"; got != want {
-		t.Fatalf("AgrPath() = %q, want %q", got, want)
 	}
 }
 
@@ -275,7 +263,7 @@ func TestNoExpansionDependentArgvReachesSSH(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ssh := &runnerSSH{body: []byte("/home/remote\n")}
-			tc.invoke(t, NewRunner(ssh, paths.TestDirs(t)))
+			tc.invoke(t, NewRunner(ssh, pathstest.Dirs(t)))
 			calls := ssh.Calls(t)
 			if len(calls) == 0 {
 				t.Fatal("caller made no SSH call, so the invariant was never exercised")
@@ -323,7 +311,7 @@ func TestResolveAgrPathReturnsAbsolutePathAndRejectsBadHome(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ssh := &runnerSSH{body: []byte(tc.probe)}
-			runner := NewRunner(ssh, paths.TestDirs(t))
+			runner := NewRunner(ssh, pathstest.Dirs(t))
 			got, err := runner.ResolveAgrPath(context.Background(), "user@example.com")
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {

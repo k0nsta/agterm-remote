@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/token"
+	"github.com/k0nsta/agterm-remote/internal/unixsock"
 )
 
 const maxControlLine = 1 << 20
@@ -38,7 +40,7 @@ type HostStatus struct {
 }
 
 func (d *Daemon) startControl(ctx context.Context) error {
-	listener, err := ListenClean(d.dirs.Sock())
+	listener, err := unixsock.ListenClean(d.dirs.Sock())
 	if err != nil {
 		return err
 	}
@@ -104,7 +106,7 @@ func (d *Daemon) serveControlConn(ctx context.Context, conn net.Conn) {
 		}
 		if len(line) > 0 {
 			var request controlRequest
-			if decodeErr := json.Unmarshal(bytesTrimSpace(line), &request); decodeErr != nil {
+			if decodeErr := json.Unmarshal(bytes.TrimSpace(line), &request); decodeErr != nil {
 				if writeErr := writeControlResponse(conn, controlResponse{Error: fmt.Sprintf("malformed control request: %v", decodeErr)}); writeErr != nil {
 					return
 				}
@@ -261,20 +263,6 @@ func (d *Daemon) hostStatuses() []HostStatus {
 		result = append(result, d.hostStatus(host))
 	}
 	return result
-}
-
-func bytesTrimSpace(value []byte) []byte {
-	for len(value) > 0 && (value[0] == ' ' || value[0] == '\t' || value[0] == '\r' || value[0] == '\n') {
-		value = value[1:]
-	}
-	for len(value) > 0 {
-		last := value[len(value)-1]
-		if last != ' ' && last != '\t' && last != '\r' && last != '\n' {
-			break
-		}
-		value = value[:len(value)-1]
-	}
-	return value
 }
 
 func (d *Daemon) trackControlConn(conn net.Conn) {

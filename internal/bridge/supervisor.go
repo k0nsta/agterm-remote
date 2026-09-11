@@ -26,10 +26,6 @@ type State string
 const (
 	StateDown State = "down"
 	StateUp   State = "up"
-
-	// Down and Up are concise aliases used by consumers of the bridge package.
-	Down = StateDown
-	Up   = StateUp
 )
 
 // Supervisor owns one reverse SSH tunnel. A supervisor is intended to be
@@ -72,12 +68,6 @@ func New(host, hostKey, remoteSock, localSock string, runner ProcessRunner) *Sup
 		sshPath:    sshPath,
 		runner:     runner,
 	}
-}
-
-// NewSupervisor is an explicit alias for callers that prefer descriptive
-// constructor names.
-func NewSupervisor(host, hostKey, remoteSock, localSock string, runner ProcessRunner) *Supervisor {
-	return New(host, hostKey, remoteSock, localSock, runner)
 }
 
 // SSHPath reports the executable selected for this supervisor. It is useful

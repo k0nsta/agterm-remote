@@ -54,11 +54,3 @@ func TestDirsPaths(t *testing.T) {
 		}
 	}
 }
-
-func TestTestDirsUsesShortCleanedRoot(t *testing.T) {
-	t.Helper()
-	dirs := TestDirs(t)
-	if dirs.Cache == "" || filepath.Dir(dirs.Cache) != "/tmp" {
-		t.Fatalf("TestDirs().Cache = %q, want a direct child of /tmp", dirs.Cache)
-	}
-}

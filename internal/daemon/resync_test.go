@@ -7,13 +7,13 @@ import (
 
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/bridge"
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
 func TestDaemonResyncsLevelsAndHUDAcrossBridgeTransitions(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	trace := newTask10Trace(t)
 	r := newTask10Remote(t, trace)
 	host := "host-a"

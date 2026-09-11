@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/k0nsta/agterm-remote/internal/bindings"
-	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -39,7 +39,7 @@ func (f *fakeCLIRows) Tree(_ context.Context) ([]string, error) {
 
 func TestListRendersGoldenWithFooter(t *testing.T) {
 	t.Helper()
-	dirs := paths.TestDirs(t)
+	dirs := pathstest.Dirs(t)
 	store := bindings.New(dirs)
 	for _, item := range []bindings.Binding{
 		{Row: "row-live", Host: "home", Name: "api"},
@@ -69,7 +69,7 @@ func TestListRendersGoldenWithFooter(t *testing.T) {
 
 func TestListKeepsRowsUnknownWhenTreeUnavailable(t *testing.T) {
 	t.Helper()
-	store := bindings.New(paths.TestDirs(t))
+	store := bindings.New(pathstest.Dirs(t))
 	if err := store.Bind(bindings.Binding{Row: "row-live", Host: "home", Name: "api"}); err != nil {
 		t.Fatalf("Bind(): %v", err)
 	}
@@ -87,7 +87,7 @@ func TestListKeepsRowsUnknownWhenTreeUnavailable(t *testing.T) {
 
 func TestListEmptySessions(t *testing.T) {
 	t.Helper()
-	output, err := List(context.Background(), "home", &fakeCLISessions{}, bindings.New(paths.TestDirs(t)), nil)
+	output, err := List(context.Background(), "home", &fakeCLISessions{}, bindings.New(pathstest.Dirs(t)), nil)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}

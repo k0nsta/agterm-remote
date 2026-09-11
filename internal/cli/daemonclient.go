@@ -2,15 +2,16 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -37,8 +38,10 @@ type daemonResponse struct {
 }
 
 // DaemonClient speaks the local agr daemon's one-request-per-connection
-// control protocol. It starts at most one detached daemon process for the
-// lifetime of the client when the control socket is absent.
+// control protocol. It starts at most one detached daemon process per client,
+// and only for up and reload-bindings when the control socket cannot be
+// dialled (a stale socket node does not block the start); Down and Status
+// never start one and return ErrDaemonNotRunning instead.
 type DaemonClient struct {
 	dirs paths.Dirs
 
@@ -61,11 +64,12 @@ func NewDaemonClient(dirs paths.Dirs) *DaemonClient {
 	return client
 }
 
-// Up asks the daemon to start or retain the bridge for host.
 // ErrDaemonNotRunning reports that no daemon was reachable for an operation
 // that deliberately does not start one.
 var ErrDaemonNotRunning = errors.New("daemon is not running")
 
+// Up asks the daemon to start or retain the bridge for host, starting a
+// daemon first when none is reachable.
 func (c *DaemonClient) Up(ctx context.Context, host string) error {
 	_, err := c.call(ctx, "up", host)
 	return err
@@ -163,7 +167,14 @@ func (c *DaemonClient) open(ctx context.Context, autoStart bool) (net.Conn, erro
 		return conn, nil
 	}
 	if !autoStart {
-		return nil, fmt.Errorf("%w: %v", ErrDaemonNotRunning, err)
+		if daemonAbsent(err) {
+			return nil, fmt.Errorf("%w: %v", ErrDaemonNotRunning, err)
+		}
+		// Anything else says nothing about whether a daemon is running — a
+		// cancelled context, a permission error, a slow accept — and callers
+		// that treat "not running" as a state (down, doctor) must not read it
+		// as one.
+		return nil, fmt.Errorf("dial daemon: %w", err)
 	}
 	// A failed dial is not evidence that a daemon is running: after SIGKILL,
 	// a panic or power loss the socket node survives with nothing listening,
@@ -236,6 +247,13 @@ func (c *DaemonClient) startDetached() error {
 	return nil
 }
 
+// daemonAbsent reports whether a dial failure means no daemon is listening:
+// the socket node is missing, or present with nothing behind it (the stale
+// node a killed daemon leaves).
+func daemonAbsent(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
 func dialDaemon(ctx context.Context, path string) (net.Conn, error) {
 	dialer := net.Dialer{}
 	return dialer.DialContext(ctx, "unix", path)
@@ -249,7 +267,7 @@ func readDaemonLine(reader *bufio.Reader) ([]byte, error) {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	line = []byte(strings.TrimSpace(string(line)))
+	line = bytes.TrimSpace(line)
 	if len(line) == 0 {
 		return nil, errors.New("empty daemon response")
 	}
