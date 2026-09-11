@@ -1,0 +1,4 @@
+NAME             ATT  IDLE   STATE      CMD              ROW
+api              1    42s    active     claude           bound
+infra            -    3m     -          -                stale
+rows without a session: row-stale

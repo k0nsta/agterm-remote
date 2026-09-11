@@ -1,0 +1,42 @@
+version: 2
+
+project_name: agr
+
+builds:
+  - id: agr
+    main: ./cmd/agr
+    binary: agr
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: agr
+    ids:
+      - agr
+    formats:
+      - tar.gz
+    name_template: "agr_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+brews:
+  - name: agr
+    ids:
+      - agr
+    repository:
+      owner: k0nsta
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/k0nsta/agterm-remote
+    description: Bridge remote agent status into agterm
+    license: MIT
+    install: |
+      bin.install "agr"

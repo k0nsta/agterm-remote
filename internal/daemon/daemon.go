@@ -1,0 +1,729 @@
+// Package daemon owns agr's local process, host bridge, and binding lifecycle.
+package daemon
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/k0nsta/agterm-remote/internal/agterm"
+	"github.com/k0nsta/agterm-remote/internal/bindings"
+	"github.com/k0nsta/agterm-remote/internal/bridge"
+	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/receiver"
+	"github.com/k0nsta/agterm-remote/internal/token"
+)
+
+// Config contains the daemon's injected dependencies.
+type Config struct {
+	Dirs        paths.Dirs
+	UI          UI
+	Remote      Remote
+	Events      EventSource
+	Rows        Rows
+	Sink        StatusSink
+	Supervisors Supervisors
+	Bindings    BindingStore
+	Logger      *log.Logger
+	// TeardownTimeout bounds how long stopHost and Close wait for goroutines
+	// to exit once told to; zero selects defaultTeardownTimeout.
+	TeardownTimeout time.Duration
+}
+
+// defaultTeardownTimeout is generous for a healthy child — they exit within
+// milliseconds of cancellation — and short enough that a handler wedged on a
+// peer that never answers cannot hold `agr down` or daemon shutdown hostage.
+const defaultTeardownTimeout = 5 * time.Second
+
+// Daemon supervises all hosts represented by the persistent binding store.
+type Daemon struct {
+	dirs        paths.Dirs
+	ui          UI
+	remote      Remote
+	events      EventSource
+	rows        Rows
+	sink        StatusSink
+	supervisors Supervisors
+	store       BindingStore
+	logger      *log.Logger
+	// teardownTimeout bounds every wait on goroutines that were told to stop.
+	teardownTimeout time.Duration
+	// childrenDrained is closed by the ONE goroutine that waits on children
+	// for the current shutdown generation. Close retries after a timeout
+	// share it instead of each starting another children.Wait(): with several
+	// waiters woken at once, the newest lets Close release the lock, a Start
+	// re-arms the WaitGroup, and an older waiter still returning panics with
+	// "WaitGroup is reused before previous Wait has returned".
+	childrenDrained chan struct{}
+
+	mu       sync.Mutex
+	started  bool
+	closing  bool
+	ctx      context.Context
+	cancel   context.CancelFunc
+	lockFile *os.File
+	logFile  *os.File
+	children sync.WaitGroup
+
+	// Accepted control connections, closed on shutdown so a client that never
+	// finishes a request cannot hold Close open on children.
+	controlMu    sync.Mutex
+	controlConns map[net.Conn]struct{}
+
+	hosts    map[string]*hostRuntime
+	ensured  map[string]bool
+	ensureMu sync.Mutex
+	control  net.Listener
+
+	recoveryRunning bool
+	recoveryLogged  bool
+	recoveryDone    chan struct{}
+	eventReset      chan struct{}
+}
+
+type hostRuntime struct {
+	host       string
+	hostKey    string
+	localSock  string
+	listener   *receiver.Listener
+	cancel     context.CancelFunc
+	supervisor Supervisor
+	state      string
+	since      time.Time
+	attempts   int
+	// done tracks this host's own goroutines so stopHost can wait for them.
+	// Without it, the listener's deferred os.Remove could fire after a later
+	// `up` had already bound a new socket at the same path, deleting it.
+	done sync.WaitGroup
+	// stopping marks a teardown in progress. The runtime STAYS in d.hosts for
+	// the whole of it, so the host slot is held until the socket is gone —
+	// releasing it early let a concurrent start bind a replacement that this
+	// teardown then unlinked. torndown closes when the slot is finally free.
+	stopping bool
+	torndown chan struct{}
+	// bound is set once this runtime's Bind succeeded, so it owns the socket
+	// path. Teardown unlinks localSock only when bound: a runtime whose bind
+	// failed with "already in use" never owned the path, and removing it
+	// would unlink whatever live listener does.
+	bound bool
+}
+
+type versioner interface {
+	Version(context.Context) (string, error)
+}
+
+type aliveMarker interface {
+	MarkAlive()
+}
+
+// New constructs a daemon from injected dependencies.
+func New(config Config) *Daemon {
+	dirs := config.Dirs
+	if dirs.Cache == "" {
+		dirs = paths.New()
+	}
+	store := config.Bindings
+	if store == nil {
+		store = bindings.New(dirs)
+	}
+	// A typed nil (*bindings.Store)(nil) passes the check above and would
+	// panic on first use; treat it as "not provided" too.
+	if concrete, ok := store.(*bindings.Store); ok && concrete == nil {
+		store = bindings.New(dirs)
+	}
+	timeout := config.TeardownTimeout
+	if timeout <= 0 {
+		timeout = defaultTeardownTimeout
+	}
+	return &Daemon{
+		dirs:            dirs,
+		ui:              config.UI,
+		remote:          config.Remote,
+		events:          config.Events,
+		rows:            config.Rows,
+		sink:            config.Sink,
+		supervisors:     config.Supervisors,
+		store:           store,
+		logger:          config.Logger,
+		teardownTimeout: timeout,
+		hosts:           make(map[string]*hostRuntime),
+		ensured:         make(map[string]bool),
+		eventReset:      make(chan struct{}),
+	}
+}
+
+// waitWithin waits for wg with a deadline and reports whether it finished.
+// On timeout the waiting goroutine is left behind until wg drains; nothing
+// else references it, so it simply exits when the wedged child finally does.
+func waitWithin(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// Start acquires the instance lock, writes the pidfile, performs startup
+// checks, and starts one listener and bridge per bound host. Start is useful
+// to callers that need to own the surrounding wait loop; Run is the normal
+// signal-aware entry point.
+func (d *Daemon) Start(ctx context.Context) error {
+	if d == nil {
+		return errors.New("nil daemon")
+	}
+	if ctx == nil {
+		return errors.New("nil daemon context")
+	}
+
+	d.mu.Lock()
+	if d.started {
+		d.mu.Unlock()
+		return errors.New("daemon is already started")
+	}
+	if err := d.acquireLock(); err != nil {
+		d.mu.Unlock()
+		return err
+	}
+	d.ctx, d.cancel = context.WithCancel(ctx)
+	d.started = true
+	d.closing = false
+	d.mu.Unlock()
+
+	if err := d.openLog(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	if err := d.writePID(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	if err := d.initialize(d.ctx); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return nil
+}
+
+// Run starts the daemon and waits for context cancellation or SIGINT/SIGTERM,
+// then shuts down all child processes and removes owned state files.
+func (d *Daemon) Run(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("nil daemon context")
+	}
+	signalCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	if err := d.Start(signalCtx); err != nil {
+		return err
+	}
+	<-signalCtx.Done()
+	return d.Close()
+}
+
+// Close stops all host children and releases the daemon's single-instance
+// lock. It is idempotent and also performs cleanup after a failed Start.
+func (d *Daemon) Close() error {
+	if d == nil {
+		return nil
+	}
+
+	d.mu.Lock()
+	if !d.started && d.lockFile == nil {
+		d.mu.Unlock()
+		return nil
+	}
+	if d.closing {
+		d.mu.Unlock()
+		return nil
+	}
+	d.closing = true
+	if d.cancel != nil {
+		d.cancel()
+	}
+	hosts := make([]*hostRuntime, 0, len(d.hosts))
+	bound := make([]bool, 0, len(d.hosts))
+	for _, host := range d.hosts {
+		hosts = append(hosts, host)
+		bound = append(bound, host.bound)
+	}
+	d.mu.Unlock()
+
+	for i, host := range hosts {
+		if host.cancel != nil {
+			host.cancel()
+		}
+		if host.supervisor != nil {
+			host.supervisor.Stop()
+		}
+		if bound[i] {
+			_ = os.Remove(host.localSock)
+		}
+	}
+	d.mu.Lock()
+	control := d.control
+	d.control = nil
+	d.mu.Unlock()
+	if control != nil {
+		_ = control.Close()
+	}
+	// Bounded like stopHost: a child wedged on a peer that never answers must
+	// not hold shutdown hostage. The socket and pid paths are still removed
+	// below so a successor process can start once this one exits, and the
+	// caller learns about the wedge through the returned error rather than a
+	// log line it may never read. What is NOT released while goroutines
+	// survive: the flock — it is the fence that keeps a successor from
+	// starting against shared state (the binding store, agterm rows) that a
+	// wedged handler may still write — and the logger those goroutines still
+	// use. Both go at process exit, or on a later Close once the children
+	// have drained; until then Start is refused as "already running".
+	var closeErr error
+	d.mu.Lock()
+	drained := d.childrenDrained
+	if drained == nil {
+		drained = make(chan struct{})
+		d.childrenDrained = drained
+		go func(wg *sync.WaitGroup, done chan struct{}) { wg.Wait(); close(done) }(&d.children, drained)
+	}
+	d.mu.Unlock()
+	quiescent := true
+	select {
+	case <-drained:
+	case <-time.After(d.teardownTimeout):
+		quiescent = false
+	}
+	if !quiescent {
+		d.logf("warning: daemon goroutines did not finish within %s; releasing paths but holding the lock", d.teardownTimeout)
+		closeErr = fmt.Errorf("daemon goroutines did not stop within %s", d.teardownTimeout)
+	}
+	// A start that was mid-Bind when the snapshot was taken has unwound by
+	// now (its children were reserved before publish); re-read which
+	// runtimes ended up owning their path.
+	d.mu.Lock()
+	for i, host := range hosts {
+		bound[i] = host.bound
+	}
+	d.mu.Unlock()
+	for i, host := range hosts {
+		if bound[i] {
+			_ = os.Remove(host.localSock)
+		}
+	}
+
+	if err := os.Remove(d.dirs.Sock()); err != nil && !errors.Is(err, os.ErrNotExist) && closeErr == nil {
+		closeErr = err
+	}
+	if err := os.Remove(d.dirs.Pid()); err != nil && !errors.Is(err, os.ErrNotExist) && closeErr == nil {
+		closeErr = err
+	}
+
+	d.mu.Lock()
+	if quiescent {
+		if d.lockFile != nil {
+			if err := syscall.Flock(int(d.lockFile.Fd()), syscall.LOCK_UN); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("unlock daemon: %w", err)
+			}
+			if err := d.lockFile.Close(); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("close daemon lock: %w", err)
+			}
+			d.lockFile = nil
+		}
+		if d.logFile != nil {
+			if err := d.logFile.Close(); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("close daemon log: %w", err)
+			}
+			d.logFile = nil
+			d.logger = nil
+		}
+		// The generation's waiter has returned; the next Start may re-arm
+		// children, and the next Close starts a fresh waiter.
+		d.childrenDrained = nil
+	}
+	d.started = false
+	d.closing = false
+	d.cancel = nil
+	d.ctx = nil
+	d.hosts = make(map[string]*hostRuntime)
+	d.mu.Unlock()
+	return closeErr
+}
+
+// Status forwards a status event and lazily removes only a row that agterm
+// explicitly says no longer exists. Tree is intentionally not consulted for
+// deletion because its result can be limited to the frontmost window.
+func (d *Daemon) Status(ctx context.Context, target string, args agterm.StatusArgs) error {
+	if d == nil || d.sink == nil {
+		return errors.New("daemon status sink is unavailable")
+	}
+	err := d.sink.Status(ctx, target, args)
+	if isConnectionRefused(err) {
+		d.beginAgtermRecovery()
+	}
+	if errors.Is(err, agterm.ErrUnknownTarget) {
+		if unbindErr := d.store.UnbindRow(target); unbindErr != nil {
+			d.logf("warning: unbind unknown agterm row %q: %v", target, unbindErr)
+		}
+	}
+	return err
+}
+
+func (d *Daemon) acquireLock() error {
+	if err := os.MkdirAll(d.dirs.Cache, 0o700); err != nil {
+		return fmt.Errorf("create daemon cache: %w", err)
+	}
+	file, err := os.OpenFile(d.dirs.Lock(), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open daemon lock: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errors.New("daemon is already running")
+		}
+		return fmt.Errorf("lock daemon: %w", err)
+	}
+	d.lockFile = file
+	return nil
+}
+
+func (d *Daemon) writePID() error {
+	data := []byte(strconv.Itoa(os.Getpid()) + "\n")
+	if err := os.WriteFile(d.dirs.Pid(), data, 0o600); err != nil {
+		return fmt.Errorf("write daemon pidfile: %w", err)
+	}
+	return nil
+}
+
+func (d *Daemon) openLog() error {
+	if d.logger != nil {
+		return nil
+	}
+	file, err := os.OpenFile(d.dirs.Log(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open daemon log: %w", err)
+	}
+	d.logFile = file
+	d.logger = log.New(file, "", log.LstdFlags)
+	return nil
+}
+
+func (d *Daemon) initialize(ctx context.Context) error {
+	sock := agterm.SocketPath()
+	ctl := agterm.CtlPath()
+	d.logf("agterm control socket=%q agtermctl=%q", sock, ctl)
+	d.handshake(ctx)
+	if err := d.startControl(ctx); err != nil {
+		return err
+	}
+
+	bound, err := d.store.Load()
+	if err != nil {
+		return err
+	}
+	// Tree is an informational startup check only: agterm's tree can be
+	// window-scoped, so a tree result must never be used to delete bindings.
+	// Bindings go one row at a time: on agterm's session.closed event, and
+	// lazily when a status push answers "no such session".
+	if d.rows != nil {
+		if live, treeErr := d.rows.Tree(ctx); treeErr != nil {
+			d.logf("warning: list agterm rows during startup: %v", treeErr)
+		} else {
+			d.logf("agterm startup tree returned %d rows; bindings remain lazy", len(live))
+		}
+	}
+
+	hosts := make(map[string]struct{}, len(bound))
+	for _, binding := range bound {
+		hosts[binding.Host] = struct{}{}
+	}
+	// Per-host isolation: startHost does an SSH round trip (EnsureDirs, Home),
+	// so one asleep or unreachable host used to abort the whole batch and take
+	// the bridge down for every other host. A host that fails here is logged
+	// and skipped; `agr up <host>` retries it, and nothing else is affected.
+	for host := range hosts {
+		if err := d.startHost(ctx, host); err != nil {
+			d.logf("warning: host %s not started: %v", host, err)
+			continue
+		}
+	}
+	d.startEvents(ctx)
+	return nil
+}
+
+func (d *Daemon) handshake(ctx context.Context) bool {
+	v, ok := d.sink.(versioner)
+	if !ok {
+		return true
+	}
+	version, err := v.Version(ctx)
+	if err != nil {
+		d.logf("warning: agterm version handshake: %v", err)
+		return false
+	}
+	if agterm.VersionLess(version, agterm.MinTestedVersion) {
+		d.logf("warning: agterm %s is older than tested minimum %s", version, agterm.MinTestedVersion)
+		return true
+	}
+	d.logf("agterm version: %s", version)
+	return true
+}
+
+func (d *Daemon) startHost(ctx context.Context, host string) error {
+	if !token.ValidHost(host) {
+		return fmt.Errorf("invalid host %q", host)
+	}
+	d.mu.Lock()
+	if !d.started || d.closing {
+		d.mu.Unlock()
+		return errors.New("daemon is stopping")
+	}
+	// A host mid-teardown is NOT a started host. Reporting success here left
+	// the caller believing the host was up while the teardown went on to
+	// delete it, so `agr down` immediately followed by `agr open` ended with
+	// no host running at all. Wait the teardown out and start properly; only
+	// a live entry is idempotent success.
+	for {
+		existing, exists := d.hosts[host]
+		if !exists {
+			break
+		}
+		if !existing.stopping {
+			d.mu.Unlock()
+			return nil
+		}
+		d.mu.Unlock()
+		<-existing.torndown
+		d.mu.Lock()
+	}
+	d.mu.Unlock()
+	if d.remote == nil {
+		return errors.New("remote dependency is unavailable")
+	}
+	if d.supervisors == nil {
+		return errors.New("supervisor factory is unavailable")
+	}
+	hostKey := token.FileKey(host)
+	d.ensureMu.Lock()
+	ensured := d.ensured[host]
+	if !ensured {
+		if err := d.remote.EnsureDirs(ctx, host); err != nil {
+			d.ensureMu.Unlock()
+			return fmt.Errorf("ensure remote agr directories for %s: %w", host, err)
+		}
+		d.ensured[host] = true
+	}
+	d.ensureMu.Unlock()
+	home, err := d.remote.Home(ctx, host)
+	if err != nil {
+		return fmt.Errorf("resolve remote home for %s: %w", host, err)
+	}
+	if home == "" {
+		return fmt.Errorf("resolve remote home for %s: empty home", host)
+	}
+
+	localSock := d.dirs.Recv(hostKey)
+	remoteSock := filepath.Join(home, ".cache", "agr", "bridge.sock")
+	supervisor := d.supervisors.New(host, hostKey, remoteSock, localSock)
+	if supervisor == nil {
+		return fmt.Errorf("create supervisor for %s: nil supervisor", host)
+	}
+	var liveness receiver.Liveness
+	if marker, ok := supervisor.(aliveMarker); ok {
+		liveness = marker
+	}
+	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness)
+	hostCtx, cancel := context.WithCancel(ctx)
+	stateSource, hasStateSource := supervisor.(interface{ Changes() <-chan bridge.State })
+	runtime := &hostRuntime{
+		host: host, hostKey: hostKey, localSock: localSock,
+		listener: listener, cancel: cancel, supervisor: supervisor,
+		state: "down", since: time.Now().UTC(), attempts: 1,
+		torndown: make(chan struct{}),
+	}
+	// Arm the WaitGroup BEFORE the runtime can be reached from d.hosts: a
+	// concurrent stopHost may call Wait as soon as it is published, and
+	// sync.WaitGroup forbids an Add that raises the counter from zero racing
+	// a Wait.
+	goroutines := 2
+	if hasStateSource {
+		goroutines = 3
+	}
+	runtime.done.Add(goroutines)
+
+	d.mu.Lock()
+	// release unwinds a runtime whose goroutines will never start. Every call
+	// happens with d.mu held continuously since the runtime was last checked
+	// or published, so no stopHost can have claimed it: this startHost is the
+	// sole owner of the torndown close. reservedChildren is true only after
+	// the publish below, where the d.children slots are taken; the
+	// pre-publish exits never reserved them.
+	release := func(reservedChildren bool) {
+		for i := 0; i < goroutines; i++ {
+			runtime.done.Done()
+			if reservedChildren {
+				d.children.Done()
+			}
+		}
+		close(runtime.torndown)
+		cancel()
+		supervisor.Stop()
+	}
+	for {
+		if !d.started || d.closing {
+			d.mu.Unlock()
+			release(false)
+			return errors.New("daemon is stopping")
+		}
+		existing, exists := d.hosts[host]
+		if !exists {
+			break
+		}
+		if !existing.stopping {
+			// A live host is already running: idempotent success.
+			d.mu.Unlock()
+			release(false)
+			return nil
+		}
+		// A teardown holds the slot. Waiting for it is what makes an
+		// immediate down/up safe — proceeding here would bind a socket the
+		// predecessor is about to unlink, and treating the entry as started
+		// would report success for a host that is going away.
+		d.mu.Unlock()
+		<-existing.torndown
+		d.mu.Lock()
+	}
+	// Claim the host under the lock BEFORE binding. The duplicate check above
+	// is the authoritative one — the early check races across the seconds of
+	// SSH round trips above — so binding before it would make the loser of a
+	// concurrent cold start fail hard on an address already in use, where it
+	// used to return nil idempotently.
+	// Reserve the children slots in the same critical section: Close flips
+	// d.closing under d.mu before it calls children.Wait, and the loop above
+	// read d.closing under d.mu, so Close either refuses this start or waits
+	// for it to unwind. Reserving after Bind let Close return with this
+	// host's goroutines about to launch behind it.
+	d.children.Add(goroutines)
+	d.hosts[host] = runtime
+
+	// Bind before the host is announced started: Serve binds asynchronously,
+	// so a bind failure used to surface only as a log line while startHost
+	// returned success and the supervisor kept running — a tunnel with no
+	// receiver, silently dropping every status event.
+	//
+	// Bind with d.mu STILL HELD from the publish above. That serializes the
+	// bind with slot release: a stopHost cannot claim this runtime, hit its
+	// teardown timeout and free the slot to a successor while this bind is
+	// in flight, so no successor can ever find the path taken by a
+	// predecessor that is already going away — and no teardown can be
+	// racing this bind's failure path for the runtime. Bind is a handful of
+	// local syscalls, so the lock is held for microseconds.
+	if err := listener.Bind(); err != nil {
+		// Nothing has seen this runtime as bound and the lock has been held
+		// since publish, so this startHost still owns the whole unwind.
+		delete(d.hosts, host)
+		d.mu.Unlock()
+		release(true)
+		return fmt.Errorf("bind receiver socket for %s: %w", host, err)
+	}
+	runtime.bound = true
+	d.mu.Unlock()
+	go func() {
+		defer d.children.Done()
+		defer runtime.done.Done()
+		if err := listener.Serve(hostCtx); err != nil && hostCtx.Err() == nil {
+			d.logf("warning: receiver for %s stopped: %v", host, err)
+		}
+	}()
+	go func() {
+		defer d.children.Done()
+		defer runtime.done.Done()
+		if err := supervisor.Run(hostCtx); err != nil && hostCtx.Err() == nil {
+			d.logf("warning: supervisor for %s stopped: %v", host, err)
+		}
+	}()
+	if hasStateSource {
+		go func() {
+			defer d.children.Done()
+			defer runtime.done.Done()
+			d.watchHostStates(hostCtx, host, stateSource.Changes())
+		}()
+	}
+	return nil
+}
+
+func (d *Daemon) stopHost(host string) {
+	d.mu.Lock()
+	runtime, ok := d.hosts[host]
+	if ok && runtime.stopping {
+		// Another stopHost owns this teardown; wait for it so callers see a
+		// stopped host on return.
+		d.mu.Unlock()
+		<-runtime.torndown
+		return
+	}
+	if ok {
+		// Keep the entry in place for the whole teardown. Deleting it here
+		// released the host slot while the old listener was still running,
+		// so a concurrent start could bind a replacement socket at the same
+		// path that the os.Remove below then unlinked — leaving that host
+		// with a live tunnel and no reachable receiver.
+		runtime.stopping = true
+	}
+	d.mu.Unlock()
+	if !ok {
+		// Nothing to tear down. Do not unlink the path either: a start for
+		// this host may be binding it right now, and a stale path is
+		// reclaimed by ListenClean on the next start anyway.
+		return
+	}
+	if runtime.cancel != nil {
+		runtime.cancel()
+	}
+	if runtime.supervisor != nil {
+		runtime.supervisor.Stop()
+	}
+	// Wait — bounded by teardownTimeout — for this host's goroutines before
+	// removing the socket and freeing the slot, so a successor `up` normally
+	// cannot bind the path while a Serve or supervisor of this runtime is
+	// still running. After the timeout the slot is released anyway, with a
+	// warning: a wedged handler must not hold `agr down` hostage.
+	if !waitWithin(&runtime.done, d.teardownTimeout) {
+		d.logf("warning: host %s teardown did not finish within %s", host, d.teardownTimeout)
+	}
+	// The listener never unlinks its path; the daemon does, here, in the one
+	// section where ownership is known: this runtime bound the path AND
+	// still holds the slot, so no successor can have bound it. Removing and
+	// releasing the slot under one lock keeps that true.
+	d.mu.Lock()
+	if d.hosts[host] == runtime {
+		if runtime.bound {
+			_ = os.Remove(runtime.localSock)
+		}
+		delete(d.hosts, host)
+	}
+	d.mu.Unlock()
+	close(runtime.torndown)
+}
+
+func isConnectionRefused(err error) bool {
+	return err != nil && (errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(strings.ToLower(err.Error()), "connection refused"))
+}
+
+func (d *Daemon) logf(format string, args ...any) {
+	if d != nil && d.logger != nil {
+		d.logger.Printf(format, args...)
+	}
+}
+
+var _ StatusSink = (*Daemon)(nil)
