@@ -144,6 +144,16 @@ func restoreModeValue(value any) string {
 			return mode
 		}
 	}
+	// agterm 0.27 nests the answer: result.restore.{active, configured,
+	// requestedAtLaunch, restartRequired}. The mode in force is "active";
+	// "configured" only differs while a restart is pending.
+	if restore, ok := object["restore"].(map[string]any); ok {
+		for _, key := range []string{"active", "configured"} {
+			if mode, ok := restore[key].(string); ok && mode != "" {
+				return mode
+			}
+		}
+	}
 	if result, ok := object["result"]; ok {
 		return restoreModeValue(result)
 	}
