@@ -61,6 +61,14 @@ func TestSupervisorUsesExactReverseSSHArgvAndPromotesOnEvent(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("supervisor did not start the process")
 	}
+	select {
+	case state := <-supervisor.Changes():
+		if state != bridge.StateConnecting {
+			t.Fatalf("state after start = %q, want %q", state, bridge.StateConnecting)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("starting the process did not report connecting")
+	}
 	supervisor.MarkAlive()
 	select {
 	case state := <-supervisor.Changes():
@@ -174,10 +182,22 @@ func TestSupervisorStopCallsProcessStopAndClosesChanges(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run() did not finish")
 	}
+	// A bridge stopped before promotion reports exactly connecting → down and
+	// then closes its change stream; nothing else may leak out.
+	for _, want := range []bridge.State{bridge.StateConnecting, bridge.StateDown} {
+		select {
+		case got, ok := <-supervisor.Changes():
+			if !ok || got != want {
+				t.Fatalf("Changes() = %q (open=%v), want %q", got, ok, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("Changes() did not report %q", want)
+		}
+	}
 	select {
-	case _, ok := <-supervisor.Changes():
+	case got, ok := <-supervisor.Changes():
 		if ok {
-			t.Fatalf("Changes() still had an unexpected transition")
+			t.Fatalf("Changes() still had an unexpected transition: %q", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Changes() was not closed")

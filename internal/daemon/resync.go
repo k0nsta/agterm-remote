@@ -24,7 +24,9 @@ func (d *Daemon) watchHostStates(ctx context.Context, host string, changes <-cha
 }
 
 func (d *Daemon) hostStateChanged(ctx context.Context, host, state string) {
-	if state != string(bridge.StateUp) && state != string(bridge.StateDown) {
+	switch state {
+	case string(bridge.StateUp), string(bridge.StateDown), string(bridge.StateConnecting):
+	default:
 		return
 	}
 	d.mu.Lock()
@@ -37,7 +39,10 @@ func (d *Daemon) hostStateChanged(ctx context.Context, host, state string) {
 	runtime.state = state
 	runtime.since = time.Now().UTC()
 	d.mu.Unlock()
-	if previous == string(bridge.StateDown) && state == string(bridge.StateUp) {
+	// Connecting is reported (doctor shows it) but changes nothing else: the
+	// resync waits for a proven bridge, and the reconnecting HUD marks the
+	// loss of one that was up — not a start that has not been proven yet.
+	if state == string(bridge.StateUp) && previous != string(bridge.StateUp) {
 		d.resyncHost(ctx, host)
 	}
 	if previous == string(bridge.StateUp) && state == string(bridge.StateDown) {
