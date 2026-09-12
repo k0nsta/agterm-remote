@@ -36,7 +36,7 @@ type Sessions interface {
 
 // Installer installs the embedded remote agr script and its hooks.
 type Installer interface {
-	Install(ctx context.Context, host, mux string) error
+	InstallResult(ctx context.Context, host, mux string) (remote.InstallResult, error)
 }
 
 // Versioner reads the running agterm app version through its control socket.
