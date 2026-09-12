@@ -227,18 +227,19 @@ func (m *MockInstaller) EXPECT() *MockInstallerMockRecorder {
 	return m.recorder
 }
 
-// Install mocks base method.
-func (m *MockInstaller) Install(ctx context.Context, host, mux string) error {
+// InstallResult mocks base method.
+func (m *MockInstaller) InstallResult(ctx context.Context, host, mux string) (remote.InstallResult, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Install", ctx, host, mux)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "InstallResult", ctx, host, mux)
+	ret0, _ := ret[0].(remote.InstallResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
-// Install indicates an expected call of Install.
-func (mr *MockInstallerMockRecorder) Install(ctx, host, mux any) *gomock.Call {
+// InstallResult indicates an expected call of InstallResult.
+func (mr *MockInstallerMockRecorder) InstallResult(ctx, host, mux any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Install", reflect.TypeOf((*MockInstaller)(nil).Install), ctx, host, mux)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InstallResult", reflect.TypeOf((*MockInstaller)(nil).InstallResult), ctx, host, mux)
 }
 
 // MockVersioner is a mock of Versioner interface.

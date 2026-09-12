@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/bridge"
@@ -72,4 +73,52 @@ func TestDaemonResyncsLevelsAndHUDAcrossBridgeTransitions(t *testing.T) {
 	if got := d.hostStatus(host).State; got != "down" {
 		t.Fatalf("host state after down = %q, want down", got)
 	}
+}
+
+// TestConnectingStateIsReportedButTriggersNothing pins the cosmetic finding
+// from the first real-host run: a freshly started bridge read "down" for five
+// seconds. It now reads "connecting" — and only reads: no resync (the bridge is
+// unproven) and no reconnecting HUD (nothing that was up has been lost).
+func TestConnectingStateIsReportedButTriggersNothing(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	trace := newTask10Trace(t)
+	host := "host-c"
+	r := newTask10Remote(t, trace)
+	r.home[host] = "/home/test"
+	store := bindings.New(dirs)
+	if err := store.Save([]bindings.Binding{daemonBinding(t, "row-c", host, "api")}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	ui := newTask10UI(t, trace)
+	factory := &task10Supervisors{}
+	d := New(task10Config(t, dirs, r, ui, nil, newTask10Sink(t, trace), factory, store))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	supervisor := factory.latest(t)
+
+	before := len(trace.snapshot(t))
+	supervisor.changes <- bridge.StateConnecting
+	waitForTask10(t, func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.hosts[host] != nil && d.hosts[host].state == string(bridge.StateConnecting)
+	})
+	time.Sleep(50 * time.Millisecond)
+	if got := trace.snapshot(t); len(got) != before {
+		t.Fatalf("connecting triggered work: %#v", got[before:])
+	}
+
+	// Promotion from connecting resyncs exactly as promotion from down did.
+	supervisor.changes <- bridge.StateUp
+	waitForTask10(t, func() bool {
+		for _, entry := range trace.snapshot(t) {
+			if entry == "sessions" {
+				return true
+			}
+		}
+		return false
+	})
 }

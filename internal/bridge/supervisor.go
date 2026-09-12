@@ -26,6 +26,11 @@ type State string
 const (
 	StateDown State = "down"
 	StateUp   State = "up"
+	// StateConnecting is a bridge whose SSH process is running but has not yet
+	// proven itself — by a first status event or by staying up for
+	// connectionPromotionDelay. Before it existed, doctor reported a freshly
+	// started, perfectly healthy bridge as "down" for those first seconds.
+	StateConnecting State = "connecting"
 )
 
 // Supervisor owns one reverse SSH tunnel. A supervisor is intended to be
@@ -187,6 +192,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		}
 
 		started := time.Now()
+		s.setState(StateConnecting)
 		waitCh := make(chan error, 1)
 		go func() { waitCh <- process.Wait() }()
 

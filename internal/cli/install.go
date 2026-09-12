@@ -9,8 +9,13 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/token"
 )
 
-// RunInstall parses agr install's host and optional multiplexer override.
-func RunInstall(ctx context.Context, args []string, installer Installer, errw io.Writer) int {
+// RunInstall parses agr install's host and optional multiplexer override, runs
+// the install, and confirms on out what was installed and which multiplexer
+// and relay the probe selected — the two facts the user needs next.
+func RunInstall(ctx context.Context, args []string, installer Installer, out, errw io.Writer) int {
+	if out == nil {
+		out = io.Discard
+	}
 	if errw == nil {
 		errw = io.Discard
 	}
@@ -27,10 +32,12 @@ func RunInstall(ctx context.Context, args []string, installer Installer, errw io
 		_, _ = fmt.Fprintln(errw, "agr: nil command context")
 		return 1
 	}
-	if err := installer.Install(ctx, host, mux); err != nil {
+	result, err := installer.InstallResult(ctx, host, mux)
+	if err != nil {
 		_, _ = fmt.Fprintf(errw, "agr: install %s: %v\n", host, err)
 		return 1
 	}
+	_, _ = fmt.Fprintf(out, "installed agr %s on %s (mux %s, relay %s)\n", result.Version, host, result.Mux, result.Relay)
 	return 0
 }
 

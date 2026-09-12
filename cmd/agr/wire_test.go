@@ -53,9 +53,9 @@ func (f *dispatchBridgeFake) ReloadBindings(context.Context) error {
 
 type dispatchInstallerFake struct{ calls []string }
 
-func (f *dispatchInstallerFake) Install(_ context.Context, host, mux string) error {
+func (f *dispatchInstallerFake) InstallResult(_ context.Context, host, mux string) (remote.InstallResult, error) {
 	f.calls = append(f.calls, host+" "+mux)
-	return nil
+	return remote.InstallResult{Host: host, Mux: mux}, nil
 }
 
 type dispatchDaemonFake struct {

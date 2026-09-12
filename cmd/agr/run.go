@@ -122,8 +122,8 @@ func runDown(ctx context.Context, app *application, args []string, _, errw io.Wr
 	return cli.RunDown(ctx, args[0], app.bridge, errw)
 }
 
-func runInstall(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
-	return cli.RunInstall(ctx, args, app.installer, errw)
+func runInstall(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
+	return cli.RunInstall(ctx, args, app.installer, out, errw)
 }
 
 func runDaemon(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
