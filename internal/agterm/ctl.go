@@ -50,9 +50,15 @@ func (c *Ctl) HudOpen(ctx context.Context, row, message string) error {
 	return c.run.Run(ctx, c.path, "session", "hud", "open", message, "--target", row, "--socket", c.sock)
 }
 
-// HudClose closes an agterm HUD for a row.
+// HudClose closes an agterm HUD for a row. Closing when no HUD is open is a
+// success, not an error: the daemon closes the "reconnecting" HUD on every
+// bound row whenever a bridge comes up, and most of the time none was shown.
 func (c *Ctl) HudClose(ctx context.Context, row string) error {
-	return c.run.Run(ctx, c.path, "session", "hud", "close", "--target", row, "--socket", c.sock)
+	err := c.run.Run(ctx, c.path, "session", "hud", "close", "--target", row, "--socket", c.sock)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no hud") {
+		return nil
+	}
+	return err
 }
 
 // Rename changes the display name of an agterm row.
