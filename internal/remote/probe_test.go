@@ -106,3 +106,29 @@ func TestRunnerProbePropagatesSSHFailure(t *testing.T) {
 		t.Fatal("Probe() error = nil, want SSH error")
 	}
 }
+
+func TestRunnerProbePassesLocalTermAndParsesTerminfo(t *testing.T) {
+	t.Helper()
+	ssh := &runnerSSH{body: []byte("home\t/home/remote\nterminfo\t0\ntic\t1\n")}
+	runner := NewRunner(ssh, pathstest.Dirs(t))
+	runner.SetTerm("xterm-ghostty")
+	got, err := runner.Probe(context.Background(), "host")
+	if err != nil {
+		t.Fatalf("Probe() error = %v", err)
+	}
+	calls := ssh.Calls(t)
+	if want := []string{"sh", "-s", "xterm-ghostty"}; !reflect.DeepEqual(calls[0].argv, want) {
+		t.Fatalf("Probe() argv = %#v, want %#v", calls[0].argv, want)
+	}
+	if got.Term != "xterm-ghostty" || !got.TerminfoChecked || got.Terminfo || !got.Tic {
+		t.Fatalf("Probe() terminfo fields = %+v, want term asked, checked, missing, tic present", got)
+	}
+	// A malformed TERM must never reach argv or a terminfo file name.
+	runner.SetTerm("xterm; rm -rf /")
+	if _, err := runner.Probe(context.Background(), "host"); err != nil {
+		t.Fatalf("Probe() error = %v", err)
+	}
+	if calls := ssh.Calls(t); !reflect.DeepEqual(calls[1].argv, []string{"sh"}) {
+		t.Fatalf("Probe() argv with a malformed TERM = %#v, want [sh]", calls[1].argv)
+	}
+}

@@ -22,7 +22,7 @@ func (f *installFake) InstallResult(_ context.Context, host, mux string) (remote
 	if f.err != nil {
 		return remote.InstallResult{}, f.err
 	}
-	return remote.InstallResult{Host: host, Version: "1.2.3", Mux: "zmx", Relay: "nc"}, nil
+	return remote.InstallResult{Host: host, Version: "1.2.3", Mux: "zmx", Relay: "nc", Terminfo: "terminfo xterm-ghostty: installed"}, nil
 }
 
 func TestRunInstallParsesMuxAfterHost(t *testing.T) {
@@ -37,7 +37,7 @@ func TestRunInstallParsesMuxAfterHost(t *testing.T) {
 	}
 	// A silent success left the user guessing whether anything happened and
 	// which multiplexer the probe picked.
-	if got := out.String(); got != "installed agr 1.2.3 on user@example.com (mux zmx, relay nc)\n" {
+	if got := out.String(); got != "installed agr 1.2.3 on user@example.com (mux zmx, relay nc)\nterminfo xterm-ghostty: installed\n" {
 		t.Fatalf("install confirmation = %q", got)
 	}
 }

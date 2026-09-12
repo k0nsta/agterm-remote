@@ -196,6 +196,13 @@ func renderRemote(out io.Writer, host, localVersion string, probe remote.ProbeRe
 	_, _ = fmt.Fprintf(out, "  agr remote: %s\n", remoteAgr)
 	_, _ = fmt.Fprintf(out, "  mux: %s\n", muxText(probe))
 	_, _ = fmt.Fprintf(out, "  relay: %s\n", relayText(probe))
+	if probe.Term != "" && probe.TerminfoChecked {
+		if probe.Terminfo {
+			_, _ = fmt.Fprintf(out, "  terminfo (%s): present\n", probe.Term)
+		} else {
+			_, _ = fmt.Fprintf(out, "  terminfo (%s): MISSING (run: agr install %s)\n", probe.Term, host)
+		}
+	}
 	_, _ = fmt.Fprintf(out, "  bridge socket: %s\n", present(probe.Sock))
 	if probe.MoshServer {
 		_, _ = fmt.Fprintln(out, "  mosh-server: yes")

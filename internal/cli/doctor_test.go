@@ -109,7 +109,7 @@ func TestRenderDoctorUnsupportedAndFailureStates(t *testing.T) {
 			AgrVersion: "1.0.0", AppVersionError: errors.New("connection refused"),
 			RestoreModeErr: agterm.ErrUnsupported, ContextErr: agterm.ErrUnsupported,
 		},
-		Remote: RemoteDoctorReport{Probe: remote.ProbeResult{AgrVersion: "0.9.0", TmuxVersion: "3.4", Python3: true}},
+		Remote: RemoteDoctorReport{Probe: remote.ProbeResult{AgrVersion: "0.9.0", TmuxVersion: "3.4", Python3: true, Term: "xterm-ghostty", TerminfoChecked: true}},
 		Daemon: DaemonDoctorReport{Err: errors.New("socket missing")},
 	}
 	var output strings.Builder
@@ -120,7 +120,7 @@ func TestRenderDoctorUnsupportedAndFailureStates(t *testing.T) {
 		"restore mode: n/a (agterm < 0.26)",
 		"session context: n/a (agterm < 0.26)",
 		"agr remote: 0.9.0 (version mismatch; run: agr install home)",
-		"mux: tmux 3.4", "relay: python3", "daemon:\n  not running",
+		"mux: tmux 3.4", "relay: python3", "terminfo (xterm-ghostty): MISSING (run: agr install home)", "daemon:\n  not running",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("doctor output = %q, want %q", got, want)

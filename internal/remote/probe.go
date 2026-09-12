@@ -24,6 +24,13 @@ type ProbeResult struct {
 	Sock            bool
 	LegacyTargets   int
 	LegacyAgrTarget int
+	// Term is the local TERM the probe asked about (empty: not asked);
+	// TerminfoChecked says the host answered, Terminfo whether it has the
+	// entry, Tic whether it could compile one.
+	Term            string
+	TerminfoChecked bool
+	Terminfo        bool
+	Tic             bool
 }
 
 // probeScript is deliberately constant. Values discovered on the remote are
@@ -90,6 +97,14 @@ if have tmux; then
 	legacy_agr_target=$(tmux list-sessions -F '#{session_name}\t#{@agr_target}' 2>/dev/null | awk -F '\t' '$2 != "" { n++ } END { print n + 0 }')
 fi
 printf 'legacy_agr_target\t%s\n' "${legacy_agr_target:-0}"
+
+# $1 is the Mac's TERM (agterm: xterm-ghostty). A host without that terminfo
+# entry runs tmux and everything under it blind: no clipboard, odd keys.
+term=${1:-}
+if [ -n "$term" ]; then
+	if infocmp "$term" >/dev/null 2>&1; then printf 'terminfo\t1\n'; else printf 'terminfo\t0\n'; fi
+	if have tic; then printf 'tic\t1\n'; else printf 'tic\t0\n'; fi
+fi
 `
 
 // Probe executes the constant probe on the remote host and parses its
@@ -102,11 +117,21 @@ func (r *Runner) Probe(ctx context.Context, host string) (ProbeResult, error) {
 	if ctx == nil {
 		return ProbeResult{}, errors.New("nil remote context")
 	}
-	body, err := r.sshClient().Run(ctx, host, []byte(probeScript), "sh")
+	argv := []string{"sh"}
+	if r.term != "" {
+		// -s keeps reading the script from stdin; the operand becomes $1.
+		argv = []string{"sh", "-s", r.term}
+	}
+	body, err := r.sshClient().Run(ctx, host, []byte(probeScript), argv...)
 	if err != nil {
 		return ProbeResult{}, err
 	}
-	return ParseProbe(body)
+	result, err := ParseProbe(body)
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	result.Term = r.term
+	return result, nil
 }
 
 // ParseProbe parses the key/value lines produced by probeScript. Unknown keys
@@ -158,6 +183,11 @@ func ParseProbe(body []byte) (ProbeResult, error) {
 			result.LegacyTargets, err = parseProbeCount(value)
 		case "legacy_agr_target":
 			result.LegacyAgrTarget, err = parseProbeCount(value)
+		case "terminfo":
+			result.TerminfoChecked = true
+			result.Terminfo, err = parseProbeBool(value)
+		case "tic":
+			result.Tic, err = parseProbeBool(value)
 		}
 		if err != nil {
 			return ProbeResult{}, fmt.Errorf("parse probe key %q: %w", key, err)
