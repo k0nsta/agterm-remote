@@ -22,6 +22,9 @@ type InstallResult struct {
 	Version string
 	Mux     string
 	Relay   string
+	// Terminfo is one phrase about the local terminal's entry on the host —
+	// present, installed, or why it could not be — empty when not checked.
+	Terminfo string
 }
 
 // Install probes the host, installs the versioned remote script, writes the
@@ -91,7 +94,34 @@ func (r *Runner) InstallResult(ctx context.Context, host, muxOverride string) (I
 		return InstallResult{}, err
 	}
 
-	return InstallResult{Host: host, Version: r.version, Mux: mux, Relay: relay}, nil
+	result := InstallResult{Host: host, Version: r.version, Mux: mux, Relay: relay}
+	result.Terminfo = r.ensureTerminfo(ctx, host, probe)
+	return result, nil
+}
+
+// ensureTerminfo pushes the local terminal's terminfo entry to host when the
+// probe found it missing, and says what happened in one phrase for the install
+// confirmation. Best effort: the script and hooks are already in place, so a
+// failure here is reported, not fatal.
+func (r *Runner) ensureTerminfo(ctx context.Context, host string, probe ProbeResult) string {
+	switch {
+	case probe.Term == "" || !probe.TerminfoChecked:
+		return ""
+	case probe.Terminfo:
+		return "terminfo " + probe.Term + ": present"
+	case !probe.Tic:
+		return "terminfo " + probe.Term + ": MISSING on host, and tic is not installed there to add it"
+	case r.terminfo == nil:
+		return "terminfo " + probe.Term + ": MISSING on host; no local terminfo source"
+	}
+	entry, err := r.terminfo.Infocmp(ctx, probe.Term)
+	if err != nil {
+		return fmt.Sprintf("terminfo %s: MISSING on host; could not read the local entry: %v", probe.Term, err)
+	}
+	if _, err := r.sshClient().Run(ctx, host, entry, "tic", "-x", "-"); err != nil {
+		return fmt.Sprintf("terminfo %s: install failed: %v", probe.Term, err)
+	}
+	return "terminfo " + probe.Term + ": installed"
 }
 
 func chooseMux(probe ProbeResult, override string) (string, error) {

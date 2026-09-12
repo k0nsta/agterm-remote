@@ -17,3 +17,9 @@ type SSH interface {
 type TTY interface {
 	Interactive(ctx context.Context, argv ...string) error
 }
+
+// TerminfoSource dumps the local terminal's terminfo entry so install can carry
+// it to a host that lacks it.
+type TerminfoSource interface {
+	Infocmp(ctx context.Context, term string) ([]byte, error)
+}

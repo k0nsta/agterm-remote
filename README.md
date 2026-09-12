@@ -157,7 +157,11 @@ brew install k0nsta/tap/agr
 agr install <host>
 ```
 
-`agr install` replaces the remote script and merges the current hooks. Sessions
+`agr install` replaces the remote script and merges the current hooks. It also
+copies the Mac terminal's terminfo entry (`$TERM`, `xterm-ghostty` under agterm)
+to the host when the host lacks it — without that entry tmux and everything
+under it cannot see the terminal's capabilities (clipboard, keys), and `doctor`
+reports the gap as `terminfo (<TERM>): MISSING`. Sessions
 created by 0.4 with a non-empty `@agr_target` remain recognized as owned.
 Sessions from 0.3's `~/.cache/agterm/targets` are reported by `doctor` as
 legacy and are not listed until you adopt them with `agr open`; after that,

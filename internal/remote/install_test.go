@@ -186,3 +186,66 @@ func testDirsForInstall(t *testing.T) (dirs paths.Dirs) {
 	t.Helper()
 	return pathstest.Dirs(t)
 }
+
+type terminfoFake struct {
+	entry []byte
+	err   error
+	calls []string
+}
+
+func (f *terminfoFake) Infocmp(_ context.Context, term string) ([]byte, error) {
+	f.calls = append(f.calls, term)
+	return f.entry, f.err
+}
+
+// TestInstallPushesMissingTerminfo pins the first real-host lesson: the Mac
+// sends TERM=xterm-ghostty and a host without that entry runs tmux blind.
+// Install now carries the local entry over when the probe says it is missing
+// and tic is available; every other outcome is reported, never fatal.
+func TestInstallPushesMissingTerminfo(t *testing.T) {
+	t.Helper()
+	base, err := os.ReadFile("testdata/probe.txt")
+	if err != nil {
+		t.Fatalf("read probe fixture: %v", err)
+	}
+	tests := []struct {
+		name      string
+		probe     string
+		infocmp   *terminfoFake
+		wantCalls int
+		wantNote  string
+		wantTic   bool
+	}{
+		{"missing with tic: pushed", "terminfo\t0\ntic\t1\n", &terminfoFake{entry: []byte("xterm-ghostty|entry,\n")}, 7, "terminfo xterm-ghostty: installed", true},
+		{"present: nothing pushed", "terminfo\t1\ntic\t1\n", &terminfoFake{entry: []byte("unused")}, 6, "terminfo xterm-ghostty: present", false},
+		{"missing without tic: reported", "terminfo\t0\ntic\t0\n", &terminfoFake{entry: []byte("unused")}, 6, "tic is not installed", false},
+		{"local infocmp fails: reported", "terminfo\t0\ntic\t1\n", &terminfoFake{err: errors.New("no entry")}, 6, "could not read the local entry", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Helper()
+			dirs := testDirsForInstall(t)
+			ssh := &runnerSSH{result: [][]byte{append(append([]byte(nil), base...), []byte(tc.probe)...), nil, nil, nil, []byte(`{}`), nil, nil}}
+			runner := NewRunnerWithVersion(ssh, dirs, "1.0.0")
+			runner.SetTerm("xterm-ghostty")
+			runner.terminfo = tc.infocmp
+			result, err := runner.InstallResult(context.Background(), "user@example.com", "")
+			if err != nil {
+				t.Fatalf("InstallResult() error = %v", err)
+			}
+			if !strings.Contains(result.Terminfo, tc.wantNote) {
+				t.Fatalf("InstallResult().Terminfo = %q, want it to contain %q", result.Terminfo, tc.wantNote)
+			}
+			calls := ssh.Calls(t)
+			if len(calls) != tc.wantCalls {
+				t.Fatalf("SSH calls = %d, want %d", len(calls), tc.wantCalls)
+			}
+			if tc.wantTic {
+				last := calls[len(calls)-1]
+				if !reflect.DeepEqual(last.argv, []string{"tic", "-x", "-"}) || string(last.stdin) != string(tc.infocmp.entry) {
+					t.Fatalf("terminfo push = argv %#v stdin %q, want tic -x - fed the local entry", last.argv, last.stdin)
+				}
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
@@ -54,6 +55,7 @@ func newApplication() *application {
 	control := agterm.NewCtl(ctlPath, sockPath, nil, nil, nil)
 	status := agterm.NewClient(sockPath, ctlPath, 5*time.Second, &agterm.ExecRunner{})
 	remoteRunner := remote.NewRunnerWithVersion(nil, dirs, version)
+	remoteRunner.SetTerm(os.Getenv("TERM"))
 	store := bindings.New(dirs)
 	client := cli.NewDaemonClient(dirs)
 	app := &application{

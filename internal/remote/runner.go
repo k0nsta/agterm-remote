@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -28,8 +30,42 @@ type Runner struct {
 	ssh     SSH
 	dirs    paths.Dirs
 	version string
+	// term is the local terminal's TERM, passed to the probe so the host can
+	// report whether it knows that terminal; empty disables the check.
+	term     string
+	terminfo TerminfoSource
 
 	homeMu sync.Mutex
+}
+
+// termName is what a TERM value may look like before it is placed in the
+// probe's argv and used as a terminfo name.
+var termName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.+-]*$`)
+
+// SetTerm records the local terminal's TERM. The probe then asks the host
+// whether it has a terminfo entry for it, install pushes one when it does not,
+// and doctor reports the gap. Found on the first real host: agterm sends
+// TERM=xterm-ghostty, the remote had never heard of it, and tmux ran blind —
+// no clipboard, odd keys. An empty or malformed value disables the check.
+func (r *Runner) SetTerm(term string) {
+	if !termName.MatchString(term) {
+		r.term = ""
+		return
+	}
+	r.term = term
+}
+
+// ExecInfocmp reads terminfo entries with the local infocmp binary.
+type ExecInfocmp struct{}
+
+// Infocmp returns the compiled-source form of term's entry, extended
+// capabilities included, ready for `tic -x -` on the other side.
+func (ExecInfocmp) Infocmp(ctx context.Context, term string) ([]byte, error) {
+	out, err := exec.CommandContext(ctx, "infocmp", "-x", term).Output()
+	if err != nil {
+		return nil, fmt.Errorf("infocmp -x %s: %w", term, err)
+	}
+	return out, nil
 }
 
 // NewRunner constructs a runner using the supplied SSH seam. A nil seam uses
@@ -50,7 +86,7 @@ func NewRunnerWithVersion(ssh SSH, dirs paths.Dirs, version string) *Runner {
 	if version == "" {
 		version = defaultVersion
 	}
-	return &Runner{ssh: ssh, dirs: dirs, version: version}
+	return &Runner{terminfo: ExecInfocmp{}, ssh: ssh, dirs: dirs, version: version}
 }
 
 // Home returns the cached remote home, probing it once when no host-info file
