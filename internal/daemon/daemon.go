@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -56,6 +57,9 @@ type Daemon struct {
 	supervisors Supervisors
 	store       BindingStore
 	logger      *log.Logger
+	// stdLogOutput is the standard logger's writer before openLog pointed it at
+	// the daemon log, restored by Close; nil when openLog did not redirect.
+	stdLogOutput io.Writer
 	// teardownTimeout bounds every wait on goroutines that were told to stop.
 	teardownTimeout time.Duration
 	// childrenDrained is closed by the ONE goroutine that waits on children
@@ -340,6 +344,10 @@ func (d *Daemon) Close() error {
 			d.lockFile = nil
 		}
 		if d.logFile != nil {
+			if d.stdLogOutput != nil {
+				log.SetOutput(d.stdLogOutput)
+				d.stdLogOutput = nil
+			}
 			if err := d.logFile.Close(); err != nil && closeErr == nil {
 				closeErr = fmt.Errorf("close daemon log: %w", err)
 			}
@@ -415,6 +423,13 @@ func (d *Daemon) openLog() error {
 	}
 	d.logFile = file
 	d.logger = log.New(file, "", log.LstdFlags)
+	// The daemon runs detached with stderr on /dev/null, and the receiver,
+	// bridge and agterm packages report through the standard logger — "no
+	// binding for remote session", relay read errors, SSH bridge start
+	// failures. Those were lost. Route the standard logger into the same file
+	// for the life of the daemon; Close puts it back.
+	d.stdLogOutput = log.Writer()
+	log.SetOutput(file)
 	return nil
 }
 

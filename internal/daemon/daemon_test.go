@@ -564,3 +564,46 @@ func TestCloseIsBoundedByAWedgedChild(t *testing.T) {
 		t.Fatalf("same-instance Close() error = %v", err)
 	}
 }
+
+// TestDaemonLogCapturesStandardLoggerWarnings pins the real-host finding that
+// the receiver's "no binding for remote session" (and every other standard-
+// logger warning from bridge, agterm and remote) vanished with the detached
+// daemon's stderr. While the daemon owns its log file, the standard logger
+// writes there too; Close restores whatever it pointed at before.
+func TestDaemonLogCapturesStandardLoggerWarnings(t *testing.T) {
+	t.Helper()
+	previous := log.Writer()
+	t.Cleanup(func() { log.SetOutput(previous) })
+	var elsewhere bytes.Buffer
+	log.SetOutput(&elsewhere)
+
+	dirs := pathstest.Dirs(t)
+	config := task10Config(t, dirs, newTask10Remote(t, nil), nil, nil, nil, &task10Supervisors{}, nil)
+	config.Logger = nil // let the daemon open dirs.Log() itself, as in production
+	d := New(config)
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	log.Printf("warning: no binding for remote session %q on %s", "probe-session", "host-x")
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	logged, err := os.ReadFile(dirs.Log())
+	if err != nil {
+		t.Fatalf("read daemon log: %v", err)
+	}
+	if !strings.Contains(string(logged), `no binding for remote session "probe-session"`) {
+		t.Fatalf("daemon log does not carry the standard-logger warning:\n%s", logged)
+	}
+	if elsewhere.Len() != 0 {
+		t.Fatalf("standard logger still wrote to its previous output while the daemon ran: %q", elsewhere.String())
+	}
+	if log.Writer() != &elsewhere {
+		t.Fatal("Close() did not restore the standard logger's previous output")
+	}
+	log.Print("after close")
+	if !strings.Contains(elsewhere.String(), "after close") {
+		t.Fatal("standard logger not writing to its restored output after Close()")
+	}
+}
