@@ -55,6 +55,28 @@ func TestCtlContextUnknownSubcommandIsBestEffort(t *testing.T) {
 	}
 }
 
+// TestCtlHudCloseTreatsNoHudAsSuccess pins the real-host finding: every bridge
+// start logged `close reconnecting HUD … error: no hud` for rows that never
+// had one. Only that answer is swallowed; any other failure still surfaces.
+func TestCtlHudCloseTreatsNoHudAsSuccess(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	runner := mocks.NewMockRunner(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, runner, nil, nil)
+	ctx := context.Background()
+
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "session", "hud", "close", "--target", "row-1", "--socket", testCtlSock).
+		Return(errors.New("agtermctl: exit status 1: error: no hud"))
+	if err := ctl.HudClose(ctx, "row-1"); err != nil {
+		t.Fatalf("HudClose() with no HUD open = %v, want nil", err)
+	}
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "session", "hud", "close", "--target", "row-1", "--socket", testCtlSock).
+		Return(errors.New("agtermctl: exit status 1: error: no such session: row-1"))
+	if err := ctl.HudClose(ctx, "row-1"); err == nil || !strings.Contains(err.Error(), "no such session") {
+		t.Fatalf("HudClose() other error = %v, want it surfaced", err)
+	}
+}
+
 func TestCtlRestoreModeUsesJSONOutput(t *testing.T) {
 	t.Helper()
 	ctrl := gomock.NewController(t)
