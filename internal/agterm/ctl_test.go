@@ -71,6 +71,25 @@ func TestCtlRestoreModeUsesJSONOutput(t *testing.T) {
 	}
 }
 
+// TestCtlRestoreModeDecodesAgterm027Shape pins the 0.27 response, which nests
+// the mode under result.restore and reports the one in force as "active".
+// Captured from agterm 0.27.1: doctor showed "missing mode" against it.
+func TestCtlRestoreModeDecodesAgterm027Shape(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "restore", "mode", "--json", "--socket", testCtlSock).
+		Return([]byte(`{"result":{"restore":{"restartRequired":false,"requestedAtLaunch":"rerun","configured":"rerun","active":"rerun"}},"ok":true}`), 0, nil)
+	mode, err := ctl.RestoreMode(context.Background())
+	if err != nil {
+		t.Fatalf("RestoreMode() error = %v", err)
+	}
+	if mode != "rerun" {
+		t.Fatalf("RestoreMode() = %q, want rerun", mode)
+	}
+}
+
 func TestCtlRestoreModeReportsUnsupported(t *testing.T) {
 	t.Helper()
 	ctrl := gomock.NewController(t)
