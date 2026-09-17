@@ -48,9 +48,10 @@ agterm session.
 
 ## How it works
 
-`agr open` records the Mac row binding, starts the local daemon's bridge for
-the host, and attaches to the named remote multiplexer session. The daemon
-maintains one reverse SSH-forwarded Unix socket per host. Remote hooks send
+`agr open` records the Mac pane binding (both panes of a split row can hold
+one), starts the local daemon's bridge for the host, and attaches to the named
+remote multiplexer session. The daemon maintains one reverse SSH-forwarded
+Unix socket per host. Remote hooks send
 events through the installed relay; the daemon resolves the session binding
 and updates agterm directly.
 

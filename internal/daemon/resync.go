@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
+	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/bridge"
 )
 
@@ -55,19 +56,34 @@ func (d *Daemon) showReconnecting(ctx context.Context, host string) {
 		return
 	}
 	message := host + ": reconnecting…"
-	for _, binding := range d.store.ForHost(host) {
-		if err := d.ui.HudOpen(ctx, binding.Row, message); err != nil {
-			d.logf("warning: open reconnecting HUD for %q: %v", binding.Row, err)
+	for _, row := range boundRows(d.store.ForHost(host)) {
+		if err := d.ui.HudOpen(ctx, row, message); err != nil {
+			d.logf("warning: open reconnecting HUD for %q: %v", row, err)
 		}
 	}
+}
+
+// boundRows returns the distinct rows of bindings in order. The HUD is a row
+// overlay, so a split row with both panes bound gets one, not two.
+func boundRows(bound []bindings.Binding) []string {
+	seen := make(map[string]struct{}, len(bound))
+	rows := make([]string, 0, len(bound))
+	for _, binding := range bound {
+		if _, ok := seen[binding.Row]; ok {
+			continue
+		}
+		seen[binding.Row] = struct{}{}
+		rows = append(rows, binding.Row)
+	}
+	return rows
 }
 
 func (d *Daemon) resyncHost(ctx context.Context, host string) {
 	bindingsForHost := d.store.ForHost(host)
 	if d.ui != nil {
-		for _, binding := range bindingsForHost {
-			if err := d.ui.HudClose(ctx, binding.Row); err != nil {
-				d.logf("warning: close reconnecting HUD for %q: %v", binding.Row, err)
+		for _, row := range boundRows(bindingsForHost) {
+			if err := d.ui.HudClose(ctx, row); err != nil {
+				d.logf("warning: close reconnecting HUD for %q: %v", row, err)
 			}
 		}
 	}

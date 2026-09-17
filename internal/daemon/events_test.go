@@ -185,3 +185,82 @@ func TestDaemonClosedRowLeavesHostRunningWhileAnotherBindingRemains(t *testing.T
 		t.Fatal("remaining binding was removed")
 	}
 }
+
+func TestDaemonClosedSplitRowUnbindsBothPanesAndKeepsBusyHost(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	host := "host-a"
+	store := bindings.New(dirs)
+	left := daemonBinding(t, "row-1", host, "api")
+	right := daemonBinding(t, "row-1", host, "worker")
+	right.Pane = "right"
+	right.PaneID = "pane-row-1-right"
+	other := daemonBinding(t, "row-2", host, "infra")
+	for _, item := range []bindings.Binding{left, right, other} {
+		if err := store.Bind(item); err != nil {
+			t.Fatalf("Bind(%#v) error = %v", item, err)
+		}
+	}
+	if got := store.ForRow("row-1"); len(got) != 2 {
+		t.Fatalf("ForRow(row-1) = %#v, want both panes bound", got)
+	}
+	r := newTask10Remote(t, nil)
+	events := &task10Events{streams: []chan string{make(chan string, 1)}}
+	factory := &task10Supervisors{}
+	d := New(task10Config(t, dirs, r, nil, events, nil, factory, store))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	events.streams[0] <- "row-1"
+	waitForTask10(t, func() bool { return len(store.ForRow("row-1")) == 0 })
+	select {
+	case <-factory.latest(t).stop:
+		t.Fatal("host stopped while row-2 was still bound to it")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, ok := store.ByHostName(host, other.Name); !ok {
+		t.Fatal("binding in another row was removed")
+	}
+}
+
+func TestDaemonClosedSplitRowStopsEveryHostItWasLastBoundTo(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	store := bindings.New(dirs)
+	left := daemonBinding(t, "row-1", "host-a", "api")
+	right := daemonBinding(t, "row-1", "host-b", "api")
+	right.Pane = "right"
+	right.PaneID = "pane-row-1-right"
+	for _, item := range []bindings.Binding{left, right} {
+		if err := store.Bind(item); err != nil {
+			t.Fatalf("Bind(%#v) error = %v", item, err)
+		}
+	}
+	r := newTask10Remote(t, nil)
+	r.home["host-a"] = "/home/test"
+	r.home["host-b"] = "/home/test"
+	events := &task10Events{streams: []chan string{make(chan string, 1)}}
+	factory := &task10Supervisors{}
+	d := New(task10Config(t, dirs, r, nil, events, nil, factory, store))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	waitForTask10(t, func() bool {
+		factory.mu.Lock()
+		defer factory.mu.Unlock()
+		return len(factory.created) == 2
+	})
+	events.streams[0] <- "row-1"
+	factory.mu.Lock()
+	created := append([]*task10Supervisor(nil), factory.created...)
+	factory.mu.Unlock()
+	for i, supervisor := range created {
+		select {
+		case <-supervisor.stop:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("supervisor %d was not stopped after its last binding's row closed", i)
+		}
+	}
+}
