@@ -1,5 +1,5 @@
-// Package bindings persists the mapping between agterm rows and remote
-// multiplexer sessions.
+// Package bindings persists the mapping between agterm panes and remote
+// multiplexer sessions. One row can hold two bindings, one per split pane.
 package bindings
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/paths"
 )
 
-// Binding identifies the agterm row that represents one remote multiplexer
+// Binding identifies the agterm pane that represents one remote multiplexer
 // session. Pane is kept in addition to PaneID because agterm's refusal reply
 // identifies the owning pane by role.
 type Binding struct {
@@ -55,9 +55,8 @@ func (s *Store) Load() ([]Binding, error) {
 
 // Save atomically upserts the supplied bindings while holding the database
 // lock. Distinct bindings already written by another process are retained,
-// so independent concurrent writers cannot lose one another's rows. Bind is
-// the stricter single-binding operation and removes conflicting row/session
-// entries before writing.
+// so independent concurrent writers cannot lose one another's panes. Each
+// binding replaces the entries upsert considers conflicting.
 func (s *Store) Save(next []Binding) error {
 	if s == nil {
 		return errors.New("nil binding store")
@@ -74,8 +73,8 @@ func (s *Store) Save(next []Binding) error {
 	})
 }
 
-// Bind stores b, replacing any existing binding for the same agterm row or
-// the same host and multiplexer session.
+// Bind stores binding, replacing any existing binding for the same agterm pane
+// or the same host and multiplexer session (see upsert).
 func (s *Store) Bind(binding Binding) error {
 	if s == nil {
 		return errors.New("nil binding store")
@@ -89,7 +88,8 @@ func (s *Store) Bind(binding Binding) error {
 	})
 }
 
-// UnbindRow removes the binding for row. It is idempotent.
+// UnbindRow removes every binding of row, both split panes included. It is
+// idempotent.
 func (s *Store) UnbindRow(row string) error {
 	if s == nil {
 		return errors.New("nil binding store")
@@ -123,18 +123,30 @@ func (s *Store) ByHostName(host, name string) (Binding, bool) {
 	return Binding{}, false
 }
 
-// ByRow finds the binding for an agterm row.
+// ByRow finds the first binding of an agterm row. A split row can hold two;
+// callers acting on the whole row should use ForRow.
 func (s *Store) ByRow(row string) (Binding, bool) {
-	bindings, err := s.Load()
-	if err != nil {
+	bindings := s.ForRow(row)
+	if len(bindings) == 0 {
 		return Binding{}, false
 	}
+	return bindings[0], true
+}
+
+// ForRow returns every binding of an agterm row in database order: one per
+// bound pane. A corrupt or unreadable database returns nil.
+func (s *Store) ForRow(row string) []Binding {
+	bindings, err := s.Load()
+	if err != nil {
+		return nil
+	}
+	result := make([]Binding, 0)
 	for _, binding := range bindings {
 		if binding.Row == row {
-			return binding, true
+			result = append(result, binding)
 		}
 	}
-	return Binding{}, false
+	return result
 }
 
 // ForHost returns bindings belonging to host in database order. A corrupt or
@@ -154,15 +166,38 @@ func (s *Store) ForHost(host string) []Binding {
 	return result
 }
 
+// upsert appends next after retiring every entry it supersedes:
+//   - the same pane token (PaneID), which survives a promote;
+//   - the same row and pane slot: nothing announces a split pane's exit and
+//     agterm's tree does not list tokens, so a dead right pane is replaced by
+//     whatever is opened next in that slot;
+//   - the same host and session name, which is bound to one pane at a time.
+//
+// When either side has no PaneID (agterm before pane tokens) the whole row is
+// replaced, as it was before per-pane bindings.
+//
+// Known edge, accepted: promote the right pane to left, split again and open
+// in the new right pane, and the promoted pane's binding is replaced because
+// it still carries the old row and slot.
 func upsert(current []Binding, next Binding) []Binding {
 	filtered := make([]Binding, 0, len(current)+1)
 	for _, binding := range current {
-		if binding.Row == next.Row || (binding.Host == next.Host && binding.Name == next.Name) {
+		if supersedes(next, binding) {
 			continue
 		}
 		filtered = append(filtered, binding)
 	}
 	return append(filtered, next)
+}
+
+func supersedes(next, old Binding) bool {
+	if old.Host == next.Host && old.Name == next.Name {
+		return true
+	}
+	if old.Row != next.Row {
+		return next.PaneID != "" && old.PaneID == next.PaneID
+	}
+	return next.PaneID == "" || old.PaneID == "" || old.PaneID == next.PaneID || old.Pane == next.Pane
 }
 
 func (s *Store) withLock(fn func() error) error {

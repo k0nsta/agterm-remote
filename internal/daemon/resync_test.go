@@ -122,3 +122,60 @@ func TestConnectingStateIsReportedButTriggersNothing(t *testing.T) {
 		return false
 	})
 }
+
+func TestDaemonReconnectingHUDOncePerSplitRow(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	trace := newTask10Trace(t)
+	r := newTask10Remote(t, trace)
+	host := "host-a"
+	r.home[host] = "/home/test"
+	r.sessions[host] = []remote.Session{{Name: "a", State: "active"}, {Name: "b", State: "completed"}}
+	store := bindings.New(dirs)
+	left := daemonBinding(t, "row-1", host, "a")
+	right := daemonBinding(t, "row-1", host, "b")
+	right.Pane = "right"
+	right.PaneID = "pane-row-1-right"
+	if err := store.Save([]bindings.Binding{left, right}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	ui := newTask10UI(t, trace)
+	sink := newTask10Sink(t, trace)
+	factory := &task10Supervisors{}
+	d := New(task10Config(t, dirs, r, ui, nil, sink, factory, store))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	supervisor := factory.latest(t)
+	supervisor.changes <- bridge.StateUp
+	waitForTask10(t, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		return len(sink.calls) == 2
+	})
+	gotTrace := trace.snapshot(t)
+	wantPrefix := []string{"hud-close row-1", "sessions", "status row-1", "status row-1"}
+	if len(gotTrace) < len(wantPrefix) || !reflect.DeepEqual(gotTrace[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("resync trace = %#v, want prefix %#v", gotTrace, wantPrefix)
+	}
+	sink.mu.Lock()
+	panes := []string{sink.calls[0].args.PaneID, sink.calls[1].args.PaneID}
+	sink.mu.Unlock()
+	if !reflect.DeepEqual(panes, []string{left.PaneID, right.PaneID}) {
+		t.Fatalf("resync status panes = %#v, want one per pane", panes)
+	}
+
+	supervisor.changes <- bridge.StateDown
+	waitForTask10Call(t, ui.calls, "open", "row-1")
+	time.Sleep(100 * time.Millisecond)
+	opens := 0
+	for _, entry := range trace.snapshot(t) {
+		if entry == "hud-open row-1" {
+			opens++
+		}
+	}
+	if opens != 1 {
+		t.Fatalf("reconnecting HUD opened %d times for one split row, want 1; trace=%#v", opens, trace.snapshot(t))
+	}
+}
