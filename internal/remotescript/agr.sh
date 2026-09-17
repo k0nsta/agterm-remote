@@ -148,12 +148,30 @@ $list
 EOF
 }
 
+# Ms is the capability tmux uses to write the outer terminal's clipboard. Its
+# own copy mode (a mouse selection under `mouse on`) sends OSC 52 with an
+# empty selection field, and mosh 1.4 forwards OSC 52 only when that field is
+# exactly "c" — so over mosh a selection never reached the Mac clipboard while
+# a program's own "52;c;" (Claude Code) did. Fill an empty field with "c" and
+# pass a non-empty one through. A server option: no tmux.conf edit, applies to
+# every client attached afterwards, re-applied per attach in case the server
+# restarted. ghostty over plain ssh accepts both forms.
+AGR_TMUX_MS='Ms=\E]52;%?%p1%l%t%p1%s%ec%;;%p2%s\007'
+
+tmux_clipboard_override() {
+	case "$(tmux show-options -sv terminal-overrides 2>/dev/null || :)" in
+		*"$AGR_TMUX_MS"*) ;;
+		*) tmux set-option -sa terminal-overrides "*:$AGR_TMUX_MS" 2>/dev/null || : ;;
+	esac
+}
+
 tmux_attach() {
 	n=$1
 	if ! tmux has-session -t "=$n" 2>/dev/null; then
 		tmux new-session -d -s "$n"
 	fi
 	tmux set-option -t "=$n:" @agr 1
+	tmux_clipboard_override
 	exec tmux attach -t "=$n"
 }
 

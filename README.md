@@ -56,7 +56,10 @@ and updates agterm directly.
 
 The remote script uses zmx by default when available and otherwise uses tmux.
 It marks sessions as agr-owned, so `ls` and `kill` never operate on arbitrary
-user sessions. `install` also installs the Claude Code hooks; other agents can
+user sessions. Under tmux, `open` also sets the server's `Ms` clipboard
+capability so copy-mode selections reach the Mac clipboard over mosh, which
+forwards OSC 52 only for selection `c`; clients attached earlier must
+re-attach. `install` also installs the Claude Code hooks; other agents can
 call the remote status entry point from their own hooks.
 
 ```text
