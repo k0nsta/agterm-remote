@@ -250,7 +250,7 @@ func TestCtlClosedRowsUsesStreamerAndCloses(t *testing.T) {
 	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, nil, streamer)
 	stopCalled := false
 	streamer.EXPECT().Stream(gomock.Any(), testCtlPath, "events", "--json", "--kind", "session.closed", "--socket", testCtlSock).
-		Return(io.NopCloser(strings.NewReader("{\"kind\":\"session.closed\",\"id\":\"row-1\"}\n{\"kind\":\"session.closed\",\"session_id\":\"row-2\"}\n")), func() error {
+		Return(io.NopCloser(strings.NewReader("{\"kind\":\"session.closed\",\"id\":\"row-1\"}\n{\"kind\":\"session.closed\",\"session_id\":\"row-2\"}\n{\"kind\":\"session.closed\",\"session\":\"row-3\",\"workspace\":\"ws-1\",\"window\":\"win-1\",\"payload\":{\"name\":\"x\"}}\n")), func() error {
 			stopCalled = true
 			return nil
 		}, nil)
@@ -262,7 +262,7 @@ func TestCtlClosedRowsUsesStreamerAndCloses(t *testing.T) {
 	for row := range rows {
 		got = append(got, row)
 	}
-	if want := []string{"row-1", "row-2"}; !equalStrings(t, got, want) {
+	if want := []string{"row-1", "row-2", "row-3"}; !equalStrings(t, got, want) {
 		t.Fatalf("ClosedRows() = %#v, want %#v", got, want)
 	}
 	if !stopCalled {

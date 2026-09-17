@@ -331,7 +331,9 @@ func findClosedRow(object map[string]any) (string, bool) {
 		kind = stringValue(object["event"])
 	}
 	if kind == "session.closed" {
-		for _, key := range []string{"session_id", "sessionID", "id", "target"} {
+		// agterm 0.27 carries the row as a plain string under "session"
+		// (alongside workspace/window ids); older shapes used the other keys.
+		for _, key := range []string{"session_id", "sessionID", "id", "target", "session"} {
 			if row := stringValue(object[key]); row != "" {
 				return row, true
 			}
