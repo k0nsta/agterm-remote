@@ -56,3 +56,19 @@ func TestItemsForIgnoresOtherHostsBindings(t *testing.T) {
 		t.Fatalf("subtitle = %q, want %q — another host's binding leaked in", got, want)
 	}
 }
+
+func TestItemsForSplitRowMarksBothPanesBound(t *testing.T) {
+	t.Helper()
+	items := ItemsFor(
+		"home",
+		[]remote.Session{{Name: "a", Cmds: "claude", IdleSecs: 5}, {Name: "b", Cmds: "codex", IdleSecs: 5}},
+		[]bindings.Binding{
+			{Row: "row-1", PaneID: "tok-l", Pane: "left", Host: "home", Name: "a"},
+			{Row: "row-1", PaneID: "tok-r", Pane: "right", Host: "home", Name: "b"},
+		},
+		[]string{"row-1"},
+	)
+	if len(items) != 2 || items[0].Subtitle != "claude · bound · 5s" || items[1].Subtitle != "codex · bound · 5s" {
+		t.Fatalf("ItemsFor() = %#v, want both panes bound", items)
+	}
+}

@@ -383,21 +383,6 @@ func (mr *MockBindingStoreMockRecorder) ByHostName(host, name any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ByHostName", reflect.TypeOf((*MockBindingStore)(nil).ByHostName), host, name)
 }
 
-// ByRow mocks base method.
-func (m *MockBindingStore) ByRow(row string) (bindings.Binding, bool) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ByRow", row)
-	ret0, _ := ret[0].(bindings.Binding)
-	ret1, _ := ret[1].(bool)
-	return ret0, ret1
-}
-
-// ByRow indicates an expected call of ByRow.
-func (mr *MockBindingStoreMockRecorder) ByRow(row any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ByRow", reflect.TypeOf((*MockBindingStore)(nil).ByRow), row)
-}
-
 // ForHost mocks base method.
 func (m *MockBindingStore) ForHost(host string) []bindings.Binding {
 	m.ctrl.T.Helper()
@@ -410,6 +395,20 @@ func (m *MockBindingStore) ForHost(host string) []bindings.Binding {
 func (mr *MockBindingStoreMockRecorder) ForHost(host any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForHost", reflect.TypeOf((*MockBindingStore)(nil).ForHost), host)
+}
+
+// ForRow mocks base method.
+func (m *MockBindingStore) ForRow(row string) []bindings.Binding {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ForRow", row)
+	ret0, _ := ret[0].([]bindings.Binding)
+	return ret0
+}
+
+// ForRow indicates an expected call of ForRow.
+func (mr *MockBindingStoreMockRecorder) ForRow(row any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForRow", reflect.TypeOf((*MockBindingStore)(nil).ForRow), row)
 }
 
 // Load mocks base method.

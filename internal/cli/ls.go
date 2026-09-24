@@ -75,14 +75,22 @@ func RenderSessions(host string, sessions []remote.Session, bound []bindings.Bin
 	}
 
 	if treeAvailable {
+		// Both panes of a split row can be bound, so a closed row is listed
+		// once, not once per binding.
 		dangling := make([]string, 0)
+		listed := make(map[string]struct{})
 		for _, binding := range bound {
 			if binding.Host != host {
 				continue
 			}
-			if _, ok := liveSet[binding.Row]; !ok {
-				dangling = append(dangling, binding.Row)
+			if _, ok := liveSet[binding.Row]; ok {
+				continue
 			}
+			if _, ok := listed[binding.Row]; ok {
+				continue
+			}
+			listed[binding.Row] = struct{}{}
+			dangling = append(dangling, binding.Row)
 		}
 		if len(dangling) > 0 {
 			fmt.Fprintf(&out, "rows without a session: %s\n", strings.Join(dangling, ", "))

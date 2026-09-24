@@ -105,3 +105,24 @@ func TestHumanizeSecs(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderSessionsSplitRowListsClosedRowOnce(t *testing.T) {
+	t.Helper()
+	bound := []bindings.Binding{
+		{Row: "row-live", PaneID: "tok-l", Pane: "left", Host: "home", Name: "api"},
+		{Row: "row-live", PaneID: "tok-r", Pane: "right", Host: "home", Name: "web"},
+		{Row: "row-gone", PaneID: "tok-gl", Pane: "left", Host: "home", Name: "infra"},
+		{Row: "row-gone", PaneID: "tok-gr", Pane: "right", Host: "home", Name: "db"},
+	}
+	sessions := []remote.Session{{Name: "api", IdleSecs: 1}, {Name: "web", IdleSecs: 1}, {Name: "infra", IdleSecs: 1}}
+	output := RenderSessions("home", sessions, bound, []string{"row-live"}, true)
+	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
+	for i, want := range []string{"bound", "bound", "stale"} {
+		if fields := strings.Fields(lines[i+1]); fields[len(fields)-1] != want {
+			t.Fatalf("row %d = %q, want ROW %s", i, lines[i+1], want)
+		}
+	}
+	if got, want := lines[len(lines)-1], "rows without a session: row-gone"; got != want {
+		t.Fatalf("footer = %q, want %q", got, want)
+	}
+}

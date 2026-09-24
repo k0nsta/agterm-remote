@@ -100,16 +100,26 @@ func (d *Daemon) handleClosedRow(row string) {
 	if row == "" {
 		return
 	}
-	binding, ok := d.store.ByRow(row)
-	if !ok {
+	// Both panes of a split row go with it, and they may be bound to
+	// different hosts: each host's bridge stops only when nothing else is
+	// bound to it.
+	bound := d.store.ForRow(row)
+	if len(bound) == 0 {
 		return
 	}
 	if err := d.store.UnbindRow(row); err != nil {
 		d.logf("warning: unbind closed agterm row %q: %v", row, err)
 		return
 	}
-	if len(d.store.ForHost(binding.Host)) == 0 {
-		d.stopHost(binding.Host)
+	checked := make(map[string]struct{}, len(bound))
+	for _, binding := range bound {
+		if _, ok := checked[binding.Host]; ok {
+			continue
+		}
+		checked[binding.Host] = struct{}{}
+		if len(d.store.ForHost(binding.Host)) == 0 {
+			d.stopHost(binding.Host)
+		}
 	}
 }
 
