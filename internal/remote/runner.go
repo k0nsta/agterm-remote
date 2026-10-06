@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/k0nsta/agterm-remote/internal/paths"
 	"github.com/k0nsta/agterm-remote/internal/token"
@@ -219,6 +220,40 @@ func (r *Runner) Reap(ctx context.Context, host, name string) error {
 	}
 	_, err := r.Data(ctx, host, "reap", name)
 	return err
+}
+
+// Cwd returns the current directory of a remote session, or "" when the
+// multiplexer cannot tell (zmx off Linux, a missing session). Anything but an
+// absolute path is reported as "": the result is handed back to attach.
+func (r *Runner) Cwd(ctx context.Context, host, name string) (string, error) {
+	if !token.Valid(name) {
+		return "", fmt.Errorf("invalid remote session name %q", name)
+	}
+	body, err := r.Data(ctx, host, "cwd", name)
+	if err != nil {
+		return "", err
+	}
+	dir := strings.TrimSuffix(string(body), "\n")
+	if !strings.HasPrefix(dir, "/") || !Printable(dir) {
+		return "", nil
+	}
+	return dir, nil
+}
+
+// Printable rejects what a quoted path cannot neutralise once it is typed
+// into a terminal: a control byte (^C aborts the line, CR runs it, ESC talks
+// to the terminal) or bytes that are not UTF-8. Quotes stop the shell, not the
+// line editor, and a remote directory name is any byte string.
+func Printable(text string) bool {
+	if !utf8.ValidString(text) {
+		return false
+	}
+	for _, r := range text {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Runner) sshClient() SSH {

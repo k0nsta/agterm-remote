@@ -585,6 +585,152 @@ func (mr *MockBridgeMockRecorder) Up(ctx, host any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Up", reflect.TypeOf((*MockBridge)(nil).Up), ctx, host)
 }
 
+// MockPanes is a mock of Panes interface.
+type MockPanes struct {
+	ctrl     *gomock.Controller
+	recorder *MockPanesMockRecorder
+	isgomock struct{}
+}
+
+// MockPanesMockRecorder is the mock recorder for MockPanes.
+type MockPanesMockRecorder struct {
+	mock *MockPanes
+}
+
+// NewMockPanes creates a new mock instance.
+func NewMockPanes(ctrl *gomock.Controller) *MockPanes {
+	mock := &MockPanes{ctrl: ctrl}
+	mock.recorder = &MockPanesMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPanes) EXPECT() *MockPanesMockRecorder {
+	return m.recorder
+}
+
+// PaneText mocks base method.
+func (m *MockPanes) PaneText(ctx context.Context, row, paneID string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PaneText", ctx, row, paneID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PaneText indicates an expected call of PaneText.
+func (mr *MockPanesMockRecorder) PaneText(ctx, row, paneID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PaneText", reflect.TypeOf((*MockPanes)(nil).PaneText), ctx, row, paneID)
+}
+
+// Surfaces mocks base method.
+func (m *MockPanes) Surfaces(ctx context.Context) (map[string][]agterm.Surface, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Surfaces", ctx)
+	ret0, _ := ret[0].(map[string][]agterm.Surface)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Surfaces indicates an expected call of Surfaces.
+func (mr *MockPanesMockRecorder) Surfaces(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Surfaces", reflect.TypeOf((*MockPanes)(nil).Surfaces), ctx)
+}
+
+// TypeLine mocks base method.
+func (m *MockPanes) TypeLine(ctx context.Context, row, paneID, text string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TypeLine", ctx, row, paneID, text)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// TypeLine indicates an expected call of TypeLine.
+func (mr *MockPanesMockRecorder) TypeLine(ctx, row, paneID, text any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TypeLine", reflect.TypeOf((*MockPanes)(nil).TypeLine), ctx, row, paneID, text)
+}
+
+// MockRemoteCwd is a mock of RemoteCwd interface.
+type MockRemoteCwd struct {
+	ctrl     *gomock.Controller
+	recorder *MockRemoteCwdMockRecorder
+	isgomock struct{}
+}
+
+// MockRemoteCwdMockRecorder is the mock recorder for MockRemoteCwd.
+type MockRemoteCwdMockRecorder struct {
+	mock *MockRemoteCwd
+}
+
+// NewMockRemoteCwd creates a new mock instance.
+func NewMockRemoteCwd(ctrl *gomock.Controller) *MockRemoteCwd {
+	mock := &MockRemoteCwd{ctrl: ctrl}
+	mock.recorder = &MockRemoteCwdMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRemoteCwd) EXPECT() *MockRemoteCwdMockRecorder {
+	return m.recorder
+}
+
+// Cwd mocks base method.
+func (m *MockRemoteCwd) Cwd(ctx context.Context, host, name string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Cwd", ctx, host, name)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Cwd indicates an expected call of Cwd.
+func (mr *MockRemoteCwdMockRecorder) Cwd(ctx, host, name any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Cwd", reflect.TypeOf((*MockRemoteCwd)(nil).Cwd), ctx, host, name)
+}
+
+// MockHandledPanes is a mock of HandledPanes interface.
+type MockHandledPanes struct {
+	ctrl     *gomock.Controller
+	recorder *MockHandledPanesMockRecorder
+	isgomock struct{}
+}
+
+// MockHandledPanesMockRecorder is the mock recorder for MockHandledPanes.
+type MockHandledPanesMockRecorder struct {
+	mock *MockHandledPanes
+}
+
+// NewMockHandledPanes creates a new mock instance.
+func NewMockHandledPanes(ctrl *gomock.Controller) *MockHandledPanes {
+	mock := &MockHandledPanes{ctrl: ctrl}
+	mock.recorder = &MockHandledPanesMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockHandledPanes) EXPECT() *MockHandledPanesMockRecorder {
+	return m.recorder
+}
+
+// Claim mocks base method.
+func (m *MockHandledPanes) Claim(paneID string, live []string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Claim", paneID, live)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Claim indicates an expected call of Claim.
+func (mr *MockHandledPanesMockRecorder) Claim(paneID, live any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Claim", reflect.TypeOf((*MockHandledPanes)(nil).Claim), paneID, live)
+}
+
 // MockBindingStore is a mock of BindingStore interface.
 type MockBindingStore struct {
 	ctrl     *gomock.Controller

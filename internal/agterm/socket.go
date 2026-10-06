@@ -18,6 +18,11 @@ func SocketPath() string {
 	if path := os.Getenv("AGTERM_SOCKET"); path != "" {
 		return path
 	}
+	// agterm's hooks and keymap commands run outside a session and get the
+	// socket as AGT_SOCKET instead.
+	if path := os.Getenv("AGT_SOCKET"); path != "" {
+		return path
+	}
 	if stateDir := os.Getenv("AGTERM_STATE_DIR"); stateDir != "" {
 		return filepath.Join(stateDir, "agterm.sock")
 	}

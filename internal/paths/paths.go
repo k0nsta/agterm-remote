@@ -43,6 +43,12 @@ func (d Dirs) Log() string { return filepath.Join(d.Cache, "agr.log") }
 // Bindings is the row-to-remote-session binding database.
 func (d Dirs) Bindings() string { return filepath.Join(d.Cache, "bindings.json") }
 
+// Handled is the set of agterm panes a pane hook has already acted on.
+func (d Dirs) Handled() string { return filepath.Join(d.Cache, "handled-panes.json") }
+
+// HookLog is where the detached pane hooks report failures.
+func (d Dirs) HookLog() string { return filepath.Join(d.Cache, "hooks.log") }
+
 // Recv is the local Unix socket receiving events for one host.
 func (d Dirs) Recv(hostKey string) string {
 	return filepath.Join(d.Cache, "recv-"+hostKey+".sock")

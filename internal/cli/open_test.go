@@ -141,7 +141,7 @@ func TestOpenBindsBeforeReloadAndUpAndUsesSSHArgv(t *testing.T) {
 	labeler := &openLabelerFake{}
 	deps.Labeler = labeler
 
-	if err := Open(context.Background(), "user@example.com", "api", deps); err != nil {
+	if err := Open(context.Background(), "user@example.com", "api", OpenOptions{}, deps); err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 	if got, want := bridgeFake.calls, []string{"reload api", "up user@example.com api"}; !reflect.DeepEqual(got, want) {
@@ -183,7 +183,7 @@ func TestOpenUsesMoshWhenBothSidesSupportIt(t *testing.T) {
 	}
 	deps.MoshPath = func() string { return "/usr/local/bin/mosh" }
 
-	if err := Open(context.Background(), "host", "api", deps); err != nil {
+	if err := Open(context.Background(), "host", "api", OpenOptions{}, deps); err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 	want := []string{"mosh", "host", "--", "/home/remote/.local/bin/agr", "attach", "api"}
@@ -209,7 +209,7 @@ func TestOpenPickerCancelHasNoSideEffects(t *testing.T) {
 	var errout strings.Builder
 	deps.ErrOut = &errout
 
-	if code := RunOpen(context.Background(), "host", "", deps, &errout); code != 1 {
+	if code := RunOpen(context.Background(), "host", "", OpenOptions{}, deps, &errout); code != 1 {
 		t.Fatalf("RunOpen() exit = %d, want 1", code)
 	}
 	if tty.calls != 0 || len(bridgeFake.calls) != 0 {
@@ -236,7 +236,7 @@ func TestOpenOutsideAgtermDoesNotBindOrLabel(t *testing.T) {
 	deps := newOpenDependencies(t, remoteFake, bridgeFake, tty)
 	deps.Store, deps.Labeler = store, labeler
 
-	if err := Open(context.Background(), "host", "api", deps); err != nil {
+	if err := Open(context.Background(), "host", "api", OpenOptions{}, deps); err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
 	if got, want := bridgeFake.calls, []string{"up host "}; !reflect.DeepEqual(got, want) {
@@ -266,10 +266,78 @@ func TestOpenContextFailureIsBestEffort(t *testing.T) {
 	var errout strings.Builder
 	deps.ErrOut = &errout
 
-	if code := RunOpen(context.Background(), "host", "api", deps, &errout); code != 0 {
+	if code := RunOpen(context.Background(), "host", "api", OpenOptions{}, deps, &errout); code != 0 {
 		t.Fatalf("RunOpen() exit = %d, want zero: %s", code, errout.String())
 	}
 	if !strings.Contains(errout.String(), "unknown subcommand context") {
 		t.Fatalf("stderr = %q, want best-effort warning", errout.String())
+	}
+}
+
+func TestOpenPassesCwdAndParentToAttach(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGTERM_SESSION_ID", "")
+	store := bindings.New(pathstest.Dirs(t))
+	remoteFake := &openRemoteFake{path: "/home/remote/.local/bin/agr"}
+	opts := OpenOptions{Cwd: "/srv/it's here", Parent: "api"}
+
+	tty := &openTTYFake{}
+	deps := newOpenDependencies(t, remoteFake, &openBridgeFake{store: store}, tty)
+	deps.Store = store
+	if err := Open(context.Background(), "host", "api-2", opts, deps); err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	wantSSH := []string{"ssh", "-t", "host", "--", `'/home/remote/.local/bin/agr' 'attach' 'api-2' '--cwd' '/srv/it'\''s here' '--parent' 'api'`}
+	if !reflect.DeepEqual(tty.argv, wantSSH) {
+		t.Fatalf("ssh argv = %#v, want %#v", tty.argv, wantSSH)
+	}
+
+	deps.HostInfo = func(string) (remote.HostInfo, error) { return remote.HostInfo{Mux: "zmx", Mosh: true}, nil }
+	deps.MoshPath = func() string { return "/usr/local/bin/mosh" }
+	if err := Open(context.Background(), "host", "api-2", opts, deps); err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	wantMosh := []string{"mosh", "host", "--", "/home/remote/.local/bin/agr", "attach", "api-2", "--cwd", "/srv/it's here", "--parent", "api"}
+	if !reflect.DeepEqual(tty.argv, wantMosh) {
+		t.Fatalf("mosh argv = %#v, want %#v", tty.argv, wantMosh)
+	}
+}
+
+func TestOpenRejectsBadOptionsBeforeSideEffects(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGTERM_SESSION_ID", "")
+	store := bindings.New(pathstest.Dirs(t))
+	for _, opts := range []OpenOptions{{Cwd: "relative"}, {Parent: "../x"}} {
+		tty := &openTTYFake{}
+		deps := newOpenDependencies(t, &openRemoteFake{path: "/a"}, &openBridgeFake{store: store}, tty)
+		deps.Store = store
+		if err := Open(context.Background(), "host", "api", opts, deps); err == nil {
+			t.Fatalf("Open(%+v) error = nil", opts)
+		}
+		if tty.calls != 0 {
+			t.Fatalf("Open(%+v) attached despite invalid options", opts)
+		}
+	}
+}
+
+func TestOpenWithParentLeavesTheRowLabelAlone(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGTERM_SESSION_ID", "row-1")
+	t.Setenv("AGTERM_PANE_ID", "pane-R")
+	t.Setenv("AGTERM_PANE", "right")
+	dirs := pathstest.Dirs(t)
+	store := bindings.New(dirs)
+	deps := newOpenDependencies(t, &openRemoteFake{path: "/a"}, &openBridgeFake{store: store}, &openTTYFake{})
+	deps.Dirs, deps.Store = dirs, store
+	labeler := &openLabelerFake{}
+	deps.Labeler = labeler
+	if err := Open(context.Background(), "host", "a1-2", OpenOptions{Parent: "a1"}, deps); err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if len(labeler.calls) != 0 {
+		t.Fatalf("labeler calls = %#v, want none for a side-pane session", labeler.calls)
+	}
+	if bound, ok := store.ByHostName("host", "a1-2"); !ok || bound.PaneID != "pane-R" {
+		t.Fatalf("side-pane session binding = %#v, %v", bound, ok)
 	}
 }
