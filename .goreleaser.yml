@@ -27,16 +27,26 @@ archives:
 checksum:
   name_template: checksums.txt
 
-brews:
+homebrew_casks:
   - name: agr
     ids:
       - agr
     repository:
       owner: k0nsta
-      name: homebrew-tap
+      name: homebrew-apps
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/k0nsta/agterm-remote
     description: Bridge remote agent status into agterm
     license: MIT
-    install: |
-      bin.install "agr"
+    binaries:
+      - agr
+    # the binaries are unsigned, so macOS quarantines what brew downloads.
+    # a custom_block, because goreleaser wraps hooks.post.install in the
+    # postflight stanza homebrew deprecated in favour of postflight_steps
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr",
+              args: ["-dr", "com.apple.quarantine", "{{ `{{staged_path}}` }}/agr"]
+        end
+      end

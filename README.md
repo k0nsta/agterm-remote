@@ -10,7 +10,7 @@ return through a self-healing bridge.
 Install the Mac binary and keep its daemon running:
 
 ```sh
-brew install k0nsta/tap/agr
+brew install k0nsta/apps/agr
 # or: go install github.com/k0nsta/agterm-remote/cmd/agr@latest
 
 agr daemon &
@@ -215,7 +215,7 @@ binary if necessary:
 
 ```sh
 if [ -L "$HOME/.local/bin/agr" ]; then rm "$HOME/.local/bin/agr"; fi
-brew install k0nsta/tap/agr
+brew install k0nsta/apps/agr
 agr install <host>
 ```
 
