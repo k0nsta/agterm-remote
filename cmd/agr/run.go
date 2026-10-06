@@ -30,6 +30,8 @@ Commands:
   shell <host> [--cwd <dir>]
                           Open a plain remote login shell (no session)
   end [row]                Kill a row's remote sessions and close the row
+  setup [--end-key <chord>]
+                          Make agterm's ⌘D and ⌘J follow a remote row; add End remote session
 
 Options:
   --help, -h               Show this help
@@ -52,6 +54,7 @@ var commandHandlers = map[string]commandHandler{
 	"doctor":  runDoctor,
 	"shell":   runShell,
 	"end":     runEnd,
+	"setup":   runSetup,
 	// Hook entry points, run by agterm's hooks.conf rather than by hand, so
 	// they stay out of --help.
 	"on-split":   runOnSplit,
@@ -116,6 +119,19 @@ func runEnd(ctx context.Context, app *application, args []string, _, errw io.Wri
 		return 2
 	}
 	return cli.RunEnd(ctx, row, app.end(), errw)
+}
+
+func runSetup(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
+	var endKey string
+	switch {
+	case len(args) == 0:
+	case len(args) == 2 && args[0] == "--end-key" && args[1] != "":
+		endKey = args[1]
+	default:
+		_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>]")
+		return 2
+	}
+	return cli.RunSetup(ctx, app.setup(out, endKey), errw)
 }
 
 func runOnSplit(ctx context.Context, app *application, args []string, _, errw io.Writer) int {

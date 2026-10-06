@@ -899,6 +899,61 @@ func (mr *MockRowCloserMockRecorder) CloseRow(ctx, row any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseRow", reflect.TypeOf((*MockRowCloser)(nil).CloseRow), ctx, row)
 }
 
+// MockAgtermConfig is a mock of AgtermConfig interface.
+type MockAgtermConfig struct {
+	ctrl     *gomock.Controller
+	recorder *MockAgtermConfigMockRecorder
+	isgomock struct{}
+}
+
+// MockAgtermConfigMockRecorder is the mock recorder for MockAgtermConfig.
+type MockAgtermConfigMockRecorder struct {
+	mock *MockAgtermConfig
+}
+
+// NewMockAgtermConfig creates a new mock instance.
+func NewMockAgtermConfig(ctrl *gomock.Controller) *MockAgtermConfig {
+	mock := &MockAgtermConfig{ctrl: ctrl}
+	mock.recorder = &MockAgtermConfigMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAgtermConfig) EXPECT() *MockAgtermConfigMockRecorder {
+	return m.recorder
+}
+
+// ConfigPaths mocks base method.
+func (m *MockAgtermConfig) ConfigPaths(ctx context.Context) (string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConfigPaths", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ConfigPaths indicates an expected call of ConfigPaths.
+func (mr *MockAgtermConfigMockRecorder) ConfigPaths(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConfigPaths", reflect.TypeOf((*MockAgtermConfig)(nil).ConfigPaths), ctx)
+}
+
+// Reload mocks base method.
+func (m *MockAgtermConfig) Reload(ctx context.Context, file string) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Reload", ctx, file)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Reload indicates an expected call of Reload.
+func (mr *MockAgtermConfigMockRecorder) Reload(ctx, file any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reload", reflect.TypeOf((*MockAgtermConfig)(nil).Reload), ctx, file)
+}
+
 // MockBindingStore is a mock of BindingStore interface.
 type MockBindingStore struct {
 	ctrl     *gomock.Controller

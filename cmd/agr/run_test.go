@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -104,5 +105,15 @@ func TestOnSplitRejectsArguments(t *testing.T) {
 	var out, errw bytes.Buffer
 	if got := runWithApplication([]string{"on-split", "x"}, &out, &errw, &application{}); got != 2 {
 		t.Fatalf("run(on-split x) exit = %d, want 2", got)
+	}
+}
+
+func TestRunSetupRejectsBadArguments(t *testing.T) {
+	t.Helper()
+	for _, argv := range [][]string{{"setup", "extra"}, {"setup", "--end-key"}, {"setup", "--end-key", ""}, {"setup", "--key", "x"}} {
+		var out, errout strings.Builder
+		if got := runWithApplication(argv, &out, &errout, &application{}); got != 2 {
+			t.Fatalf("run(%q) exit = %d, want 2", argv, got)
+		}
 	}
 }

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -82,6 +84,9 @@ func (f *dispatchTTYFake) Interactive(_ context.Context, argv ...string) error {
 func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 	t.Helper()
 	t.Setenv("AGTERM_SESSION_ID", "")
+	// setup writes agterm's config under HOME when agterm is not reachable.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	dirs := pathstest.Dirs(t)
 	remoteFake := &dispatchRemoteFake{path: "/agr"}
 	bridgeFake := &dispatchBridgeFake{}
@@ -141,6 +146,12 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		// reaching agterm.
 		{name: "on-split", argv: []string{"on-split"}, want: 0, check: func(t *testing.T) {}},
 		{name: "on-scratch", argv: []string{"on-scratch"}, want: 0, check: func(t *testing.T) {}},
+		{name: "setup", argv: []string{"setup", "--end-key", "ctrl+a>x"}, want: 0, check: func(t *testing.T) {
+			keymap, err := os.ReadFile(filepath.Join(home, ".config", "agterm", "keymap.conf"))
+			if err != nil || !strings.Contains(string(keymap), `"End remote session" ctrl+a>x`) {
+				t.Fatalf("keymap.conf = %q, %v; want the End command on the given key", keymap, err)
+			}
+		}},
 		{name: "shell", argv: []string{"shell", "host", "--cwd", "/srv"}, want: 0, check: func(t *testing.T) {
 			// The fake is shared across subtests; check what shell sent, not a
 			// count that depends on which subtests ran before it.
@@ -162,7 +173,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		})
 	}
 
-	if got, want := len(commandHandlers), 12; got != want {
+	if got, want := len(commandHandlers), 13; got != want {
 		t.Fatalf("registered command count = %d, want %d", got, want)
 	}
 }
