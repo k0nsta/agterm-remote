@@ -109,8 +109,9 @@ is shown as `-`.
 
 ## agterm keys on a remote row
 
-agterm's own keys can follow a row's remote host (agterm 0.27 or newer: the
-pane hooks and pane tokens were verified there). Add these lines to
+agterm's own keys can follow a row's remote host (verified on agterm 0.35:
+the pane hooks, pane tokens and confirm dialog they rely on are recent). Add
+these lines to
 `~/.config/agterm/hooks.conf` and reload hooks (File ▸ Reload Hooks):
 
 ```text
