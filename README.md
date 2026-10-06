@@ -82,29 +82,29 @@ sessions, not windows in a shared session.
 
 ```sh
 # Start or attach to a named remote session from an agterm row.
-agr open homelab api
+agr open remote api
 
 # List owned sessions. The ROW column says bound, stale, or -.
-agr ls homelab
+agr ls remote
 
 # Open the native picker instead of naming a session.
-agr open homelab
+agr open remote
 
 # Stop one or more owned sessions.
-agr kill homelab api infra
+agr kill remote api infra
 
 # Control the shared bridge explicitly (the daemon must be running).
-agr up homelab
-agr down homelab
+agr up remote
+agr down remote
 
 # Re-probe the host and install the embedded remote script and hooks.
-agr install homelab --mux zmx
+agr install remote --mux zmx
 
 # Print local, remote, and daemon diagnostics.
-agr doctor homelab
+agr doctor remote
 
 # A plain login shell on the host, in a given directory (no session).
-agr shell homelab --cwd /srv/app
+agr shell remote --cwd /srv/app
 ```
 
 `agr ls` reports the remote command and the elapsed age of its last event.
@@ -115,10 +115,10 @@ is shown as `-`.
 
 On a row opened with `agr open`, agterm's own keys can follow the remote host:
 
-| Key | Local row | Row running `agr open homelab a1` |
+| Key | Local row | Row running `agr open remote a1` |
 | --- | --- | --- |
-| ⌘D | local split | `a1-2` on homelab, in `a1`'s current directory |
-| ⌘J | local scratch | a plain shell on homelab, in `a1`'s current directory |
+| ⌘D | local split | `a1-2` on the remote host, in `a1`'s current directory |
+| ⌘J | local scratch | a plain shell on the remote host, in `a1`'s current directory |
 | ctrl+a x | — | asks, then ends `a1` and `a1-2` and closes the row |
 
 ### Setup

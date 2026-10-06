@@ -86,7 +86,7 @@ remote shell there would be typed blind and follow no row; ⌘J covers the need 
   ask decoding against canned JSON.
 - **remote**: shell tests for `cwd`, `attach --cwd/--parent`, `reap` cascade on the tmux
   test server and the zmx fake.
-- **e2e**: manual on homelab inside agterm (Post-Completion).
+- **e2e**: manual on a real remote host inside agterm (Post-Completion).
 
 ## Progress Tracking
 
@@ -170,7 +170,7 @@ answered shape is probed with one click before the decoder is written.
 - [x] agterm `Ctl.Ask(ctx, row, title, message, buttons, destructive) (string, error)` and
       `Ctl.Close(ctx, row)`
 - [x] `agr end <row>`: bindings `ForRow`; none → error "not an agr row"; confirm
-      ("End a1 on homelab? Kills the agent and its side-pane sessions."); per distinct
+      ("End a1 on remote? Kills the agent and its side-pane sessions."); per distinct
       host+name `Reap` ("no session" counts as done); any other failure → stop, keep the row;
       then `UnbindRow`, `session close`
 - [x] tests: no binding, cancel, reap failure keeps the row, success order
@@ -179,7 +179,7 @@ answered shape is probed with one click before the decoder is written.
 
 ## Post-Completion
 
-- homelab in agterm: ⌘D on a bound row → `a1-2` in a1's dir; hide/show → no retype;
+- a real remote host in agterm: ⌘D on a bound row → `a1-2` in a1's dir; hide/show → no retype;
   ⌘J → remote shell in the dir; ⌘J hide/show → same shell; ctrl+a>x → dialog → both
   sessions gone, row closed; a local row → all three keys unchanged.
 - confirm the `ask` answered-result shape and tighten the decoder.
