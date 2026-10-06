@@ -267,6 +267,42 @@ func (c *Ctl) treeSessions(ctx context.Context) ([]treeSession, error) {
 	return sessions, nil
 }
 
+// Confirm asks a yes/no question in a dialog anchored on row and reports
+// whether the confirm button was pressed. It fails closed: a cancel, any
+// other button, an unknown answer shape or a failed dialog is not a yes.
+func (c *Ctl) Confirm(ctx context.Context, row, title, message, confirmID, confirmLabel string) (bool, error) {
+	out, exit, err := c.out.Output(ctx, nil, c.path, "ask", "open", title,
+		"--message", message,
+		"--button", confirmID+"="+confirmLabel, "--button", "cancel=Cancel",
+		"--destructive", confirmID, "--default", "cancel",
+		"--target", row, "--socket", c.sock)
+	// ExecRunner returns an error for every non-zero exit, so the cancel
+	// exit has to be recognised before the error is: it is a "no", not a
+	// failure.
+	if exit == 2 {
+		return false, nil
+	}
+	if err != nil || exit != 0 {
+		if err == nil {
+			err = fmt.Errorf("command exited with status %d", exit)
+		}
+		return false, commandError("ask", out, exit, err)
+	}
+	var answer struct {
+		Result string `json:"result"`
+		ID     string `json:"id"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out), &answer); err != nil {
+		return false, fmt.Errorf("decode agterm ask: %w", err)
+	}
+	return answer.Result == "answered" && answer.ID == confirmID, nil
+}
+
+// CloseRow closes an agterm row.
+func (c *Ctl) CloseRow(ctx context.Context, row string) error {
+	return c.run.Run(ctx, c.path, "session", "close", "--target", row, "--socket", c.sock)
+}
+
 // PickItem is one row offered to agterm's native picker.
 type PickItem struct {
 	ID       string `json:"id"`

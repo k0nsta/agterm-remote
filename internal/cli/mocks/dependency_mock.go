@@ -731,6 +731,174 @@ func (mr *MockHandledPanesMockRecorder) Claim(paneID, live any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Claim", reflect.TypeOf((*MockHandledPanes)(nil).Claim), paneID, live)
 }
 
+// MockRowBindings is a mock of RowBindings interface.
+type MockRowBindings struct {
+	ctrl     *gomock.Controller
+	recorder *MockRowBindingsMockRecorder
+	isgomock struct{}
+}
+
+// MockRowBindingsMockRecorder is the mock recorder for MockRowBindings.
+type MockRowBindingsMockRecorder struct {
+	mock *MockRowBindings
+}
+
+// NewMockRowBindings creates a new mock instance.
+func NewMockRowBindings(ctrl *gomock.Controller) *MockRowBindings {
+	mock := &MockRowBindings{ctrl: ctrl}
+	mock.recorder = &MockRowBindingsMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRowBindings) EXPECT() *MockRowBindingsMockRecorder {
+	return m.recorder
+}
+
+// Load mocks base method.
+func (m *MockRowBindings) Load() ([]bindings.Binding, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Load")
+	ret0, _ := ret[0].([]bindings.Binding)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Load indicates an expected call of Load.
+func (mr *MockRowBindingsMockRecorder) Load() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Load", reflect.TypeOf((*MockRowBindings)(nil).Load))
+}
+
+// UnbindRow mocks base method.
+func (m *MockRowBindings) UnbindRow(row string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UnbindRow", row)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UnbindRow indicates an expected call of UnbindRow.
+func (mr *MockRowBindingsMockRecorder) UnbindRow(row any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnbindRow", reflect.TypeOf((*MockRowBindings)(nil).UnbindRow), row)
+}
+
+// MockReaper is a mock of Reaper interface.
+type MockReaper struct {
+	ctrl     *gomock.Controller
+	recorder *MockReaperMockRecorder
+	isgomock struct{}
+}
+
+// MockReaperMockRecorder is the mock recorder for MockReaper.
+type MockReaperMockRecorder struct {
+	mock *MockReaper
+}
+
+// NewMockReaper creates a new mock instance.
+func NewMockReaper(ctrl *gomock.Controller) *MockReaper {
+	mock := &MockReaper{ctrl: ctrl}
+	mock.recorder = &MockReaperMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockReaper) EXPECT() *MockReaperMockRecorder {
+	return m.recorder
+}
+
+// Reap mocks base method.
+func (m *MockReaper) Reap(ctx context.Context, host, name string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Reap", ctx, host, name)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Reap indicates an expected call of Reap.
+func (mr *MockReaperMockRecorder) Reap(ctx, host, name any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reap", reflect.TypeOf((*MockReaper)(nil).Reap), ctx, host, name)
+}
+
+// MockConfirmer is a mock of Confirmer interface.
+type MockConfirmer struct {
+	ctrl     *gomock.Controller
+	recorder *MockConfirmerMockRecorder
+	isgomock struct{}
+}
+
+// MockConfirmerMockRecorder is the mock recorder for MockConfirmer.
+type MockConfirmerMockRecorder struct {
+	mock *MockConfirmer
+}
+
+// NewMockConfirmer creates a new mock instance.
+func NewMockConfirmer(ctrl *gomock.Controller) *MockConfirmer {
+	mock := &MockConfirmer{ctrl: ctrl}
+	mock.recorder = &MockConfirmerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockConfirmer) EXPECT() *MockConfirmerMockRecorder {
+	return m.recorder
+}
+
+// Confirm mocks base method.
+func (m *MockConfirmer) Confirm(ctx context.Context, row, title, message, confirmID, confirmLabel string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Confirm", ctx, row, title, message, confirmID, confirmLabel)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Confirm indicates an expected call of Confirm.
+func (mr *MockConfirmerMockRecorder) Confirm(ctx, row, title, message, confirmID, confirmLabel any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Confirm", reflect.TypeOf((*MockConfirmer)(nil).Confirm), ctx, row, title, message, confirmID, confirmLabel)
+}
+
+// MockRowCloser is a mock of RowCloser interface.
+type MockRowCloser struct {
+	ctrl     *gomock.Controller
+	recorder *MockRowCloserMockRecorder
+	isgomock struct{}
+}
+
+// MockRowCloserMockRecorder is the mock recorder for MockRowCloser.
+type MockRowCloserMockRecorder struct {
+	mock *MockRowCloser
+}
+
+// NewMockRowCloser creates a new mock instance.
+func NewMockRowCloser(ctrl *gomock.Controller) *MockRowCloser {
+	mock := &MockRowCloser{ctrl: ctrl}
+	mock.recorder = &MockRowCloserMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRowCloser) EXPECT() *MockRowCloserMockRecorder {
+	return m.recorder
+}
+
+// CloseRow mocks base method.
+func (m *MockRowCloser) CloseRow(ctx context.Context, row string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CloseRow", ctx, row)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CloseRow indicates an expected call of CloseRow.
+func (mr *MockRowCloserMockRecorder) CloseRow(ctx, row any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseRow", reflect.TypeOf((*MockRowCloser)(nil).CloseRow), ctx, row)
+}
+
 // MockBindingStore is a mock of BindingStore interface.
 type MockBindingStore struct {
 	ctrl     *gomock.Controller

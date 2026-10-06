@@ -39,6 +39,7 @@ Commands:
   doctor <host>            Check local and remote prerequisites
   shell <host> [--cwd <dir>]
                           Open a plain remote login shell (no session)
+  end [row]                Kill a row's remote sessions and close the row
 
 Options:
   --help, -h               Show this help
@@ -110,7 +111,8 @@ is shown as `-`.
 ## agterm keys on a remote row
 
 agterm's own keys can follow a row's remote host (agterm 0.27 or newer: the
-pane hooks and pane tokens were verified there). Add these lines to
+pane hooks, pane tokens and the confirm dialog were verified there). Add
+these lines to
 `~/.config/agterm/hooks.conf` and reload hooks (File ▸ Reload Hooks):
 
 ```text
@@ -136,6 +138,28 @@ the next ⌘J is remote again.
 The directory comes from tmux (`pane_current_path`) or, under zmx, from the
 session shell's `/proc/<pid>/cwd` — Linux hosts only; elsewhere the new
 session starts in the remote home.
+
+### Ending a row's work
+
+Closing a row (⌘W) only detaches: the remote sessions keep running, which is
+how an agent survives a disconnect or moves to another Mac. To end the work,
+bind `agr end` in `~/.config/agterm/keymap.conf`:
+
+```text
+command "End remote session" ctrl+a>x --error-hud $HOME/go/bin/agr end "{AGT_SESSION_ID}"
+```
+
+After a confirm dialog it kills the row's sessions on the host — `agr kill`
+and `end` also take every session recorded as a child, so `a1` brings `a1-2`
+with it — drops the row's bindings and closes the row. A remote scratch
+shell needs nothing: it ends with the pane. A session already gone counts as
+ended; any other failure keeps the row.
+
+| Piece | Kind | ⌘W | `agr end` |
+| --- | --- | --- | --- |
+| `a1` (left pane) | multiplexer session | keeps running | killed |
+| `a1-2` (⌘D) | multiplexer session, child of `a1` | keeps running | killed |
+| scratch (⌘J) | plain ssh/mosh shell | ends | ends |
 
 ## agterm versions
 

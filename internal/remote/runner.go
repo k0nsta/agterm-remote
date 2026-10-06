@@ -22,6 +22,14 @@ const (
 	remoteAgrPath  = ".local/bin/agr"
 )
 
+// ErrNoSession identifies a reap of a session that does not exist on the
+// host. The remote script exits noSessionExit for it, distinct from the 1 of
+// a refusal; an older script exits 1 for both, which callers then treat as a
+// failure — the safe reading.
+var ErrNoSession = errors.New("no such remote session")
+
+const noSessionExit = 3
+
 // ErrNotInstalled identifies a host that did not return agr's data header.
 var ErrNotInstalled = errors.New("remote agr is not installed")
 
@@ -219,6 +227,10 @@ func (r *Runner) Reap(ctx context.Context, host, name string) error {
 		return fmt.Errorf("invalid remote session name %q", name)
 	}
 	_, err := r.Data(ctx, host, "reap", name)
+	var exit *ExitError
+	if errors.As(err, &exit) && exit.Code == noSessionExit {
+		return fmt.Errorf("%w: %s on %s", ErrNoSession, name, host)
+	}
 	return err
 }
 
