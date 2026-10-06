@@ -16,6 +16,14 @@ tab=$(printf '\t')
 work=$REMOTE_TEST_TMP/work
 mkdir -p "$work"
 work_real=$(CDPATH="" cd -- "$work" && pwd)
+work_physical=$(CDPATH="" cd -- "$work" && pwd -P)
+
+# The fake reports ZMX_FAKE_PID as the session's pid; a live process whose
+# cwd is the work directory lets a /proc host resolve it for real.
+(cd "$work" && exec sleep 60) &
+holder=$!
+trap 'kill "$holder" 2>/dev/null || :; cleanup_remote_test' EXIT HUP INT TERM
+export ZMX_FAKE_PID=$holder
 
 run_agr attach child --cwd "$work" --parent api </dev/null
 assert_eq 1 "$(zmx get child agr)" 'attach with options labels the session owned'
@@ -42,7 +50,7 @@ assert_eq api "$label" 'background retry labels the parent too'
 output=$(run_agr cwd child)
 assert_eq "agr${tab}@VERSION@" "$(printf '%s\n' "$output" | sed -n '1p')" 'cwd prints the handshake header'
 if [ -d /proc/self ]; then
-	[ -n "$(printf '%s\n' "$output" | sed -n '2p')" ] || { printf '%s\n' 'cwd empty on a /proc host' >&2; exit 1; }
+	assert_eq "$work_physical" "$(printf '%s\n' "$output" | sed -n '2p')" 'cwd reads the session process cwd from /proc'
 else
 	assert_eq '' "$(printf '%s\n' "$output" | sed -n '2p')" 'cwd is empty without /proc'
 fi
