@@ -27,6 +27,8 @@ Commands:
                           Install the remote script and agent hooks
   daemon                  Run the local bridge daemon
   doctor <host>            Check local and remote prerequisites
+  shell <host> [--cwd <dir>]
+                          Open a plain remote login shell (no session)
 
 Options:
   --help, -h               Show this help
@@ -47,9 +49,11 @@ var commandHandlers = map[string]commandHandler{
 	"install": runInstall,
 	"daemon":  runDaemon,
 	"doctor":  runDoctor,
+	"shell":   runShell,
 	// Hook entry points, run by agterm's hooks.conf rather than by hand, so
 	// they stay out of --help.
-	"on-split": runOnSplit,
+	"on-split":   runOnSplit,
+	"on-scratch": runOnScratch,
 }
 
 func runWithApplication(args []string, out, errw io.Writer, app *application) int {
@@ -75,6 +79,21 @@ func runWithApplication(args []string, out, errw io.Writer, app *application) in
 
 	writeUsage(errw)
 	return 2
+}
+
+func runOnScratch(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
+	return runPaneHook(ctx, app, args, errw, "on-scratch", cli.OnScratch)
+}
+
+func runShell(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
+	positional, opts, ok := parseOpenArgs(args)
+	if !ok || len(positional) != 1 || opts.Parent != "" {
+		_, _ = fmt.Fprintln(errw, "usage: agr shell <host> [--cwd <dir>]")
+		return 2
+	}
+	return cli.RunShell(ctx, positional[0], opts.Cwd, cli.ShellDependencies{
+		TTY: app.tty, HostInfo: app.hostInfo, MoshPath: app.moshPath, Out: out,
+	}, errw)
 }
 
 func runOnSplit(ctx context.Context, app *application, args []string, _, errw io.Writer) int {

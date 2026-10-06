@@ -37,6 +37,8 @@ Commands:
                           Install the remote script and agent hooks
   daemon                  Run the local bridge daemon
   doctor <host>            Check local and remote prerequisites
+  shell <host> [--cwd <dir>]
+                          Open a plain remote login shell (no session)
 
 Options:
   --help, -h               Show this help
@@ -108,11 +110,12 @@ is shown as `-`.
 ## agterm keys on a remote row
 
 agterm's own keys can follow a row's remote host (verified on agterm 0.35:
-the pane hooks and pane tokens they rely on are recent). Add this line to
+the pane hooks and pane tokens they rely on are recent). Add these lines to
 `~/.config/agterm/hooks.conf` and reload hooks (File ▸ Reload Hooks):
 
 ```text
-on pane.split  $HOME/go/bin/agr on-split
+on pane.split    $HOME/go/bin/agr on-split
+on pane.scratch  $HOME/go/bin/agr on-scratch
 ```
 
 On a row whose left pane holds `agr open <host> a1`, ⌘D then opens
@@ -123,6 +126,12 @@ bound is left alone, and on a local row ⌘D stays a plain local split. The
 directory needs the remote script from `agr install <host>` of this version;
 an older one still gets `a1-2`, in the remote home. Hook failures are
 appended to `~/.cache/agr/hooks.log`.
+
+⌘J on the same row opens the scratch terminal as `agr shell <host> --cwd
+<dir>`: a plain ssh (or mosh) login shell in `a1`'s directory, with no
+multiplexer session behind it. It ends with the scratch and leaves nothing
+on the host; hiding the scratch keeps it, and `exit` closes the scratch, so
+the next ⌘J is remote again.
 
 The directory comes from tmux (`pane_current_path`) or, under zmx, from the
 session shell's `/proc/<pid>/cwd` — Linux hosts only; elsewhere the new
