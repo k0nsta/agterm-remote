@@ -14,6 +14,7 @@ brew install k0nsta/apps/agr
 # or: go install github.com/k0nsta/agterm-remote/cmd/agr@latest
 
 agr daemon &
+agr setup            # ⌘D/⌘J follow a remote row; asks for an End key
 agr install <host>
 agr open <host> <name>
 ```
@@ -119,21 +120,25 @@ On a row opened with `agr open`, agterm's own keys can follow the remote host:
 | --- | --- | --- |
 | ⌘D | local split | `a1-2` on the remote host, in `a1`'s current directory |
 | ⌘J | local scratch | a plain shell on the remote host, in `a1`'s current directory |
-| ctrl+a x | — | asks, then ends `a1` and `a1-2` and closes the row |
+| End key (yours, e.g. ctrl+a x) | — | asks, then ends `a1` and `a1-2` and closes the row |
 
 ### Setup
 
-Add to `~/.config/agterm/hooks.conf`, then File ▸ Reload Hooks:
-
-```text
-on pane.split    $HOME/go/bin/agr on-split
-on pane.scratch  $HOME/go/bin/agr on-scratch
+```sh
+agr setup                        # asks for the End key; Enter skips it
+agr setup --end-key 'ctrl+a>x'   # bind or change it later
 ```
 
-Add to `~/.config/agterm/keymap.conf`, then run `agtermctl keymap reload`:
+It writes these lines with the binary's own path, then reloads agterm. Lines
+that already run agr only get the path updated, so your key stays as it is:
 
 ```text
-command "End remote session" ctrl+a>x --error-hud $HOME/go/bin/agr end "{AGT_SESSION_ID}"
+# hooks.conf
+on pane.split     '/opt/homebrew/bin/agr' on-split
+on pane.scratch   '/opt/homebrew/bin/agr' on-scratch
+
+# keymap.conf (with no key, run it from agterm's command palette)
+command "End remote session" ctrl+a>x --error-hud '/opt/homebrew/bin/agr' end "{AGT_SESSION_ID}"
 ```
 
 Run `agr install <host>` once per host so it has the current remote script.
@@ -141,7 +146,7 @@ Tested on agterm 0.35.
 
 ### What each piece is
 
-| Piece | What it is | ⌘W closes the row | ctrl+a x (`agr end`) |
+| Piece | What it is | ⌘W closes the row | End (`agr end`) |
 | --- | --- | --- | --- |
 | `a1` | agr session | keeps running | killed |
 | `a1-2` (⌘D) | agr session, child of `a1` | keeps running | killed |

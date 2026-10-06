@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -78,6 +81,29 @@ func (a *application) end() cli.EndDependencies {
 	return cli.EndDependencies{Store: a.store, Reaper: a.remote, Confirm: ctl, Rows: ctl}
 }
 
+// setup wires agr setup. Without agtermctl it still writes the files, to the
+// default config directory, and leaves the reload to agterm's next start. The
+// key for End remote session is asked only on a terminal.
+func (a *application) setup(out io.Writer, endKey string) cli.SetupDependencies {
+	self, _ := os.Executable()
+	home, _ := os.UserHomeDir()
+	deps := cli.SetupDependencies{Agr: self, Home: home, Out: out, EndKey: endKey}
+	if a.control != nil && agterm.CtlPath() != "" {
+		deps.Config = a.control
+	}
+	if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+		deps.AskKey = func() (string, error) {
+			_, _ = fmt.Fprint(out, "Key for End remote session (e.g. ctrl+a>x, Enter for none): ")
+			answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			return answer, err
+		}
+	}
+	return deps
+}
+
 // logHookFailure appends one line to the hook log; a failure to log is
 // dropped, there is nowhere left to report it.
 func (a *application) logHookFailure(verb string, failure error) {
@@ -144,6 +170,7 @@ var (
 	_ cli.RowBindings                         = (*bindings.Store)(nil)
 	_ cli.Confirmer                           = (*agterm.Ctl)(nil)
 	_ cli.RowCloser                           = (*agterm.Ctl)(nil)
+	_ cli.AgtermConfig                        = (*agterm.Ctl)(nil)
 	_ cli.Sessions                            = (*remote.Runner)(nil)
 	_ cli.Installer                           = (*remote.Runner)(nil)
 	_ cli.Versioner                           = (*agterm.Client)(nil)

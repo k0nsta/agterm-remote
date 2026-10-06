@@ -303,6 +303,63 @@ func (c *Ctl) CloseRow(ctx context.Context, row string) error {
 	return c.run.Run(ctx, c.path, "session", "close", "--target", row, "--socket", c.sock)
 }
 
+// ConfigPaths returns the hooks.conf and keymap.conf agterm actually reads,
+// which follow its config-directory setting rather than a fixed location.
+func (c *Ctl) ConfigPaths(ctx context.Context) (hooks, keymap string, err error) {
+	if hooks, err = c.listedPath(ctx, "hooks"); err != nil {
+		return "", "", err
+	}
+	if keymap, err = c.listedPath(ctx, "keymap"); err != nil {
+		return "", "", err
+	}
+	return hooks, keymap, nil
+}
+
+// listedPath reads `.result.<file>.path` from `agtermctl <file> list --json`.
+func (c *Ctl) listedPath(ctx context.Context, file string) (string, error) {
+	out, exit, err := c.out.Output(ctx, nil, c.path, file, "list", "--json", "--socket", c.sock)
+	if err != nil || exit != 0 {
+		if err == nil {
+			err = fmt.Errorf("command exited with status %d", exit)
+		}
+		return "", commandError(file+" list", out, exit, err)
+	}
+	var response struct {
+		Result map[string]struct {
+			Path string `json:"path"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out, &response); err != nil {
+		return "", fmt.Errorf("decode agtermctl %s list: %w", file, err)
+	}
+	path := response.Result[file].Path
+	if !strings.HasPrefix(path, "/") {
+		return "", fmt.Errorf("agtermctl %s list returned no absolute path", file)
+	}
+	return path, nil
+}
+
+// Reload re-reads hooks.conf or keymap.conf (file is "hooks" or "keymap") and
+// returns agterm's count of diagnostics, the lines it could not apply.
+func (c *Ctl) Reload(ctx context.Context, file string) (int, error) {
+	out, exit, err := c.out.Output(ctx, nil, c.path, file, "reload", "--json", "--socket", c.sock)
+	if err != nil || exit != 0 {
+		if err == nil {
+			err = fmt.Errorf("command exited with status %d", exit)
+		}
+		return 0, commandError(file+" reload", out, exit, err)
+	}
+	var response struct {
+		Result struct {
+			Count int `json:"count"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out, &response); err != nil {
+		return 0, fmt.Errorf("decode agtermctl %s reload: %w", file, err)
+	}
+	return response.Result.Count, nil
+}
+
 // PickItem is one row offered to agterm's native picker.
 type PickItem struct {
 	ID       string `json:"id"`

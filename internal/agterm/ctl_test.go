@@ -420,3 +420,63 @@ func TestCtlCloseRow(t *testing.T) {
 		t.Fatalf("CloseRow() error = %v", err)
 	}
 }
+
+// TestCtlConfigPathsReadsListedPaths uses the `hooks list` / `keymap list`
+// shapes probed on agterm 0.35.
+func TestCtlConfigPathsReadsListedPaths(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "hooks", "list", "--json", "--socket", testCtlSock).
+		Return([]byte(`{"result":{"hooks":{"diagnostics":[],"hooks":[],"path":"\/cfg\/hooks.conf"}},"ok":true}`), 0, nil)
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "keymap", "list", "--json", "--socket", testCtlSock).
+		Return([]byte(`{"result":{"keymap":{"commands":[],"diagnostics":[],"path":"/cfg/keymap.conf"}},"ok":true}`), 0, nil)
+	hooks, keymap, err := ctl.ConfigPaths(context.Background())
+	if err != nil || hooks != "/cfg/hooks.conf" || keymap != "/cfg/keymap.conf" {
+		t.Fatalf("ConfigPaths() = (%q, %q, %v)", hooks, keymap, err)
+	}
+}
+
+func TestCtlConfigPathsRejectsMissingPath(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		out  string
+		exit int
+		err  error
+	}{
+		{name: "no path", out: `{"result":{"hooks":{"hooks":[]}},"ok":true}`},
+		{name: "relative path", out: `{"result":{"hooks":{"path":"hooks.conf"}},"ok":true}`},
+		{name: "not json", out: `ok`},
+		{name: "old agterm", out: `Error: Unexpected argument 'hooks'`, exit: 64, err: errors.New("exit status 64")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "hooks", "list", "--json", "--socket", testCtlSock).
+				Return([]byte(tc.out), tc.exit, tc.err)
+			if _, _, err := ctl.ConfigPaths(context.Background()); err == nil {
+				t.Fatal("ConfigPaths() error = nil, want failure")
+			}
+		})
+	}
+}
+
+func TestCtlReloadReturnsDiagnosticCount(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "keymap", "reload", "--json", "--socket", testCtlSock).
+		Return([]byte(`{"ok":true,"result":{"count":2}}`), 0, nil)
+	if count, err := ctl.Reload(context.Background(), "keymap"); err != nil || count != 2 {
+		t.Fatalf("Reload() = (%d, %v), want (2, nil)", count, err)
+	}
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "hooks", "reload", "--json", "--socket", testCtlSock).
+		Return([]byte(`no socket`), 1, errors.New("exit status 1"))
+	if _, err := ctl.Reload(context.Background(), "hooks"); err == nil {
+		t.Fatal("Reload() error = nil, want failure")
+	}
+}

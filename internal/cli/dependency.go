@@ -118,6 +118,13 @@ type RowCloser interface {
 	CloseRow(ctx context.Context, row string) error
 }
 
+// AgtermConfig locates agterm's hooks.conf and keymap.conf and reloads one
+// ("hooks" or "keymap"), returning the count of lines agterm could not apply.
+type AgtermConfig interface {
+	ConfigPaths(ctx context.Context) (hooks, keymap string, err error)
+	Reload(ctx context.Context, file string) (int, error)
+}
+
 // BindingStore is the slice of the binding store the CLI uses: the listing
 // reads it, and open records the binding it just made.
 type BindingStore interface {
