@@ -96,6 +96,28 @@ type HandledPanes interface {
 	Claim(paneID string, live []string) (bool, error)
 }
 
+// RowBindings reads bindings and drops every binding of one row.
+type RowBindings interface {
+	Load() ([]bindings.Binding, error)
+	UnbindRow(row string) error
+}
+
+// Reaper kills one remote agr session and the sessions recorded as its
+// children.
+type Reaper interface {
+	Reap(ctx context.Context, host, name string) error
+}
+
+// Confirmer asks a yes/no question on an agterm row.
+type Confirmer interface {
+	Confirm(ctx context.Context, row, title, message, confirmID, confirmLabel string) (bool, error)
+}
+
+// RowCloser closes an agterm row.
+type RowCloser interface {
+	CloseRow(ctx context.Context, row string) error
+}
+
 // BindingStore is the slice of the binding store the CLI uses: the listing
 // reads it, and open records the binding it just made.
 type BindingStore interface {

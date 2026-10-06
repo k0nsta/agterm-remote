@@ -39,6 +39,7 @@ Commands:
   doctor <host>            Check local and remote prerequisites
   shell <host> [--cwd <dir>]
                           Open a plain remote login shell (no session)
+  end [row]                Kill a row's remote sessions and close the row
 
 Options:
   --help, -h               Show this help
@@ -81,26 +82,29 @@ sessions, not windows in a shared session.
 
 ```sh
 # Start or attach to a named remote session from an agterm row.
-agr open homelab api
+agr open remote api
 
 # List owned sessions. The ROW column says bound, stale, or -.
-agr ls homelab
+agr ls remote
 
 # Open the native picker instead of naming a session.
-agr open homelab
+agr open remote
 
 # Stop one or more owned sessions.
-agr kill homelab api infra
+agr kill remote api infra
 
 # Control the shared bridge explicitly (the daemon must be running).
-agr up homelab
-agr down homelab
+agr up remote
+agr down remote
 
 # Re-probe the host and install the embedded remote script and hooks.
-agr install homelab --mux zmx
+agr install remote --mux zmx
 
 # Print local, remote, and daemon diagnostics.
-agr doctor homelab
+agr doctor remote
+
+# A plain login shell on the host, in a given directory (no session).
+agr shell remote --cwd /srv/app
 ```
 
 `agr ls` reports the remote command and the elapsed age of its last event.
@@ -109,33 +113,54 @@ is shown as `-`.
 
 ## agterm keys on a remote row
 
-agterm's own keys can follow a row's remote host (verified on agterm 0.35:
-the pane hooks and pane tokens they rely on are recent). Add these lines to
-`~/.config/agterm/hooks.conf` and reload hooks (File ▸ Reload Hooks):
+On a row opened with `agr open`, agterm's own keys can follow the remote host:
+
+| Key | Local row | Row running `agr open remote a1` |
+| --- | --- | --- |
+| ⌘D | local split | `a1-2` on the remote host, in `a1`'s current directory |
+| ⌘J | local scratch | a plain shell on the remote host, in `a1`'s current directory |
+| ctrl+a x | — | asks, then ends `a1` and `a1-2` and closes the row |
+
+### Setup
+
+Add to `~/.config/agterm/hooks.conf`, then File ▸ Reload Hooks:
 
 ```text
 on pane.split    $HOME/go/bin/agr on-split
 on pane.scratch  $HOME/go/bin/agr on-scratch
 ```
 
-On a row whose left pane holds `agr open <host> a1`, ⌘D then opens
-`agr open <host> a1-2` in the new pane: a second agr session on the same host,
-recorded as a child of `a1` and started in `a1`'s current remote directory.
-Hiding and re-showing the split does not open it again, a pane you already
-bound is left alone, and on a local row ⌘D stays a plain local split. The
-directory needs the remote script from `agr install <host>` of this version;
-an older one still gets `a1-2`, in the remote home. Hook failures are
-appended to `~/.cache/agr/hooks.log`.
+Add to `~/.config/agterm/keymap.conf`, then run `agtermctl keymap reload`:
 
-⌘J on the same row opens the scratch terminal as `agr shell <host> --cwd
-<dir>`: a plain ssh (or mosh) login shell in `a1`'s directory, with no
-multiplexer session behind it. It ends with the scratch and leaves nothing
-on the host; hiding the scratch keeps it, and `exit` closes the scratch, so
-the next ⌘J is remote again.
+```text
+command "End remote session" ctrl+a>x --error-hud $HOME/go/bin/agr end "{AGT_SESSION_ID}"
+```
 
-The directory comes from tmux (`pane_current_path`) or, under zmx, from the
-session shell's `/proc/<pid>/cwd` — Linux hosts only; elsewhere the new
-session starts in the remote home.
+Run `agr install <host>` once per host so it has the current remote script.
+Tested on agterm 0.35.
+
+### What each piece is
+
+| Piece | What it is | ⌘W closes the row | ctrl+a x (`agr end`) |
+| --- | --- | --- | --- |
+| `a1` | agr session | keeps running | killed |
+| `a1-2` (⌘D) | agr session, child of `a1` | keeps running | killed |
+| scratch (⌘J) | plain ssh/mosh shell | ends | ends |
+
+⌘W only detaches, so an agent survives a disconnect or a move to another Mac.
+`agr end` is the way to stop the work. `agr kill <host> a1` also takes `a1`'s
+children.
+
+### Details
+
+- ⌘D acts once per pane: hiding and showing the split again does nothing, and
+  a pane you bound yourself is left alone.
+- `exit` in the remote scratch closes it; the next ⌘J opens a fresh one.
+- The directory comes from tmux, or from zmx on Linux hosts. Elsewhere, or
+  with an older remote script, the new session starts in the remote home.
+- `agr end` does nothing until you press End. If the host cannot be reached,
+  it keeps the row so you can run it again.
+- Hook errors are written to `~/.cache/agr/hooks.log`.
 
 ## agterm versions
 

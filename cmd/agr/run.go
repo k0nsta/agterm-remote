@@ -29,6 +29,7 @@ Commands:
   doctor <host>            Check local and remote prerequisites
   shell <host> [--cwd <dir>]
                           Open a plain remote login shell (no session)
+  end [row]                Kill a row's remote sessions and close the row
 
 Options:
   --help, -h               Show this help
@@ -50,6 +51,7 @@ var commandHandlers = map[string]commandHandler{
 	"daemon":  runDaemon,
 	"doctor":  runDoctor,
 	"shell":   runShell,
+	"end":     runEnd,
 	// Hook entry points, run by agterm's hooks.conf rather than by hand, so
 	// they stay out of --help.
 	"on-split":   runOnSplit,
@@ -94,6 +96,26 @@ func runShell(ctx context.Context, app *application, args []string, out, errw io
 	return cli.RunShell(ctx, positional[0], opts.Cwd, cli.ShellDependencies{
 		TTY: app.tty, HostInfo: app.hostInfo, MoshPath: app.moshPath, Out: out,
 	}, errw)
+}
+
+// runEnd takes the row from its argument (a keymap command passes
+// {AGT_SESSION_ID}) or, run by hand inside agterm, from the environment.
+func runEnd(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
+	if len(args) > 1 {
+		_, _ = fmt.Fprintln(errw, "usage: agr end [row]")
+		return 2
+	}
+	row := optionalArg(args, 0)
+	for _, key := range []string{"AGT_SESSION_ID", "AGTERM_SESSION_ID"} {
+		if row == "" {
+			row = os.Getenv(key)
+		}
+	}
+	if row == "" {
+		_, _ = fmt.Fprintln(errw, "usage: agr end [row] (no agterm row in the environment)")
+		return 2
+	}
+	return cli.RunEnd(ctx, row, app.end(), errw)
 }
 
 func runOnSplit(ctx context.Context, app *application, args []string, _, errw io.Writer) int {

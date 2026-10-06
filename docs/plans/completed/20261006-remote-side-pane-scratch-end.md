@@ -86,7 +86,7 @@ remote shell there would be typed blind and follow no row; ⌘J covers the need 
   ask decoding against canned JSON.
 - **remote**: shell tests for `cwd`, `attach --cwd/--parent`, `reap` cascade on the tmux
   test server and the zmx fake.
-- **e2e**: manual on homelab inside agterm (Post-Completion).
+- **e2e**: manual on a real remote host inside agterm (Post-Completion).
 
 ## Progress Tracking
 
@@ -112,28 +112,28 @@ lose the feature).
   `tests/remote/{tmux,zmx}/cwd_test.sh`
 - Delete: `docs/backlog/split-pane-follows-the-remote-host.md`
 
-- [ ] remote `cwd <name>`: header, then the session's cwd or an empty line; tmux via
+- [x] remote `cwd <name>`: header, then the session's cwd or an empty line; tmux via
       `display-message`, zmx via the listed pid's `/proc/<pid>/cwd`; never fails for a
       missing session (empty line)
-- [ ] remote `attach <name> [--cwd <dir>] [--parent <name>]`: dir must be absolute, ignored
+- [x] remote `attach <name> [--cwd <dir>] [--parent <name>]`: dir must be absolute, ignored
       when `cd` fails; tmux `new-session -c` (new sessions only) + `@agr_parent`; zmx `cd`
       before attach + `agr_parent` label; parent through `valid_token`
-- [ ] runner `Cwd(ctx, host, name) (dir string, err error)`; empty/non-absolute → `""`
-- [ ] `agr open <host> [name] [--cwd DIR] [--parent NAME]` → `OpenOptions`; passed to the
+- [x] runner `Cwd(ctx, host, name) (dir string, err error)`; empty/non-absolute → `""`
+- [x] `agr open <host> [name] [--cwd DIR] [--parent NAME]` → `OpenOptions`; passed to the
       remote `attach` argv (ssh quoted, mosh unquoted)
-- [ ] agterm `Ctl.Session(ctx, row)` decoding surfaces (kind, paneID, visible); `Ctl.Text`
+- [x] agterm `Ctl.Session(ctx, row)` decoding surfaces (kind, paneID, visible); `Ctl.Text`
       and `Ctl.Type` by pane id
-- [ ] handled-pane set at `dirs.Cache/handled-panes.json` (flocked, pruned to pane ids still
+- [x] handled-pane set at `dirs.Cache/handled-panes.json` (flocked, pruned to pane ids still
       in the tree) so a re-shown pane is never typed into twice
-- [ ] `agr on-split`: only `shown`; find the split surface; skip if handled (mark it), if the
+- [x] `agr on-split`: only `shown`; find the split surface; skip if handled (mark it), if the
       primary pane has no binding, or if the split pane is already bound; `Cwd` best effort;
       wait ≤5s for a non-blank screen; type `<abs agr> open <host> <name>-2 --cwd '<dir>'
       --parent <name>` (shell-quoted; flags omitted when `cwd` failed)
-- [ ] dispatch `on-split` (not in `--help`: a hook entry point), wire deps
-- [ ] tests: remote cwd/attach (tmux + zmx fake); Go tests for every skip branch, quoting
+- [x] dispatch `on-split` (not in `--help`: a hook entry point), wire deps
+- [x] tests: remote cwd/attach (tmux + zmx fake); Go tests for every skip branch, quoting
       (dir with space and `'`), old-remote fallback, handled-set prune
-- [ ] README: hooks.conf snippet, behaviour, `agr install` needed for `--cwd`
-- [ ] `make test lint shellcheck check-remote` green
+- [x] README: hooks.conf snippet, behaviour, `agr install` needed for `--cwd`
+- [x] `make test lint shellcheck check-remote` green
 
 ### Task 2: Scratch follows the remote host (`agr shell`, `on-scratch`)
 
@@ -144,14 +144,14 @@ next ⌘J goes remote again; an unreachable host waits for Enter so the error is
 - Create: `internal/cli/shell.go`, `internal/cli/onscratch.go`, tests
 - Modify: `cmd/agr/run.go`, `README.md`
 
-- [ ] `agr shell <host> [--cwd DIR]`: interactive ssh (mosh when the host has it) running
+- [x] `agr shell <host> [--cwd DIR]`: interactive ssh (mosh when the host has it) running
       `sh -c 'cd "$1" 2>/dev/null; exec "${SHELL:-sh}" -l' sh <dir>`; no binding, no bridge
-- [ ] `agr on-scratch`: only `shown`; scratch surface; handled-set skip; binding = the row's
+- [x] `agr on-scratch`: only `shown`; scratch surface; handled-set skip; binding = the row's
       primary-pane binding, else none → skip; `Cwd` best effort; wait for prompt; type
       `<abs agr> shell <host> --cwd '<dir>'`
-- [ ] tests: skip branches, typed line, shell argv for ssh and mosh
-- [ ] README: second hooks.conf line
-- [ ] `make test lint shellcheck check-remote` green
+- [x] tests: skip branches, typed line, shell argv for ssh and mosh
+- [x] README: second hooks.conf line
+- [x] `make test lint shellcheck check-remote` green
 
 ### Task 3: `agr end` and cascading `kill`
 
@@ -165,21 +165,21 @@ answered shape is probed with one click before the decoder is written.
   `internal/cli/dependency.go`, `README.md`
 - Create: `internal/cli/end.go`, tests, `tests/remote/{tmux,zmx}/reap_children_test.sh`
 
-- [ ] remote `reap <name>` also reaps owned sessions whose parent is `<name>` (one
+- [x] remote `reap <name>` also reaps owned sessions whose parent is `<name>` (one
       `killed <x>` line each); a missing parent with live children still reaps the children
-- [ ] agterm `Ctl.Ask(ctx, row, title, message, buttons, destructive) (string, error)` and
+- [x] agterm `Ctl.Ask(ctx, row, title, message, buttons, destructive) (string, error)` and
       `Ctl.Close(ctx, row)`
-- [ ] `agr end <row>`: bindings `ForRow`; none → error "not an agr row"; confirm
-      ("End a1 on homelab? Kills the agent and its side-pane sessions."); per distinct
+- [x] `agr end <row>`: bindings `ForRow`; none → error "not an agr row"; confirm
+      ("End a1 on remote? Kills the agent and its side-pane sessions."); per distinct
       host+name `Reap` ("no session" counts as done); any other failure → stop, keep the row;
       then `UnbindRow`, `session close`
-- [ ] tests: no binding, cancel, reap failure keeps the row, success order
-- [ ] README: keymap line (`--error-hud`), lifecycle table (⌘W detaches, `end` kills)
-- [ ] `make test lint shellcheck check-remote` green
+- [x] tests: no binding, cancel, reap failure keeps the row, success order
+- [x] README: keymap line (`--error-hud`), lifecycle table (⌘W detaches, `end` kills)
+- [x] `make test lint shellcheck check-remote` green
 
 ## Post-Completion
 
-- homelab in agterm: ⌘D on a bound row → `a1-2` in a1's dir; hide/show → no retype;
+- a real remote host in agterm: ⌘D on a bound row → `a1-2` in a1's dir; hide/show → no retype;
   ⌘J → remote shell in the dir; ⌘J hide/show → same shell; ctrl+a>x → dialog → both
   sessions gone, row closed; a local row → all three keys unchanged.
 - confirm the `ask` answered-result shape and tighten the decoder.

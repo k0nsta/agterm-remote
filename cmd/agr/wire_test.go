@@ -162,7 +162,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		})
 	}
 
-	if got, want := len(commandHandlers), 11; got != want {
+	if got, want := len(commandHandlers), 12; got != want {
 		t.Fatalf("registered command count = %d, want %d", got, want)
 	}
 }

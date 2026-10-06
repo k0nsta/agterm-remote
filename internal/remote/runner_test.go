@@ -385,3 +385,21 @@ func TestRunnerCwdRejectsInvalidNameAndOldRemote(t *testing.T) {
 		t.Fatal("Cwd() against a remote without the verb error = nil")
 	}
 }
+
+func TestRunnerReapMapsTheMissingSessionExit(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	for _, tc := range []struct {
+		code int
+		want bool
+	}{{3, true}, {1, false}} {
+		ssh := &runnerSSH{body: []byte("agr\t1.0.0\n"), err: &ExitError{Code: tc.code, Stderr: "agr: no session 'api'"}}
+		err := NewRunnerWithVersion(ssh, dirs, "1.0.0").Reap(context.Background(), "host", "api")
+		if errors.Is(err, ErrNoSession) != tc.want {
+			t.Fatalf("exit %d: Reap() error = %v, ErrNoSession = %v", tc.code, err, tc.want)
+		}
+	}
+}

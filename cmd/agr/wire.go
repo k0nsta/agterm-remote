@@ -68,6 +68,16 @@ func (a *application) paneHooks() cli.PaneHookDependencies {
 	}
 }
 
+// end wires agr end on the application's control client, the same one the
+// pane hooks use (SocketPath covers a keymap command's AGT_SOCKET).
+func (a *application) end() cli.EndDependencies {
+	ctl := a.control
+	if ctl == nil {
+		ctl = agterm.NewCtl("", "", nil, nil, nil)
+	}
+	return cli.EndDependencies{Store: a.store, Reaper: a.remote, Confirm: ctl, Rows: ctl}
+}
+
 // logHookFailure appends one line to the hook log; a failure to log is
 // dropped, there is nowhere left to report it.
 func (a *application) logHookFailure(verb string, failure error) {
@@ -131,6 +141,9 @@ var (
 	_ cli.Panes                               = (*agterm.Ctl)(nil)
 	_ cli.RemoteCwd                           = (*remote.Runner)(nil)
 	_ cli.HandledPanes                        = (*handled.Store)(nil)
+	_ cli.RowBindings                         = (*bindings.Store)(nil)
+	_ cli.Confirmer                           = (*agterm.Ctl)(nil)
+	_ cli.RowCloser                           = (*agterm.Ctl)(nil)
 	_ cli.Sessions                            = (*remote.Runner)(nil)
 	_ cli.Installer                           = (*remote.Runner)(nil)
 	_ cli.Versioner                           = (*agterm.Client)(nil)

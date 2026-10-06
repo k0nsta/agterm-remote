@@ -186,18 +186,78 @@ tmux_cwd() {
 	tmux display-message -p -t "=$1:" '#{pane_current_path}' 2>/dev/null || :
 }
 
+# tmux_children prints the owned sessions recorded as children of $1 — the
+# side-pane sessions `agr open --parent` created for it.
+tmux_children() {
+	parent=$1
+	sessions=$(tmux_list_names) || return 1
+	while IFS= read -r child; do
+		[ -n "$child" ] || continue
+		tmux_owned "$child" || continue
+		[ "$(tmux_option "$child" @agr_parent)" = "$parent" ] || continue
+		printf '%s\n' "$child"
+	done <<EOF
+$sessions
+EOF
+}
+
+# tmux_reap kills $1 and every child recorded for it. Children whose parent
+# is already gone are still reaped, so a parent ended by hand never strands
+# its side panes.
+# tmux_list_names lists session names. No server at all is an empty list;
+# any other failure (a client/server protocol mismatch after an upgrade, a
+# socket it cannot open) fails, so it is never mistaken for "no sessions".
+tmux_list_names() {
+	if names=$(tmux list-sessions -F '#{session_name}' 2>&1); then
+		printf '%s\n' "$names"
+		return 0
+	fi
+	case "$names" in
+		*"no server running"*|*"error connecting to"*"No such file or directory"*) return 0 ;;
+	esac
+	printf 'agr: tmux query failed: %s\n' "$names" >&2
+	return 1
+}
+
+# tmux_session_state prints present or absent for $1, and fails on a query
+# error: only an absent answer may become reap's missing-session exit.
+tmux_session_state() {
+	if out=$(tmux has-session -t "=$1" 2>&1); then
+		printf 'present\n'
+		return 0
+	fi
+	case "$out" in
+		*"can't find session"*|*"no server running"*|*"error connecting to"*"No such file or directory"*)
+			printf 'absent\n'
+			return 0
+			;;
+	esac
+	printf 'agr: tmux query failed: %s\n' "$out" >&2
+	return 1
+}
+
 tmux_reap() {
 	n=$1
-	if ! tmux has-session -t "=$n" 2>/dev/null; then
+	state=$(tmux_session_state "$n") || return 1
+	children=$(tmux_children "$n") || return 1
+	if [ "$state" = present ]; then
+		if ! tmux_owned "$n"; then
+			printf "agr: '%s' exists but is not agr-managed\n" "$n" >&2
+			return 1
+		fi
+		tmux kill-session -t "=$n"
+		printf 'killed %s\n' "$n"
+	elif [ -z "$children" ]; then
 		printf "agr: no session '%s'\n" "$n" >&2
-		return 1
+		return "$AGR_NO_SESSION"
 	fi
-	if ! tmux_owned "$n"; then
-		printf "agr: '%s' exists but is not agr-managed\n" "$n" >&2
-		return 1
-	fi
-	tmux kill-session -t "=$n"
-	printf 'killed %s\n' "$n"
+	while IFS= read -r child; do
+		[ -n "$child" ] || continue
+		tmux kill-session -t "=$child" 2>/dev/null && printf 'killed %s\n' "$child"
+	done <<EOF
+$children
+EOF
+	return 0
 }
 
 relay() {
@@ -434,18 +494,69 @@ zmx_cwd() {
 	readlink "/proc/$shell/cwd" 2>/dev/null || :
 }
 
+# zmx_scan reads one `zmx list` ($2) for session $1: its first line is
+# "present" or "absent", the rest are the owned sessions labelled as its
+# children. Presence and children come from the same listing, so a query
+# that fails can never be read as a session that is gone.
+zmx_scan() {
+	parent=$1
+	entries=$2
+	sep=$(printf '\t')
+	found=absent
+	kids=
+	while IFS= read -r entry; do
+		entry=${entry#'→ '}
+		child=${entry%%"$sep"*}
+		child=${child#name=}
+		[ -n "$child" ] || continue
+		if [ "$child" = "$parent" ]; then
+			found=present
+			continue
+		fi
+		valid_token "$child" || continue
+		[ "$(zmx_value "$entry" agr 2>/dev/null || :)" = 1 ] || continue
+		[ "$(zmx_value "$entry" agr_parent 2>/dev/null || :)" = "$parent" ] || continue
+		kids="$kids$child
+"
+	done <<EOF
+$entries
+EOF
+	printf '%s\n%s' "$found" "$kids"
+}
+
 zmx_reap() {
 	n=$1
-	# Must match zmx_sessions' test exactly (= 1, not merely non-empty): a
-	# session labelled agr=0 is hidden from `agr ls`, so accepting it here
-	# would let `agr kill` destroy a session the tool never claimed to own.
-	agr=$(zmx get "$n" agr 2>/dev/null || :)
-	if [ "$agr" != 1 ]; then
-		printf "agr: '%s' exists but is not agr-managed\n" "$n" >&2
+	# A failed listing must not read as "no such session": that answer lets
+	# `agr end` close a row whose agent is still running.
+	if ! entries=$(zmx list 2>/dev/null); then
+		printf '%s\n' 'agr: zmx list failed' >&2
 		return 1
 	fi
-	zmx kill "$n"
-	printf 'killed %s\n' "$n"
+	scan=$(zmx_scan "$n" "$entries")
+	state=$(printf '%s\n' "$scan" | sed -n '1p')
+	children=$(printf '%s\n' "$scan" | sed '1d')
+	if [ "$state" = present ]; then
+		# Must match zmx_sessions' test exactly (= 1, not merely non-empty): a
+		# session labelled agr=0 is hidden from `agr ls`, so accepting it here
+		# would let `agr kill` destroy a session the tool never claimed to own.
+		agr=$(zmx get "$n" agr 2>/dev/null || :)
+		if [ "$agr" != 1 ]; then
+			printf "agr: '%s' exists but is not agr-managed\n" "$n" >&2
+			return 1
+		fi
+		zmx kill "$n"
+		printf 'killed %s\n' "$n"
+	elif [ -z "$children" ]; then
+		printf "agr: no session '%s'\n" "$n" >&2
+		return "$AGR_NO_SESSION"
+	fi
+	while IFS= read -r child; do
+		[ -n "$child" ] || continue
+		zmx kill "$child" 2>/dev/null && printf 'killed %s\n' "$child"
+	done <<EOF
+$children
+EOF
+	return 0
 }
 
 zmx_status() {
@@ -464,6 +575,10 @@ zmx_status() {
 
 attach_cwd=
 attach_parent=
+
+# reap's exit status for a session that does not exist, so the Mac can tell
+# "already gone" from a refusal without parsing stderr.
+AGR_NO_SESSION=3
 
 # attach's options follow the session name. An unusable directory is dropped
 # rather than refused: the attach matters more than where a new session starts.

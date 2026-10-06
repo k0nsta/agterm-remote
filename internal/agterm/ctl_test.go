@@ -372,3 +372,51 @@ func TestCtlPaneTextAndTypeLineTargetThePaneByID(t *testing.T) {
 		t.Fatalf("TypeLine() error = %v, want the agtermctl refusal", err)
 	}
 }
+
+func TestCtlConfirmFailsClosed(t *testing.T) {
+	t.Helper()
+	args := []any{"ask", "open", "End a1?", "--message", "kills it",
+		"--button", "end=End", "--button", "cancel=Cancel", "--destructive", "end", "--default", "cancel",
+		"--target", "row-1", "--socket", testCtlSock}
+	for _, tc := range []struct {
+		name string
+		out  string
+		exit int
+		err  error
+		want bool
+		fail bool
+	}{
+		// The answered shape probed on agterm 0.27 with a real click.
+		{name: "confirmed", out: `{"id":"end","index":0,"result":"answered","label":"End"}`, want: true},
+		{name: "other button", out: `{"id":"cancel","index":1,"result":"answered","label":"Cancel"}`},
+		// ExecRunner reports every non-zero exit with an error as well, so
+		// the cancel and failure rows carry one, as the real runner does.
+		{name: "cancelled", out: `{"result":"cancelled"}`, exit: 2, err: errors.New("exit status 2")},
+		{name: "unknown shape", out: `{"result":"pending","id":"end"}`},
+		{name: "not json", out: `End`, fail: true},
+		{name: "dialog failed", out: `error: no session`, exit: 1, err: errors.New("exit status 1"), fail: true},
+		{name: "exec failed", err: errors.New("no agtermctl"), fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, args...).Return([]byte(tc.out), tc.exit, tc.err)
+			got, err := ctl.Confirm(context.Background(), "row-1", "End a1?", "kills it", "end", "End")
+			if got != tc.want || (err != nil) != tc.fail {
+				t.Fatalf("Confirm() = (%v, %v), want (%v, failure %v)", got, err, tc.want, tc.fail)
+			}
+		})
+	}
+}
+
+func TestCtlCloseRow(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	runner := mocks.NewMockRunner(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, runner, nil, nil)
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "session", "close", "--target", "row-1", "--socket", testCtlSock)
+	if err := ctl.CloseRow(context.Background(), "row-1"); err != nil {
+		t.Fatalf("CloseRow() error = %v", err)
+	}
+}
