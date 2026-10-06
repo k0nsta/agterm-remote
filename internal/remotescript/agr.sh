@@ -9,7 +9,7 @@ have() {
 
 usage() {
 	printf '%s\n' "agr $AGR_VERSION — remote session bridge" >&2
-	printf '%s\n' "usage: agr {attach|sessions|reap|status|--version} ..." >&2
+	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|status|--version} ..." >&2
 	exit "${1:-2}"
 }
 
@@ -168,11 +168,22 @@ tmux_clipboard_override() {
 tmux_attach() {
 	n=$1
 	if ! tmux has-session -t "=$n" 2>/dev/null; then
-		tmux new-session -d -s "$n"
+		if [ -n "$attach_cwd" ]; then
+			# -c is format-expanded: a literal # must be doubled, or a path
+			# like /d/a#{x} lands in $HOME (and #() would run a command).
+			tmux new-session -d -s "$n" -c "$(printf '%s' "$attach_cwd" | sed 's/#/##/g')"
+		else
+			tmux new-session -d -s "$n"
+		fi
 	fi
 	tmux set-option -t "=$n:" @agr 1
+	[ -z "$attach_parent" ] || tmux set-option -t "=$n:" @agr_parent "$attach_parent"
 	tmux_clipboard_override
 	exec tmux attach -t "=$n"
+}
+
+tmux_cwd() {
+	tmux display-message -p -t "=$1:" '#{pane_current_path}' 2>/dev/null || :
 }
 
 tmux_reap() {
@@ -362,7 +373,7 @@ zmx_label_retry() {
 	n=$1
 	i=0
 	while [ "$i" -lt 10 ]; do
-		if zmx set "$n" agr=1 2>/dev/null; then
+		if zmx_set_labels "$n"; then
 			return 0
 		fi
 		i=$((i + 1))
@@ -371,14 +382,56 @@ zmx_label_retry() {
 	return 0
 }
 
+zmx_set_labels() {
+	if [ -n "$attach_parent" ]; then
+		zmx set "$1" agr=1 "agr_parent=$attach_parent" 2>/dev/null
+	else
+		zmx set "$1" agr=1 2>/dev/null
+	fi
+}
+
 zmx_attach() {
 	n=$1
-	zmx set "$n" agr=1 2>/dev/null || true
+	zmx_set_labels "$n" || true
+	# A new zmx session starts its shell in the caller's directory; an
+	# existing one ignores it, which is the re-attach behaviour wanted.
+	[ -z "$attach_cwd" ] || cd "$attach_cwd" 2>/dev/null || :
 	if [ "${AGR_ZMX_LABELS:-0}" = 1 ]; then
+		if [ -n "$attach_parent" ]; then
+			exec zmx attach --labels "agr=1" --labels "agr_parent=$attach_parent" "$n"
+		fi
 		exec zmx attach --labels "agr=1" "$n"
 	fi
 	zmx_label_retry "$n" &
 	exec zmx attach "$n"
+}
+
+zmx_line() {
+	list=$(zmx list 2>/dev/null || :)
+	tab=$(printf '\t')
+	while IFS= read -r line; do
+		line=${line#'→ '}
+		name=${line%%"$tab"*}
+		if [ "${name#name=}" = "$1" ]; then
+			printf '%s\n' "$line"
+			return 0
+		fi
+	done <<EOF
+$list
+EOF
+	return 1
+}
+
+# zmx reports the pid of the process that owns the session; the shell it
+# started is its first child. /proc is Linux-only, so elsewhere this prints
+# nothing and the caller falls back to the remote home.
+zmx_cwd() {
+	line=$(zmx_line "$1") || return 0
+	pid=$(zmx_value "$line" pid 2>/dev/null || :)
+	case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+	shell=$(pgrep -P "$pid" 2>/dev/null | sed -n '1p' || :)
+	[ -n "$shell" ] || shell=$pid
+	readlink "/proc/$shell/cwd" 2>/dev/null || :
 }
 
 zmx_reap() {
@@ -409,17 +462,60 @@ zmx_status() {
 	exit 0
 }
 
+attach_cwd=
+attach_parent=
+
+# attach's options follow the session name. An unusable directory is dropped
+# rather than refused: the attach matters more than where a new session starts.
+parse_attach_options() {
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--cwd)
+				[ "$#" -ge 2 ] || usage 2
+				case "$2" in
+					/*) [ ! -d "$2" ] || attach_cwd=$2 ;;
+				esac
+				shift 2
+				;;
+			--parent)
+				[ "$#" -ge 2 ] || usage 2
+				valid_token "$2" || { printf '%s\n' 'agr: invalid parent name' >&2; exit 2; }
+				attach_parent=$2
+				shift 2
+				;;
+			*) usage 2 ;;
+		esac
+	done
+}
+
 dispatch() {
 	sub=${1:-}
 	shift || :
 	case "$sub" in
 		attach)
+			[ "$#" -ge 1 ] || usage 2
+			valid_token "$1" || { printf '%s\n' 'agr: invalid session name' >&2; exit 2; }
+			n=$1
+			shift
+			parse_attach_options "$@"
+			case "$AGR_MUX" in
+				tmux) tmux_attach "$n" ;;
+				zmx) zmx_attach "$n" ;;
+				*) printf 'agr: unsupported multiplexer %s\n' "$AGR_MUX" >&2; exit 2 ;;
+			esac
+			;;
+		cwd)
 			[ "$#" -eq 1 ] || usage 2
 			valid_token "$1" || { printf '%s\n' 'agr: invalid session name' >&2; exit 2; }
+			header
 			case "$AGR_MUX" in
-				tmux) tmux_attach "$1" ;;
-				zmx) zmx_attach "$1" ;;
+				tmux) dir=$(tmux_cwd "$1") ;;
+				zmx) dir=$(zmx_cwd "$1") ;;
 				*) printf 'agr: unsupported multiplexer %s\n' "$AGR_MUX" >&2; exit 2 ;;
+			esac
+			case "$dir" in
+				/*) printf '%s\n' "$dir" ;;
+				*) printf '\n' ;;
 			esac
 			;;
 		sessions)

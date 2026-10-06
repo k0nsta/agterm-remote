@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/cli"
@@ -16,7 +17,8 @@ const usage = "usage: agr <command> [args...]"
 const help = `usage: agr <command> [args...]
 
 Commands:
-  open <host> [name]       Attach to a remote session; without name, use the picker
+  open <host> [name] [--cwd <dir>] [--parent <name>]
+                          Attach to a remote session; without name, use the picker
   ls <host>                List agr-owned remote sessions
   kill <host> <name>…      Kill one or more agr-owned remote sessions
   up <host>                Start the host's status bridge
@@ -45,6 +47,9 @@ var commandHandlers = map[string]commandHandler{
 	"install": runInstall,
 	"daemon":  runDaemon,
 	"doctor":  runDoctor,
+	// Hook entry points, run by agterm's hooks.conf rather than by hand, so
+	// they stay out of --help.
+	"on-split": runOnSplit,
 }
 
 func runWithApplication(args []string, out, errw io.Writer, app *application) int {
@@ -72,12 +77,52 @@ func runWithApplication(args []string, out, errw io.Writer, app *application) in
 	return 2
 }
 
-func runOpen(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
-	if len(args) < 1 || len(args) > 2 {
-		_, _ = fmt.Fprintln(errw, "usage: agr open <host> [name]")
+func runOnSplit(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
+	return runPaneHook(ctx, app, args, errw, "on-split", cli.OnSplit)
+}
+
+// runPaneHook reads the event from agterm's hook environment and reports a
+// failure to the hook log as well as stderr: agterm runs hooks detached, so
+// stderr alone reaches no one.
+func runPaneHook(ctx context.Context, app *application, args []string, errw io.Writer, verb string,
+	hook func(context.Context, string, string, cli.PaneHookDependencies) error) int {
+	if len(args) != 0 {
+		_, _ = fmt.Fprintf(errw, "usage: agr %s (run from an agterm hook)\n", verb)
 		return 2
 	}
-	return cli.RunOpen(ctx, args[0], optionalArg(args, 1), cli.OpenDependencies{
+	row, status := cli.HookEvent(hookStdin(), os.Getenv)
+	if status != "shown" && status != "hidden" {
+		// Not a pane event this hook understands: say so, or a mismatch with
+		// agterm's event shape would look exactly like a quiet no-op.
+		app.logHookFailure(verb, fmt.Errorf("ignored event row=%q status=%q", row, status))
+		return 0
+	}
+	deps := app.paneHooks()
+	if err := hook(ctx, row, status, deps); err != nil {
+		_, _ = fmt.Fprintf(errw, "agr: %s: %v\n", verb, err)
+		app.logHookFailure(verb, err)
+		return 1
+	}
+	return 0
+}
+
+// hookStdin is the event agterm pipes to a hook, or nil when stdin is a
+// terminal (run by hand), where reading would block.
+func hookStdin() io.Reader {
+	info, err := os.Stdin.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice != 0 {
+		return nil
+	}
+	return os.Stdin
+}
+
+func runOpen(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
+	positional, opts, ok := parseOpenArgs(args)
+	if !ok || len(positional) < 1 || len(positional) > 2 {
+		_, _ = fmt.Fprintln(errw, "usage: agr open <host> [name] [--cwd <dir>] [--parent <name>]")
+		return 2
+	}
+	return cli.RunOpen(ctx, positional[0], optionalArg(positional, 1), opts, cli.OpenDependencies{
 		Dirs: app.dirs, Remote: app.openRemote, Picker: app.picker, Rows: app.rows,
 		Store: app.store, Bridge: app.bridge, Labeler: app.labeler,
 		HostInfo: app.hostInfo, TTY: app.tty, Out: out, ErrOut: errw, MoshPath: app.moshPath,
@@ -159,6 +204,33 @@ func runDoctor(ctx context.Context, app *application, args []string, out, errw i
 		deps.SocketPath = agterm.SocketPath()
 	}
 	return cli.RunDoctor(ctx, args[0], deps, out, errw)
+}
+
+// parseOpenArgs splits open's positionals from its two valued flags, which
+// may appear anywhere after the verb. A flag without a value, or repeated,
+// is a usage error.
+func parseOpenArgs(args []string) ([]string, cli.OpenOptions, bool) {
+	var positional []string
+	var opts cli.OpenOptions
+	seen := map[string]bool{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--cwd", "--parent":
+			if i+1 >= len(args) || seen[args[i]] {
+				return nil, cli.OpenOptions{}, false
+			}
+			seen[args[i]] = true
+			if args[i] == "--cwd" {
+				opts.Cwd = args[i+1]
+			} else {
+				opts.Parent = args[i+1]
+			}
+			i++
+		default:
+			positional = append(positional, args[i])
+		}
+	}
+	return positional, opts, true
 }
 
 func optionalArg(args []string, index int) string {

@@ -70,3 +70,39 @@ func TestRunWithoutArguments(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", got)
 	}
 }
+
+func TestParseOpenArgs(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		args       []string
+		positional []string
+		cwd        string
+		parent     string
+		ok         bool
+	}{
+		{args: []string{"host"}, positional: []string{"host"}, ok: true},
+		{args: []string{"host", "a1-2", "--cwd", "/srv/x y", "--parent", "a1"}, positional: []string{"host", "a1-2"}, cwd: "/srv/x y", parent: "a1", ok: true},
+		{args: []string{"--parent", "a1", "host", "a1-2"}, positional: []string{"host", "a1-2"}, parent: "a1", ok: true},
+		{args: []string{"host", "--cwd"}},
+		{args: []string{"host", "--cwd", "/a", "--cwd", "/b"}},
+	} {
+		positional, opts, ok := parseOpenArgs(tc.args)
+		if ok != tc.ok || (ok && (len(positional) != len(tc.positional) || opts.Cwd != tc.cwd || opts.Parent != tc.parent)) {
+			t.Errorf("parseOpenArgs(%q) = (%q, %+v, %v)", tc.args, positional, opts, ok)
+			continue
+		}
+		for i := range positional {
+			if positional[i] != tc.positional[i] {
+				t.Errorf("parseOpenArgs(%q) positional = %q, want %q", tc.args, positional, tc.positional)
+			}
+		}
+	}
+}
+
+func TestOnSplitRejectsArguments(t *testing.T) {
+	t.Helper()
+	var out, errw bytes.Buffer
+	if got := runWithApplication([]string{"on-split", "x"}, &out, &errw, &application{}); got != 2 {
+		t.Fatalf("run(on-split x) exit = %d, want 2", got)
+	}
+}

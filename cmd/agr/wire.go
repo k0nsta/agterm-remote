@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/bridge"
 	"github.com/k0nsta/agterm-remote/internal/cli"
 	"github.com/k0nsta/agterm-remote/internal/daemon"
+	"github.com/k0nsta/agterm-remote/internal/handled"
 	"github.com/k0nsta/agterm-remote/internal/paths"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
@@ -28,6 +30,7 @@ type application struct {
 	labeler    cli.Labeler
 	installer  cli.Installer
 	openRemote cli.OpenerRemote
+	cwd        cli.RemoteCwd
 	hostInfo   cli.HostInfoReader
 	moshPath   func() string
 	doctor     cli.DoctorDependencies
@@ -48,6 +51,34 @@ func (bridgeFactory) New(host, hostKey, remoteSock, localSock string) daemon.Sup
 	return bridge.New(host, hostKey, remoteSock, localSock, &bridge.ExecRunner{})
 }
 
+// paneHooks wires the pane-hook dependencies. The control client is the
+// application's own: SocketPath already falls back to the AGT_SOCKET agterm
+// hands a hook.
+func (a *application) paneHooks() cli.PaneHookDependencies {
+	ctl := a.control
+	if ctl == nil {
+		ctl = agterm.NewCtl("", "", nil, nil, nil)
+	}
+	self, err := os.Executable()
+	if err != nil || self == "" {
+		self = "agr"
+	}
+	return cli.PaneHookDependencies{
+		Panes: ctl, Store: a.store, Remote: a.cwd, Handled: handled.New(a.dirs.Handled()), Agr: self,
+	}
+}
+
+// logHookFailure appends one line to the hook log; a failure to log is
+// dropped, there is nowhere left to report it.
+func (a *application) logHookFailure(verb string, failure error) {
+	file, err := os.OpenFile(a.dirs.HookLog(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = file.Close() }()
+	_, _ = fmt.Fprintf(file, "%s %s: %v\n", time.Now().UTC().Format(time.RFC3339), verb, failure)
+}
+
 func newApplication() *application {
 	dirs := paths.New()
 	ctlPath := agterm.CtlPath()
@@ -61,7 +92,7 @@ func newApplication() *application {
 	app := &application{
 		dirs: dirs, control: control, status: status, remote: remoteRunner,
 		tty: &remote.ExecTTY{}, store: store, bridge: client,
-		installer: remoteRunner, openRemote: remoteRunner,
+		installer: remoteRunner, openRemote: remoteRunner, cwd: remoteRunner,
 		doctor: cli.DoctorDependencies{
 			LocalVersion: version, SocketPath: sockPath, AppVersion: status,
 			Agterm: control, CtlPath: ctlPath, Remote: remoteRunner, Daemon: client,
@@ -97,6 +128,9 @@ var (
 	_ cli.Picker                              = (*agterm.Ctl)(nil)
 	_ cli.Rows                                = (*agterm.Ctl)(nil)
 	_ cli.Labeler                             = (*agterm.Ctl)(nil)
+	_ cli.Panes                               = (*agterm.Ctl)(nil)
+	_ cli.RemoteCwd                           = (*remote.Runner)(nil)
+	_ cli.HandledPanes                        = (*handled.Store)(nil)
 	_ cli.Sessions                            = (*remote.Runner)(nil)
 	_ cli.Installer                           = (*remote.Runner)(nil)
 	_ cli.Versioner                           = (*agterm.Client)(nil)

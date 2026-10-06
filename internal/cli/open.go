@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
@@ -36,13 +37,21 @@ type OpenDependencies struct {
 	Reset    func(io.Writer)
 }
 
+// OpenOptions are where a new remote session starts and which session it
+// belongs to. Both only reach a remote that knows them (the cwd verb's era):
+// an older attach refuses any argument after the name.
+type OpenOptions struct {
+	Cwd    string
+	Parent string
+}
+
 // ErrPickerUnavailable means the caller asked for picker-based open but
 // agtermctl is not available. Open has already rendered ls and its usage.
 var ErrPickerUnavailable = errors.New("picker unavailable")
 
 // Open attaches to a remote agr session, optionally adopting the current
 // agterm row. A blank name invokes the native picker before any side effects.
-func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
+func Open(ctx context.Context, host, name string, opts OpenOptions, deps OpenDependencies) error {
 	deps.Store = storeOrNil(deps.Store)
 	if ctx == nil {
 		return errors.New("nil open context")
@@ -68,6 +77,12 @@ func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
 	}
 	if !token.Valid(name) {
 		return fmt.Errorf("invalid name %q (use [A-Za-z0-9_.-])", name)
+	}
+	if opts.Parent != "" && !token.Valid(opts.Parent) {
+		return fmt.Errorf("invalid parent %q (use [A-Za-z0-9_.-])", opts.Parent)
+	}
+	if opts.Cwd != "" && !strings.HasPrefix(opts.Cwd, "/") {
+		return fmt.Errorf("invalid --cwd %q (must be absolute)", opts.Cwd)
 	}
 	if deps.Remote == nil {
 		return errors.New("remote runner is unavailable")
@@ -126,7 +141,9 @@ func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
 		return fmt.Errorf("bring bridge up: %w", err)
 	}
 
-	if row != "" && deps.Labeler != nil {
+	// A parented open is a side-pane session inside a row that already names
+	// its parent: relabelling would rename the whole row after the child.
+	if row != "" && deps.Labeler != nil && opts.Parent == "" {
 		if err := deps.Labeler.Rename(ctx, row, name); err != nil {
 			_, _ = fmt.Fprintf(errout, "agr: rename %s: %v\n", row, err)
 		}
@@ -139,11 +156,12 @@ func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
 	// the remote argv has to be quoted here the same way ExecSSH.Run quotes
 	// it — a home like `/srv/user data` or one containing `;` would otherwise
 	// break the attach or execute as a separate remote command.
-	argv := []string{"ssh", "-t", host, "--", remote.QuoteRemoteCommand(agrPath, "attach", name)}
+	remoteArgv := attachArgv(agrPath, name, opts)
+	argv := []string{"ssh", "-t", host, "--", remote.QuoteRemoteCommand(remoteArgv...)}
 	if info.Mosh && localMoshPath(deps) != "" {
 		// mosh-server execs argv directly — no remote shell — so these stay
 		// separate and unquoted.
-		argv = []string{"mosh", host, "--", agrPath, "attach", name}
+		argv = append([]string{"mosh", host, "--"}, remoteArgv...)
 	}
 	if isTerminalWriter(out) {
 		reset := deps.Reset
@@ -156,6 +174,17 @@ func Open(ctx context.Context, host, name string, deps OpenDependencies) error {
 		return err
 	}
 	return nil
+}
+
+func attachArgv(agrPath, name string, opts OpenOptions) []string {
+	argv := []string{agrPath, "attach", name}
+	if opts.Cwd != "" {
+		argv = append(argv, "--cwd", opts.Cwd)
+	}
+	if opts.Parent != "" {
+		argv = append(argv, "--parent", opts.Parent)
+	}
+	return argv
 }
 
 func chooseOpenName(ctx context.Context, host string, deps OpenDependencies, out, errout io.Writer) (string, error) {
@@ -236,9 +265,9 @@ func resetTerminal(writer io.Writer) {
 }
 
 // RunOpen adapts Open to agr's integer-exit CLI convention.
-func RunOpen(ctx context.Context, host, name string, deps OpenDependencies, errw io.Writer) int {
+func RunOpen(ctx context.Context, host, name string, opts OpenOptions, deps OpenDependencies, errw io.Writer) int {
 	deps.ErrOut = errw
-	if err := Open(ctx, host, name, deps); err != nil {
+	if err := Open(ctx, host, name, opts, deps); err != nil {
 		if errors.Is(err, agterm.ErrCancelled) {
 			return 1
 		}

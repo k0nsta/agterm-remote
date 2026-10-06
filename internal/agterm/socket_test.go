@@ -16,18 +16,24 @@ func TestSocketPathPrecedence(t *testing.T) {
 		control string
 		agterm  string
 		state   string
+		hook    string
 		want    string
 	}{
 		{name: "control socket", control: "/run/control.sock", agterm: "/run/agterm.sock", state: "/run/state", want: "/run/control.sock"},
 		{name: "agterm socket", agterm: "/run/agterm.sock", state: "/run/state", want: "/run/agterm.sock"},
+		{name: "agterm socket beats hook socket", agterm: "/run/agterm.sock", hook: "/run/hook.sock", want: "/run/agterm.sock"},
+		{name: "hook socket", hook: "/run/hook.sock", state: "/run/state", want: "/run/hook.sock"},
 		{name: "state directory", state: "/run/state", want: "/run/state/agterm.sock"},
 		{name: "default", want: filepath.Join("/tmp/agr-home", "Library", "Application Support", "agterm", "agterm.sock")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Helper()
-			for _, key := range []string{"AGTERM_CONTROL_SOCKET", "AGTERM_SOCKET", "AGTERM_STATE_DIR"} {
+			for _, key := range []string{"AGTERM_CONTROL_SOCKET", "AGTERM_SOCKET", "AGT_SOCKET", "AGTERM_STATE_DIR"} {
 				t.Setenv(key, "")
+			}
+			if tt.hook != "" {
+				t.Setenv("AGT_SOCKET", tt.hook)
 			}
 			if tt.control != "" {
 				t.Setenv("AGTERM_CONTROL_SOCKET", tt.control)
@@ -50,6 +56,7 @@ func TestSocketPathUsesExplicitStateSocket(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("AGTERM_CONTROL_SOCKET", "")
 	t.Setenv("AGTERM_SOCKET", "")
+	t.Setenv("AGT_SOCKET", "")
 	t.Setenv("AGTERM_STATE_DIR", stateDir)
 	got := agterm.SocketPath()
 	if want := filepath.Join(stateDir, "agterm.sock"); got != want {

@@ -145,6 +145,7 @@ $2"; else labels=$2; fi
 		done
 		name=$1
 		create_session "$name"
+		printf 'attach-cwd %s %s\n' "$name" "$(pwd)" >> "$calls"
 		if [ -n "$labels" ]; then
 			while IFS= read -r label; do
 				[ -n "$label" ] || continue

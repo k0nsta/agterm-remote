@@ -133,7 +133,12 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 			}
 		}},
 		{name: "doctor", argv: []string{"doctor", "host"}, want: 1, check: func(t *testing.T) {}},
+		// A hidden split is the hook's no-op branch: it proves dispatch without
+		// reaching agterm.
+		{name: "on-split", argv: []string{"on-split"}, want: 0, check: func(t *testing.T) {}},
 	}
+	t.Setenv("AGT_SESSION_ID", "row-1")
+	t.Setenv("AGT_EVENT_STATUS", "hidden")
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Helper()
@@ -145,7 +150,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		})
 	}
 
-	if got, want := len(commandHandlers), 8; got != want {
+	if got, want := len(commandHandlers), 9; got != want {
 		t.Fatalf("registered command count = %d, want %d", got, want)
 	}
 }

@@ -168,6 +168,70 @@ func restoreModeValue(value any) string {
 
 // Tree returns the ids of all live agterm rows.
 func (c *Ctl) Tree(ctx context.Context) ([]string, error) {
+	sessions, err := c.treeSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		rows = append(rows, session.ID)
+	}
+	return rows, nil
+}
+
+// Surface is one terminal of an agterm row: its left/right (or top/bottom)
+// split pane, or its scratch. A hidden pane is still listed, with Visible
+// false; a pane whose process exited is not.
+type Surface struct {
+	Kind    string `json:"kind"`
+	PaneID  string `json:"paneID"`
+	Visible bool   `json:"visible"`
+}
+
+// Surfaces returns every live row's surfaces, keyed by row id.
+func (c *Ctl) Surfaces(ctx context.Context) (map[string][]Surface, error) {
+	sessions, err := c.treeSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]Surface, len(sessions))
+	for _, session := range sessions {
+		result[session.ID] = session.Surfaces
+	}
+	return result, nil
+}
+
+// PaneText returns the visible screen of one pane.
+func (c *Ctl) PaneText(ctx context.Context, row, paneID string) (string, error) {
+	out, exit, err := c.out.Output(ctx, nil, c.path, "session", "text", "--target", row, "--pane-id", paneID, "--socket", c.sock)
+	if err != nil || exit != 0 {
+		if err == nil {
+			err = fmt.Errorf("command exited with status %d", exit)
+		}
+		return "", commandError("session text", out, exit, err)
+	}
+	return string(out), nil
+}
+
+// TypeLine types text into one pane followed by a newline, which runs it at a
+// shell prompt. It goes through stdin so the text is never an agtermctl flag.
+func (c *Ctl) TypeLine(ctx context.Context, row, paneID, text string) error {
+	out, exit, err := c.out.Output(ctx, []byte(text+"\n"), c.path, "session", "type", "--stdin", "--target", row, "--pane-id", paneID, "--socket", c.sock)
+	if err != nil || exit != 0 {
+		if err == nil {
+			err = fmt.Errorf("command exited with status %d", exit)
+		}
+		return commandError("session type", out, exit, err)
+	}
+	return nil
+}
+
+type treeSession struct {
+	ID       string    `json:"id"`
+	Surfaces []Surface `json:"surfaces"`
+}
+
+func (c *Ctl) treeSessions(ctx context.Context) ([]treeSession, error) {
 	out, exit, err := c.out.Output(ctx, nil, c.path, "tree", "--json", "--socket", c.sock)
 	if err != nil || exit != 0 {
 		if err == nil {
@@ -180,9 +244,7 @@ func (c *Ctl) Tree(ctx context.Context) ([]string, error) {
 		Result *struct {
 			Tree *struct {
 				Workspaces []struct {
-					Sessions []struct {
-						ID string `json:"id"`
-					} `json:"sessions"`
+					Sessions []treeSession `json:"sessions"`
 				} `json:"workspaces"`
 			} `json:"tree"`
 		} `json:"result"`
@@ -194,15 +256,15 @@ func (c *Ctl) Tree(ctx context.Context) ([]string, error) {
 		return nil, errors.New("decode agterm tree: missing result.tree")
 	}
 
-	rows := make([]string, 0)
+	sessions := make([]treeSession, 0)
 	for _, workspace := range response.Result.Tree.Workspaces {
 		for _, session := range workspace.Sessions {
 			if session.ID != "" {
-				rows = append(rows, session.ID)
+				sessions = append(sessions, session)
 			}
 		}
 	}
-	return rows, nil
+	return sessions, nil
 }
 
 // PickItem is one row offered to agterm's native picker.

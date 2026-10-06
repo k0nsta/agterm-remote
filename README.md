@@ -27,7 +27,8 @@ The complete Mac-side command list is:
 usage: agr <command> [args...]
 
 Commands:
-  open <host> [name]       Attach to a remote session; without name, use the picker
+  open <host> [name] [--cwd <dir>] [--parent <name>]
+                          Attach to a remote session; without name, use the picker
   ls <host>                List agr-owned remote sessions
   kill <host> <name>…      Kill one or more agr-owned remote sessions
   up <host>                Start the host's status bridge
@@ -103,6 +104,29 @@ agr doctor homelab
 `agr ls` reports the remote command and the elapsed age of its last event.
 The `ROW` value is live only when agterm's tree can be queried; otherwise it
 is shown as `-`.
+
+## agterm keys on a remote row
+
+agterm's own keys can follow a row's remote host (verified on agterm 0.35:
+the pane hooks and pane tokens they rely on are recent). Add this line to
+`~/.config/agterm/hooks.conf` and reload hooks (File ▸ Reload Hooks):
+
+```text
+on pane.split  $HOME/go/bin/agr on-split
+```
+
+On a row whose left pane holds `agr open <host> a1`, ⌘D then opens
+`agr open <host> a1-2` in the new pane: a second agr session on the same host,
+recorded as a child of `a1` and started in `a1`'s current remote directory.
+Hiding and re-showing the split does not open it again, a pane you already
+bound is left alone, and on a local row ⌘D stays a plain local split. The
+directory needs the remote script from `agr install <host>` of this version;
+an older one still gets `a1-2`, in the remote home. Hook failures are
+appended to `~/.cache/agr/hooks.log`.
+
+The directory comes from tmux (`pane_current_path`) or, under zmx, from the
+session shell's `/proc/<pid>/cwd` — Linux hosts only; elsewhere the new
+session starts in the remote home.
 
 ## agterm versions
 

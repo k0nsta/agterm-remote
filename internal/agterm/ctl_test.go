@@ -324,3 +324,51 @@ func TestPickItemJSONTags(t *testing.T) {
 		t.Fatalf("marshal PickItem = %s, want %s", got, want)
 	}
 }
+
+func TestCtlSurfacesDecodesPanesPerRow(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	tree := `{"result":{"tree":{"workspaces":[{"sessions":[
+		{"id":"row-1","surfaces":[{"kind":"left","paneID":"L","visible":true,"active":false},
+			{"kind":"right","paneID":"R","visible":true},{"kind":"scratch","paneID":"S","visible":false}]},
+		{"id":"row-2"}]}]}}}`
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return([]byte(tree), 0, nil)
+	got, err := ctl.Surfaces(context.Background())
+	if err != nil {
+		t.Fatalf("Surfaces() error = %v", err)
+	}
+	want := []agterm.Surface{{Kind: "left", PaneID: "L", Visible: true}, {Kind: "right", PaneID: "R", Visible: true}, {Kind: "scratch", PaneID: "S"}}
+	if len(got["row-1"]) != 3 || got["row-1"][0] != want[0] || got["row-1"][1] != want[1] || got["row-1"][2] != want[2] {
+		t.Fatalf("Surfaces()[row-1] = %#v, want %#v", got["row-1"], want)
+	}
+	if surfaces, ok := got["row-2"]; !ok || len(surfaces) != 0 {
+		t.Fatalf("Surfaces()[row-2] = %#v, %v; want present and empty", surfaces, ok)
+	}
+}
+
+func TestCtlPaneTextAndTypeLineTargetThePaneByID(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	ctx := context.Background()
+
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "session", "text", "--target", "row-1", "--pane-id", "P", "--socket", testCtlSock).
+		Return([]byte("$ \n"), 0, nil)
+	if text, err := ctl.PaneText(ctx, "row-1", "P"); err != nil || text != "$ \n" {
+		t.Fatalf("PaneText() = (%q, %v)", text, err)
+	}
+	outputter.EXPECT().Output(gomock.Any(), []byte("--help\n"), testCtlPath, "session", "type", "--stdin", "--target", "row-1", "--pane-id", "P", "--socket", testCtlSock).
+		Return(nil, 0, nil)
+	if err := ctl.TypeLine(ctx, "row-1", "P", "--help"); err != nil {
+		t.Fatalf("TypeLine() error = %v", err)
+	}
+	outputter.EXPECT().Output(gomock.Any(), gomock.Any(), testCtlPath, "session", "type", "--stdin", "--target", "row-1", "--pane-id", "gone", "--socket", testCtlSock).
+		Return([]byte("error: unknown pane"), 1, nil)
+	if err := ctl.TypeLine(ctx, "row-1", "gone", "x"); err == nil || !strings.Contains(err.Error(), "unknown pane") {
+		t.Fatalf("TypeLine() error = %v, want the agtermctl refusal", err)
+	}
+}

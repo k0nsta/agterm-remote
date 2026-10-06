@@ -79,6 +79,23 @@ type Bridge interface {
 	Down(ctx context.Context, host string) error
 }
 
+// Panes reads agterm's panes and types into one.
+type Panes interface {
+	Surfaces(ctx context.Context) (map[string][]agterm.Surface, error)
+	PaneText(ctx context.Context, row, paneID string) (string, error)
+	TypeLine(ctx context.Context, row, paneID, text string) error
+}
+
+// RemoteCwd reads a remote session's current directory.
+type RemoteCwd interface {
+	Cwd(ctx context.Context, host, name string) (string, error)
+}
+
+// HandledPanes records the panes a hook has already acted on.
+type HandledPanes interface {
+	Claim(paneID string, live []string) (bool, error)
+}
+
 // BindingStore is the slice of the binding store the CLI uses: the listing
 // reads it, and open records the binding it just made.
 type BindingStore interface {
