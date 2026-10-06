@@ -68,10 +68,14 @@ func (f *dispatchDaemonFake) Run(context.Context) error {
 	return f.err
 }
 
-type dispatchTTYFake struct{ calls int }
+type dispatchTTYFake struct {
+	calls int
+	argv  []string
+}
 
-func (f *dispatchTTYFake) Interactive(context.Context, ...string) error {
+func (f *dispatchTTYFake) Interactive(_ context.Context, argv ...string) error {
 	f.calls++
+	f.argv = append([]string(nil), argv...)
 	return nil
 }
 
@@ -136,6 +140,14 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		// A hidden split is the hook's no-op branch: it proves dispatch without
 		// reaching agterm.
 		{name: "on-split", argv: []string{"on-split"}, want: 0, check: func(t *testing.T) {}},
+		{name: "on-scratch", argv: []string{"on-scratch"}, want: 0, check: func(t *testing.T) {}},
+		{name: "shell", argv: []string{"shell", "host", "--cwd", "/srv"}, want: 0, check: func(t *testing.T) {
+			// The fake is shared across subtests; check what shell sent, not a
+			// count that depends on which subtests ran before it.
+			if len(tty.argv) < 1 || tty.argv[0] != "ssh" || !strings.Contains(strings.Join(tty.argv, " "), "'/srv'") {
+				t.Fatalf("TTY argv = %q, want the shell's ssh into /srv", tty.argv)
+			}
+		}},
 	}
 	t.Setenv("AGT_SESSION_ID", "row-1")
 	t.Setenv("AGT_EVENT_STATUS", "hidden")
@@ -150,7 +162,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		})
 	}
 
-	if got, want := len(commandHandlers), 9; got != want {
+	if got, want := len(commandHandlers), 11; got != want {
 		t.Fatalf("registered command count = %d, want %d", got, want)
 	}
 }
