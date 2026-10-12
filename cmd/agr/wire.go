@@ -17,6 +17,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/handled"
 	"github.com/k0nsta/agterm-remote/internal/paths"
 	"github.com/k0nsta/agterm-remote/internal/remote"
+	"golang.org/x/term"
 )
 
 type application struct {
@@ -91,7 +92,8 @@ func (a *application) setup(out io.Writer, endKey string) cli.SetupDependencies 
 	if a.control != nil && agterm.CtlPath() != "" {
 		deps.Config = a.control
 	}
-	if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+	// /dev/null is a character device too, so ask the terminal itself.
+	if term.IsTerminal(int(os.Stdin.Fd())) {
 		deps.AskKey = func() (string, error) {
 			_, _ = fmt.Fprint(out, "Key for End remote session (e.g. ctrl+a>x, Enter for none): ")
 			answer, err := bufio.NewReader(os.Stdin).ReadString('\n')

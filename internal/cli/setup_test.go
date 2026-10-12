@@ -40,6 +40,25 @@ func TestWireHooks(t *testing.T) {
 				"on pane.scratch  " + testAgr + " on-scratch   # remote shell\n",
 		},
 		{
+			name: "double-quoted lines are repointed in place",
+			in: `on pane.split    "$HOME/go/bin/agr" on-split` + "\n" +
+				`on pane.scratch  "$HOME/go/bin/agr" on-scratch` + "\n",
+			want: "on pane.split    " + testAgr + " on-split\n" +
+				"on pane.scratch  " + testAgr + " on-scratch\n",
+		},
+		{
+			name: "the duplicates a 1.1.0 run appended are removed with their note",
+			in: "# my hooks\n" +
+				`on pane.split    "$HOME/go/bin/agr" on-split` + "\n" +
+				`on pane.scratch  "$HOME/go/bin/agr" on-scratch` + "\n" +
+				"\n" + hooksNote + "\n" +
+				"on pane.split     '/Users/me/.local/bin/agr' on-split\n" +
+				"on pane.scratch   '/Users/me/.local/bin/agr' on-scratch\n",
+			want: "# my hooks\n" +
+				"on pane.split    " + testAgr + " on-split\n" +
+				"on pane.scratch  " + testAgr + " on-scratch\n",
+		},
+		{
 			name: "a missing line is appended after a blank",
 			in:   "on pane.split '/old path/agr' on-split",
 			want: "on pane.split " + testAgr + " on-split\n" +
@@ -102,6 +121,28 @@ func TestWireKeymap(t *testing.T) {
 			name: "an existing command keeps its name, chord and options",
 			in:   `command "Finish" cmd+shift+e --error-hud $HOME/go/bin/agr end "{AGT_SESSION_ID}"` + "\n",
 			want: `command "Finish" cmd+shift+e --error-hud ` + end + "\n",
+		},
+		{
+			name: "a double-quoted agr is repointed, not duplicated",
+			in:   `command "End remote session" ctrl+a>x --error-hud "$HOME/go/bin/agr" end "{AGT_SESSION_ID}"` + "\n",
+			want: `command "End remote session" ctrl+a>x --error-hud ` + end + "\n",
+		},
+		{
+			name: "the duplicate a 1.1.0 run appended is removed with its note",
+			in: "map cmd+k clear\n" +
+				`command "End remote session" ctrl+a>x --error-hud "$HOME/go/bin/agr" end "{AGT_SESSION_ID}"` + "\n" +
+				"\n" + keymapNote + "\n" +
+				`command "End remote session" --error-hud '/Users/me/.local/bin/agr' end "{AGT_SESSION_ID}"` + "\n",
+			want: "map cmd+k clear\n" +
+				`command "End remote session" ctrl+a>x --error-hud ` + end + "\n",
+		},
+		{
+			name: "a repeat's chord moves to a first command without one",
+			in: `command "End remote session" --error-hud agr end "{AGT_SESSION_ID}"` + "\n" +
+				"map cmd+k clear\n" +
+				`command "End remote session" ctrl+a>x agr end "{AGT_SESSION_ID}"` + "\n",
+			want: `command "End remote session" ctrl+a>x --error-hud ` + end + "\n" +
+				"map cmd+k clear\n",
 		},
 		{
 			name: "a key rebinds an existing chord",
