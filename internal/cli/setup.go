@@ -134,14 +134,15 @@ func RunSetup(ctx context.Context, deps SetupDependencies, errw io.Writer) int {
 var confToken = regexp.MustCompile(`'[^']*'|"[^"]*"|\S+`)
 
 // isAgr reports whether a config word names an agr binary, however it is
-// spelled: bare, $HOME-relative, absolute or single-quoted.
+// spelled: bare, $HOME-relative, absolute, single- or double-quoted.
 func isAgr(word string) bool {
-	return path.Base(strings.Trim(word, "'")) == "agr"
+	return path.Base(strings.Trim(word, `'"`)) == "agr"
 }
 
 // wireHooks points every `on pane.split|pane.scratch <agr> on-split|on-scratch`
 // line at agr, drops a repeat of one (agterm reports an identical line as a
-// problem), and appends whichever of the two is missing.
+// problem) with the note an earlier run put above it, and appends whichever
+// of the two is missing.
 func wireHooks(content, agr string) string {
 	lines := splitLines(content)
 	seen := map[string]bool{}
@@ -153,6 +154,7 @@ func wireHooks(content, agr string) string {
 			(len(spans) == 4 || strings.HasPrefix(word(line, spans[4]), "#")) {
 			kind := word(line, spans[1])
 			if seen[kind] {
+				kept = dropNote(kept, hooksNote)
 				continue
 			}
 			seen[kind] = true
@@ -193,10 +195,26 @@ func endKey(keymapPath string, deps SetupDependencies) (string, error) {
 
 // wireKeymap points the custom command that runs `<agr> end` at agr, keeping
 // its name and options, and binds it to key when one is given; with no such
-// command it appends End remote session, bound to key or to nothing.
+// command it appends End remote session, bound to key or to nothing. A later
+// command running agr end is dropped with its note (agterm rejects a repeated
+// name); its chord moves to the first when that has none.
 func wireKeymap(content, agr, key string) string {
 	lines := splitLines(content)
 	i := endCommandLine(lines)
+	if i >= 0 {
+		kept := lines[:i+1]
+		for _, line := range lines[i+1:] {
+			if agrWord(line, confToken.FindAllStringIndex(line, -1)) < 0 {
+				kept = append(kept, line)
+				continue
+			}
+			if key == "" && endChord(lines[i]) == "" {
+				key = endChord(line)
+			}
+			kept = dropNote(kept, keymapNote)
+		}
+		lines = kept
+	}
 	if i < 0 {
 		line := "command " + endName
 		if key != "" {
@@ -249,11 +267,29 @@ func agrWord(line string, spans [][]int) int {
 func keymapHasKey(name string) bool {
 	lines := splitLines(readConf(name))
 	i := endCommandLine(lines)
-	if i < 0 {
-		return false
+	return i >= 0 && endChord(lines[i]) != ""
+}
+
+// endChord is the chord of a command line running agr end, or empty.
+func endChord(line string) string {
+	spans := confToken.FindAllStringIndex(line, -1)
+	if agrWord(line, spans) > 2 && !strings.HasPrefix(word(line, spans[2]), "-") {
+		return word(line, spans[2])
 	}
-	spans := confToken.FindAllStringIndex(lines[i], -1)
-	return agrWord(lines[i], spans) > 2 && !strings.HasPrefix(word(lines[i], spans[2]), "-")
+	return ""
+}
+
+// dropNote removes a trailing note setup wrote, and the blank line it put
+// before it, from kept.
+func dropNote(kept []string, note string) []string {
+	if len(kept) == 0 || kept[len(kept)-1] != note {
+		return kept
+	}
+	kept = kept[:len(kept)-1]
+	if len(kept) > 0 && strings.TrimSpace(kept[len(kept)-1]) == "" {
+		kept = kept[:len(kept)-1]
+	}
+	return kept
 }
 
 // readConf reads a config file, empty when it is missing or unreadable.
