@@ -43,7 +43,10 @@ homebrew_casks:
     # the binaries are unsigned, so macOS quarantines what brew downloads.
     # a custom_block, because goreleaser wraps hooks.post.install in the
     # postflight stanza homebrew deprecated in favour of postflight_steps
+    # depends_on :macos: Homebrew 7 rejects the whole tap when a cask has no Linux url
     custom_block: |
+      depends_on :macos
+
       postflight_steps do
         on_macos do
           run "/usr/bin/xattr",
