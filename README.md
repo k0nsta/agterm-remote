@@ -181,9 +181,7 @@ or disable the delay with:
 defaults write com.apple.screencapture show-thumbnail -bool false
 ```
 
-The normal delivery path types the remote path and leaves it unsubmitted. If
-you use a keymap variant that delivers the path through agterm's bracketed
-paste branch, the Mac clipboard is replaced by that path and is not restored.
+The path is typed, not pasted, so your Mac clipboard is left unchanged.
 
 ### What each piece is
 
