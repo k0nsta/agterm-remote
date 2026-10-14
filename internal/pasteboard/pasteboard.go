@@ -63,6 +63,8 @@ type Content struct {
 // ExecRunner; Runner is exposed so callers and tests can provide a seam.
 type Clipboard struct {
 	Runner Runner
+	// board names a private pasteboard instead of the general one (tests).
+	board string
 }
 
 // NewClipboard constructs a Clipboard using runner, or the real command
@@ -85,7 +87,11 @@ func (c Clipboard) Read(ctx context.Context, pngPath string) (Content, error) {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	body, err := runner.Run(ctx, "osascript", "-l", "JavaScript", "-e", clipboardScript, pngPath)
+	args := []string{"-l", "JavaScript", "-e", clipboardScript, pngPath}
+	if c.board != "" {
+		args = append(args, c.board)
+	}
+	body, err := runner.Run(ctx, "osascript", args...)
 	if err != nil {
 		return Content{}, fmt.Errorf("read clipboard: %w", err)
 	}
@@ -289,23 +295,35 @@ func safeBytes(value string) string {
 	return builder.String()
 }
 
+// clipboardScript checks every ObjC value with present: JXA wraps a nil
+// return in a truthy object, so a plain truthiness test calls methods on nil.
 const clipboardScript = `
 ObjC.import('AppKit')
 ObjC.import('Foundation')
 
+function present(value) {
+    return value !== undefined && value !== null && !value.isNil()
+}
+
+function write(data, path) {
+    if (!data.writeToFileAtomically(path, true)) {
+        throw new Error('cannot write clipboard image')
+    }
+    return JSON.stringify({image: true})
+}
+
 function run(argv) {
-    const pasteboard = $.NSPasteboard.generalPasteboard
+    const pasteboard = argv.length > 1 ? $.NSPasteboard.pasteboardWithName(argv[1]) : $.NSPasteboard.generalPasteboard
     const files = []
     const items = pasteboard.pasteboardItems
-    if (items) {
+    if (present(items)) {
         for (let i = 0; i < items.count; i++) {
-            const item = items.objectAtIndex(i)
-            const value = item.stringForType('public.file-url')
-            if (!value) {
+            const value = items.objectAtIndex(i).stringForType('public.file-url')
+            if (!present(value)) {
                 continue
             }
-            const url = $.NSURL.URLWithString(ObjC.unwrap(value))
-            if (url && url.path) {
+            const url = $.NSURL.URLWithString(value)
+            if (present(url) && present(url.path)) {
                 files.push(ObjC.unwrap(url.path))
             }
         }
@@ -316,17 +334,17 @@ function run(argv) {
 
     const path = argv[0]
     let data = pasteboard.dataForType('public.png')
-    if (data) {
-        data.writeToFileAtomically(path, true)
-        return JSON.stringify({image: true})
+    if (present(data)) {
+        return write(data, path)
     }
 
     data = pasteboard.dataForType('public.tiff')
-    if (data) {
+    if (present(data)) {
         const bitmap = $.NSBitmapImageRep.alloc.initWithData(data)
-        const png = bitmap.representationUsingTypeProperties(4, $())
-        png.writeToFileAtomically(path, true)
-        return JSON.stringify({image: true})
+        const png = present(bitmap) ? bitmap.representationUsingTypeProperties(4, $()) : null
+        if (present(png)) {
+            return write(png, path)
+        }
     }
     return '{}'
 }
