@@ -589,7 +589,7 @@ paste_put() {
 	tmp=$(mktemp "$dir/.paste.XXXXXX")
 	cat >"$tmp"
 	stamp=$(date -u +%Y%m%d%H%M%S)
-	target=$dir/$stamp-$name
+	target=$dir/$stamp-${tmp##*/.paste.}-$name
 	mv "$tmp" "$target"
 	tmp=
 	printf '%s\n' "$target"

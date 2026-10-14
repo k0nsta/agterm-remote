@@ -53,3 +53,8 @@ if [ "$(id -u)" -ne 0 ]; then
 	[ "$failed_rc" -ne 0 ] || { printf '%s\n' 'unwritable paste dir did not fail' >&2; exit 1; }
 	assert_eq "agr${tab}@VERSION@" "$(printf '%s\n' "$failed_output" | sed -n '1p')" 'a failed write still prints the header first'
 fi
+
+first=$(printf 'one' | run_agr paste-put 3-same.png | sed -n '2p')
+second=$(printf 'two' | run_agr paste-put 3-same.png | sed -n '2p')
+[ "$first" != "$second" ] || { printf '%s\n' 'same-second pastes share a path' >&2; exit 1; }
+assert_eq "one" "$(cat "$first")" 'an earlier paste is not overwritten'
