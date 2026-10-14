@@ -41,6 +41,7 @@ Commands:
   shell <host> [--cwd <dir>]
                           Open a plain remote login shell (no session)
   end [row]                Kill a row's remote sessions and close the row
+  paste [row] [pane-id]   Send clipboard files/image or latest screenshot to a remote row
 
 Options:
   --help, -h               Show this help
@@ -139,10 +140,48 @@ on pane.scratch   '/opt/homebrew/bin/agr' on-scratch
 
 # keymap.conf (with no key, run it from agterm's command palette)
 command "End remote session" ctrl+a>x --error-hud '/opt/homebrew/bin/agr' end "{AGT_SESSION_ID}"
+command "Paste to remote" ctrl+a>v --error-hud '/opt/homebrew/bin/agr' paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"
 ```
 
 Run `agr install <host>` once per host so it has the current remote script.
 Tested on agterm 0.35.
+
+### Paste a screenshot (or files)
+
+On a row opened with `agr open`, press `ctrl+a>v` to upload local content to
+the remote host and type its remote path into the pane without submitting the
+shell line. `agr setup` binds that chord when it is free; use
+`agr setup --paste-key 'ctrl+a>v'` to choose a different chord. The same
+operation is available as `agr paste [row] [pane-id]`.
+
+The sources are checked in this order:
+
+- regular files copied in Finder with `⌘C` (several files are supported; these
+  take precedence over Finder's clipboard icon image);
+- image data on the Mac clipboard, written as a PNG;
+- the newest regular screenshot in macOS's screenshot folder, only when it is
+  less than five minutes old.
+
+Each file is uploaded to the host selected by the pane binding and stored at
+`~/.cache/agr/paste/` with a safe name and mode `0600`. Files older than seven
+days are pruned when an upload runs. The remote `paste-put` verb is installed
+by `agr install <host>`; run that command on every host before using this
+feature after upgrading `agr`. If no source is available, or the row is local,
+`agr` reports an error through agterm's error HUD.
+
+There is a macOS screenshot timing caveat: with the floating thumbnail enabled,
+macOS may not write the screenshot file until roughly five seconds after the
+capture. Pressing the paste key sooner can find an older screenshot or none at
+all. Wait for the thumbnail to disappear, click the thumbnail to dismiss it,
+or disable the delay with:
+
+```sh
+defaults write com.apple.screencapture show-thumbnail -bool false
+```
+
+The normal delivery path types the remote path and leaves it unsubmitted. If
+you use a keymap variant that delivers the path through agterm's bracketed
+paste branch, the Mac clipboard is replaced by that path and is not restored.
 
 ### What each piece is
 

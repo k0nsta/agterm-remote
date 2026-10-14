@@ -297,11 +297,11 @@ post-completion manual check in a genuinely throwaway row.
 
 ### Task 7: [Final] Update documentation
 
-- [ ] README: "Paste a screenshot" section (key, sources, remote location, 7-day prune,
+- [x] README: "Paste a screenshot" section (key, sources, remote location, 7-day prune,
       `agr install <host>` needed; the thumbnail delay with its three workarounds, incl.
       `defaults write com.apple.screencapture show-thumbnail -bool false`; on the paste
       branch, that the clipboard ends up holding the path) + `paste` in the command list + keymap line
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
