@@ -203,6 +203,83 @@ func TestRunnerDataPropagatesExitAfterValidHeader(t *testing.T) {
 	}
 }
 
+func TestRunnerDataPassesNilStdin(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	ssh := &runnerSSH{body: []byte("agr\t1.0.0\n")}
+	if _, err := NewRunnerWithVersion(ssh, dirs, "1.0.0").Data(context.Background(), "host", "sessions"); err != nil {
+		t.Fatalf("Data() error = %v", err)
+	}
+	calls := ssh.Calls(t)
+	if len(calls) != 1 || calls[0].stdin != nil {
+		t.Fatalf("Data() stdin = %#v, want nil", calls)
+	}
+}
+
+func TestRunnerPastePutPassesArgvAndStdin(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	ssh := &runnerSSH{body: []byte("agr\t1.0.0\n/home/remote/.cache/agr/paste/20261014183000-0-image.png\n")}
+	got, err := NewRunnerWithVersion(ssh, dirs, "1.0.0").PastePut(context.Background(), "host", "0-image.png", []byte("png bytes"))
+	if err != nil {
+		t.Fatalf("PastePut() error = %v", err)
+	}
+	if got != "/home/remote/.cache/agr/paste/20261014183000-0-image.png" {
+		t.Fatalf("PastePut() = %q, want remote paste path", got)
+	}
+	calls := ssh.Calls(t)
+	if len(calls) != 1 {
+		t.Fatalf("SSH calls = %d, want one", len(calls))
+	}
+	wantArgv := []string{"/home/remote/.local/bin/agr", "paste-put", "0-image.png"}
+	if !reflect.DeepEqual(calls[0].argv, wantArgv) || string(calls[0].stdin) != "png bytes" {
+		t.Fatalf("PastePut() call = %#v, want argv %#v and body", calls[0], wantArgv)
+	}
+}
+
+func TestRunnerPastePutRejectsInvalidReplies(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "outside paste dir", body: "agr\t1.0.0\n/home/remote/.cache/agr/other/x-image.png\n"},
+		{name: "wrong suffix", body: "agr\t1.0.0\n/home/remote/.cache/agr/paste/20261014183000-other.png\n"},
+		{name: "extra line", body: "agr\t1.0.0\n/home/remote/.cache/agr/paste/20261014183000-0-image.png\nsecond\n"},
+		{name: "control byte", body: "agr\t1.0.0\n/home/remote/.cache/agr/paste/20261014183000-0-image.png\x1b\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ssh := &runnerSSH{body: []byte(tc.body)}
+			if got, err := NewRunnerWithVersion(ssh, dirs, "1.0.0").PastePut(context.Background(), "host", "0-image.png", []byte("body")); err == nil || got != "" {
+				t.Fatalf("PastePut() = (%q, %v), want invalid-reply error", got, err)
+			}
+		})
+	}
+}
+
+func TestRunnerPastePutOldRemoteReturnsInstallError(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	ssh := &runnerSSH{body: []byte("agr 0.9 — remote session bridge\n")}
+	got, err := NewRunnerWithVersion(ssh, dirs, "1.0.0").PastePut(context.Background(), "host", "0-image.png", []byte("body"))
+	if got != "" || !errors.Is(err, ErrNotInstalled) || !strings.Contains(err.Error(), "agr install host") {
+		t.Fatalf("PastePut() = (%q, %v), want install error", got, err)
+	}
+}
+
 func TestRunnerReapValidatesNameAndSurfacesRemoteRefusal(t *testing.T) {
 	t.Helper()
 	dirs := pathstest.Dirs(t)

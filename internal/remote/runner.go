@@ -178,6 +178,10 @@ func (r *Runner) ResolveAgrPath(ctx context.Context, host string) (string, error
 // and returns only the body after that header. An unreachable host is checked
 // before header parsing so offline hosts never receive an installation hint.
 func (r *Runner) Data(ctx context.Context, host, verb string, args ...string) ([]byte, error) {
+	return r.data(ctx, host, nil, verb, args...)
+}
+
+func (r *Runner) data(ctx context.Context, host string, stdin []byte, verb string, args ...string) ([]byte, error) {
 	if err := validateHost(host); err != nil {
 		return nil, err
 	}
@@ -194,7 +198,7 @@ func (r *Runner) Data(ctx context.Context, host, verb string, args ...string) ([
 	remoteArgv := make([]string, 0, 1+len(args))
 	remoteArgv = append(remoteArgv, filepath.Join(home, remoteAgrPath), verb)
 	remoteArgv = append(remoteArgv, args...)
-	body, runErr := r.sshClient().Run(ctx, host, nil, remoteArgv...)
+	body, runErr := r.sshClient().Run(ctx, host, stdin, remoteArgv...)
 	if errors.Is(runErr, ErrUnreachable) {
 		return body, runErr
 	}
@@ -209,6 +213,31 @@ func (r *Runner) Data(ctx context.Context, host, verb string, args ...string) ([
 		return payload, runErr
 	}
 	return payload, nil
+}
+
+// PastePut uploads body to the remote paste cache and returns the path printed
+// by the remote command. The path is checked before it can be typed into a
+// terminal: it must be one printable line in this host's paste directory and
+// end with the exact name sent to the remote.
+func (r *Runner) PastePut(ctx context.Context, host, name string, body []byte) (string, error) {
+	if !token.Valid(name) {
+		return "", fmt.Errorf("invalid paste name %q", name)
+	}
+	home, err := r.Home(ctx, host)
+	if err != nil {
+		return "", err
+	}
+	payload, err := r.data(ctx, host, body, "paste-put", name)
+	if err != nil {
+		return "", err
+	}
+	path := strings.TrimSuffix(string(payload), "\n")
+	prefix := filepath.Join(home, ".cache", "agr", "paste") + string(filepath.Separator)
+	if path == "" || strings.Contains(path, "\n") || !Printable(path) ||
+		!strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, "-"+name) {
+		return "", fmt.Errorf("remote paste-put returned an invalid path")
+	}
+	return path, nil
 }
 
 // Sessions lists agr-owned remote sessions.

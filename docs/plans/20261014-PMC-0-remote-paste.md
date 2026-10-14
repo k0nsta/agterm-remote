@@ -204,18 +204,18 @@ post-completion manual check in a genuinely throwaway row.
 - Create: `tests/remote/tmux/paste_put_test.sh`
 - Modify: `internal/remote/runner_test.go`
 
-- [ ] `agr.sh`: `paste-put <name>` verb (also in `usage()`): `valid_token` or exit 2,
+- [x] `agr.sh`: `paste-put <name>` verb (also in `usage()`): `valid_token` or exit 2,
       `umask 077`, `mkdir -p "$HOME/.cache/agr/paste"`, POSIX prune, `mktemp` in the dir +
       `trap` cleanup, `mv` to `<stamp>-<name>`, print header + absolute path
-- [ ] runner: unexported `data(ctx, host, stdin, verb, args…)`; `Data` calls it with `nil`
-- [ ] `Runner.PastePut(ctx, host, name string, body []byte) (string, error)`: reply checked
+- [x] runner: unexported `data(ctx, host, stdin, verb, args…)`; `Data` calls it with `nil`
+- [x] `Runner.PastePut(ctx, host, name string, body []byte) (string, error)`: reply checked
       against `<home>/.cache/agr/paste/` prefix and `-<name>` suffix, printable, one line
-- [ ] remote test: content round-trips, absolute path printed, `../x` and `.hidden`
+- [x] remote test: content round-trips, absolute path printed, `../x` and `.hidden`
       refused with exit 2 and nothing written, a file aged with `touch -t 202001010000` is
       pruned, a fresh one kept (no GNU/BSD-only `date`)
-- [ ] Go tests: argv + stdin passed, `Data` unchanged (nil stdin), old remote → install
+- [x] Go tests: argv + stdin passed, `Data` unchanged (nil stdin), old remote → install
       error, reply outside the paste dir → error, wrong suffix → error
-- [ ] `make check` green
+- [x] `make check` green
 
 ### Task 3: Mac content sources (clipboard and screenshot)
 
