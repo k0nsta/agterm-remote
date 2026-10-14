@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -110,10 +112,70 @@ func TestOnSplitRejectsArguments(t *testing.T) {
 
 func TestRunSetupRejectsBadArguments(t *testing.T) {
 	t.Helper()
-	for _, argv := range [][]string{{"setup", "extra"}, {"setup", "--end-key"}, {"setup", "--end-key", ""}, {"setup", "--key", "x"}} {
+	for _, argv := range [][]string{
+		{"setup", "extra"},
+		{"setup", "--end-key"},
+		{"setup", "--end-key", ""},
+		{"setup", "--paste-key"},
+		{"setup", "--paste-key", ""},
+		{"setup", "--key", "x"},
+		{"setup", "--end-key", "x", "--end-key", "y"},
+		{"setup", "--paste-key", "x", "--paste-key", "y"},
+		{"setup", "--end-key", "--paste-key", "x"},
+	} {
 		var out, errout strings.Builder
 		if got := runWithApplication(argv, &out, &errout, &application{}); got != 2 {
 			t.Fatalf("run(%q) exit = %d, want 2", argv, got)
 		}
+	}
+}
+
+func TestRunSetupAcceptsBothFlagsInEitherOrder(t *testing.T) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"setup", "--end-key", "ctrl+a>x", "--paste-key", "ctrl+a>v"},
+		{"setup", "--paste-key", "ctrl+a>v", "--end-key", "ctrl+a>x"},
+	} {
+		t.Run(strings.Join(args[1:], "/"), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			var out, errout strings.Builder
+			if got := runWithApplication(args, &out, &errout, &application{}); got != 0 {
+				t.Fatalf("run(%q) exit = %d, stderr = %q", args, got, errout.String())
+			}
+			keymap, err := os.ReadFile(filepath.Join(home, ".config", "agterm", "keymap.conf"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(keymap), `"End remote session" ctrl+a>x`) || !strings.Contains(string(keymap), `"Paste to remote" ctrl+a>v`) {
+				t.Fatalf("keymap.conf = %q, want both requested chords", keymap)
+			}
+		})
+	}
+}
+
+func TestRunPasteUsesRowFromAgtermEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGT_SESSION_ID", "row-from-keymap")
+	t.Setenv("AGTERM_SESSION_ID", "")
+	var out, errout strings.Builder
+	if got := runWithApplication([]string{"paste"}, &out, &errout, &application{}); got != 1 {
+		t.Fatalf("run(paste) exit = %d, want 1 after using the environment row", got)
+	}
+	if strings.Contains(errout.String(), "no agterm row in the environment") {
+		t.Fatalf("run(paste) ignored AGT_SESSION_ID: %q", errout.String())
+	}
+}
+
+func TestRunPasteRequiresARowWhenNoArgumentOrEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGT_SESSION_ID", "")
+	t.Setenv("AGTERM_SESSION_ID", "")
+	var out, errout strings.Builder
+	if got := runWithApplication([]string{"paste"}, &out, &errout, &application{}); got != 2 {
+		t.Fatalf("run(paste) exit = %d, want usage error", got)
+	}
+	if !strings.Contains(errout.String(), "no agterm row in the environment") {
+		t.Fatalf("run(paste) stderr = %q, want missing-row usage", errout.String())
 	}
 }

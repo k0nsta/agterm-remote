@@ -12,10 +12,12 @@ package mocks
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	agterm "github.com/k0nsta/agterm-remote/internal/agterm"
 	bindings "github.com/k0nsta/agterm-remote/internal/bindings"
 	daemon "github.com/k0nsta/agterm-remote/internal/daemon"
+	pasteboard "github.com/k0nsta/agterm-remote/internal/pasteboard"
 	remote "github.com/k0nsta/agterm-remote/internal/remote"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -651,6 +653,200 @@ func (m *MockPanes) TypeLine(ctx context.Context, row, paneID, text string) erro
 func (mr *MockPanesMockRecorder) TypeLine(ctx, row, paneID, text any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TypeLine", reflect.TypeOf((*MockPanes)(nil).TypeLine), ctx, row, paneID, text)
+}
+
+// MockPastePanes is a mock of PastePanes interface.
+type MockPastePanes struct {
+	ctrl     *gomock.Controller
+	recorder *MockPastePanesMockRecorder
+	isgomock struct{}
+}
+
+// MockPastePanesMockRecorder is the mock recorder for MockPastePanes.
+type MockPastePanesMockRecorder struct {
+	mock *MockPastePanes
+}
+
+// NewMockPastePanes creates a new mock instance.
+func NewMockPastePanes(ctrl *gomock.Controller) *MockPastePanes {
+	mock := &MockPastePanes{ctrl: ctrl}
+	mock.recorder = &MockPastePanesMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPastePanes) EXPECT() *MockPastePanesMockRecorder {
+	return m.recorder
+}
+
+// Type mocks base method.
+func (m *MockPastePanes) Type(ctx context.Context, row, paneID, text string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Type", ctx, row, paneID, text)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Type indicates an expected call of Type.
+func (mr *MockPastePanesMockRecorder) Type(ctx, row, paneID, text any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Type", reflect.TypeOf((*MockPastePanes)(nil).Type), ctx, row, paneID, text)
+}
+
+// MockPasteBindings is a mock of PasteBindings interface.
+type MockPasteBindings struct {
+	ctrl     *gomock.Controller
+	recorder *MockPasteBindingsMockRecorder
+	isgomock struct{}
+}
+
+// MockPasteBindingsMockRecorder is the mock recorder for MockPasteBindings.
+type MockPasteBindingsMockRecorder struct {
+	mock *MockPasteBindings
+}
+
+// NewMockPasteBindings creates a new mock instance.
+func NewMockPasteBindings(ctrl *gomock.Controller) *MockPasteBindings {
+	mock := &MockPasteBindings{ctrl: ctrl}
+	mock.recorder = &MockPasteBindingsMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPasteBindings) EXPECT() *MockPasteBindingsMockRecorder {
+	return m.recorder
+}
+
+// ForRow mocks base method.
+func (m *MockPasteBindings) ForRow(row string) []bindings.Binding {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ForRow", row)
+	ret0, _ := ret[0].([]bindings.Binding)
+	return ret0
+}
+
+// ForRow indicates an expected call of ForRow.
+func (mr *MockPasteBindingsMockRecorder) ForRow(row any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForRow", reflect.TypeOf((*MockPasteBindings)(nil).ForRow), row)
+}
+
+// MockPasteClipboard is a mock of PasteClipboard interface.
+type MockPasteClipboard struct {
+	ctrl     *gomock.Controller
+	recorder *MockPasteClipboardMockRecorder
+	isgomock struct{}
+}
+
+// MockPasteClipboardMockRecorder is the mock recorder for MockPasteClipboard.
+type MockPasteClipboardMockRecorder struct {
+	mock *MockPasteClipboard
+}
+
+// NewMockPasteClipboard creates a new mock instance.
+func NewMockPasteClipboard(ctrl *gomock.Controller) *MockPasteClipboard {
+	mock := &MockPasteClipboard{ctrl: ctrl}
+	mock.recorder = &MockPasteClipboardMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPasteClipboard) EXPECT() *MockPasteClipboardMockRecorder {
+	return m.recorder
+}
+
+// Read mocks base method.
+func (m *MockPasteClipboard) Read(ctx context.Context, pngPath string) (pasteboard.Content, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Read", ctx, pngPath)
+	ret0, _ := ret[0].(pasteboard.Content)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Read indicates an expected call of Read.
+func (mr *MockPasteClipboardMockRecorder) Read(ctx, pngPath any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Read", reflect.TypeOf((*MockPasteClipboard)(nil).Read), ctx, pngPath)
+}
+
+// MockPasteScreenshots is a mock of PasteScreenshots interface.
+type MockPasteScreenshots struct {
+	ctrl     *gomock.Controller
+	recorder *MockPasteScreenshotsMockRecorder
+	isgomock struct{}
+}
+
+// MockPasteScreenshotsMockRecorder is the mock recorder for MockPasteScreenshots.
+type MockPasteScreenshotsMockRecorder struct {
+	mock *MockPasteScreenshots
+}
+
+// NewMockPasteScreenshots creates a new mock instance.
+func NewMockPasteScreenshots(ctrl *gomock.Controller) *MockPasteScreenshots {
+	mock := &MockPasteScreenshots{ctrl: ctrl}
+	mock.recorder = &MockPasteScreenshotsMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPasteScreenshots) EXPECT() *MockPasteScreenshotsMockRecorder {
+	return m.recorder
+}
+
+// Latest mocks base method.
+func (m *MockPasteScreenshots) Latest(ctx context.Context, now time.Time, maxAge time.Duration) (string, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Latest", ctx, now, maxAge)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// Latest indicates an expected call of Latest.
+func (mr *MockPasteScreenshotsMockRecorder) Latest(ctx, now, maxAge any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Latest", reflect.TypeOf((*MockPasteScreenshots)(nil).Latest), ctx, now, maxAge)
+}
+
+// MockPasteUploader is a mock of PasteUploader interface.
+type MockPasteUploader struct {
+	ctrl     *gomock.Controller
+	recorder *MockPasteUploaderMockRecorder
+	isgomock struct{}
+}
+
+// MockPasteUploaderMockRecorder is the mock recorder for MockPasteUploader.
+type MockPasteUploaderMockRecorder struct {
+	mock *MockPasteUploader
+}
+
+// NewMockPasteUploader creates a new mock instance.
+func NewMockPasteUploader(ctrl *gomock.Controller) *MockPasteUploader {
+	mock := &MockPasteUploader{ctrl: ctrl}
+	mock.recorder = &MockPasteUploaderMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPasteUploader) EXPECT() *MockPasteUploaderMockRecorder {
+	return m.recorder
+}
+
+// PastePut mocks base method.
+func (m *MockPasteUploader) PastePut(ctx context.Context, host, name string, body []byte) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PastePut", ctx, host, name, body)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PastePut indicates an expected call of PastePut.
+func (mr *MockPasteUploaderMockRecorder) PastePut(ctx, host, name, body any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PastePut", reflect.TypeOf((*MockPasteUploader)(nil).PastePut), ctx, host, name, body)
 }
 
 // MockRemoteCwd is a mock of RemoteCwd interface.

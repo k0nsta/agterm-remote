@@ -3,10 +3,12 @@ package cli
 
 import (
 	"context"
+	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/daemon"
+	"github.com/k0nsta/agterm-remote/internal/pasteboard"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -84,6 +86,32 @@ type Panes interface {
 	Surfaces(ctx context.Context) (map[string][]agterm.Surface, error)
 	PaneText(ctx context.Context, row, paneID string) (string, error)
 	TypeLine(ctx context.Context, row, paneID, text string) error
+}
+
+// PastePanes types into a pane without pressing Enter.
+type PastePanes interface {
+	Type(ctx context.Context, row, paneID, text string) error
+}
+
+// PasteBindings resolves the remote host represented by an agterm row.
+type PasteBindings interface {
+	ForRow(row string) []bindings.Binding
+}
+
+// PasteClipboard reads the Mac pasteboard, preferring Finder file URLs over
+// the icon image Finder also places on the pasteboard.
+type PasteClipboard interface {
+	Read(ctx context.Context, pngPath string) (pasteboard.Content, error)
+}
+
+// PasteScreenshots finds the newest eligible screenshot file.
+type PasteScreenshots interface {
+	Latest(ctx context.Context, now time.Time, maxAge time.Duration) (string, bool, error)
+}
+
+// PasteUploader writes one local file to a remote agr paste cache.
+type PasteUploader interface {
+	PastePut(ctx context.Context, host, name string, body []byte) (string, error)
 }
 
 // RemoteCwd reads a remote session's current directory.

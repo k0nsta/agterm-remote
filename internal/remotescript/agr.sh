@@ -9,7 +9,7 @@ have() {
 
 usage() {
 	printf '%s\n' "agr $AGR_VERSION — remote session bridge" >&2
-	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|status|--version} ..." >&2
+	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|paste-put|status|--version} ..." >&2
 	exit "${1:-2}"
 }
 
@@ -573,6 +573,28 @@ zmx_status() {
 	exit 0
 }
 
+paste_put() {
+	[ "$#" -eq 1 ] || usage 2
+	name=$1
+	valid_token "$name" || { printf '%s\n' 'agr: invalid paste name' >&2; exit 2; }
+	header
+
+	umask 077
+	dir=$HOME/.cache/agr/paste
+	mkdir -p "$dir"
+	find "$dir" -type f -mtime +7 -exec rm -f {} +
+
+	tmp=
+	trap 'rm -f "$tmp"' 0 1 2 3 15
+	tmp=$(mktemp "$dir/.paste.XXXXXX")
+	cat >"$tmp"
+	stamp=$(date -u +%Y%m%d%H%M%S)
+	target=$dir/$stamp-${tmp##*/.paste.}-$name
+	mv "$tmp" "$target"
+	tmp=
+	printf '%s\n' "$target"
+}
+
 attach_cwd=
 attach_parent=
 
@@ -651,6 +673,9 @@ dispatch() {
 				zmx) zmx_reap "$1" ;;
 				*) printf 'agr: unsupported multiplexer %s\n' "$AGR_MUX" >&2; exit 2 ;;
 			esac
+			;;
+		paste-put)
+			paste_put "$@"
 			;;
 		status)
 			[ "$#" -ge 1 ] || exit 0

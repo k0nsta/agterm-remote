@@ -15,29 +15,33 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/cli"
 	"github.com/k0nsta/agterm-remote/internal/daemon"
 	"github.com/k0nsta/agterm-remote/internal/handled"
+	"github.com/k0nsta/agterm-remote/internal/pasteboard"
 	"github.com/k0nsta/agterm-remote/internal/paths"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 	"golang.org/x/term"
 )
 
 type application struct {
-	dirs       paths.Dirs
-	control    *agterm.Ctl
-	status     *agterm.Client
-	remote     cli.Sessions
-	tty        remote.TTY
-	store      *bindings.Store
-	bridge     applicationBridge
-	daemon     daemonRunner
-	picker     cli.Picker
-	rows       cli.Rows
-	labeler    cli.Labeler
-	installer  cli.Installer
-	openRemote cli.OpenerRemote
-	cwd        cli.RemoteCwd
-	hostInfo   cli.HostInfoReader
-	moshPath   func() string
-	doctor     cli.DoctorDependencies
+	dirs        paths.Dirs
+	control     *agterm.Ctl
+	status      *agterm.Client
+	remote      cli.Sessions
+	tty         remote.TTY
+	store       *bindings.Store
+	bridge      applicationBridge
+	daemon      daemonRunner
+	picker      cli.Picker
+	rows        cli.Rows
+	labeler     cli.Labeler
+	installer   cli.Installer
+	openRemote  cli.OpenerRemote
+	cwd         cli.RemoteCwd
+	pasteRemote cli.PasteUploader
+	clipboard   cli.PasteClipboard
+	screenshots cli.PasteScreenshots
+	hostInfo    cli.HostInfoReader
+	moshPath    func() string
+	doctor      cli.DoctorDependencies
 }
 
 type applicationBridge interface {
@@ -82,13 +86,26 @@ func (a *application) end() cli.EndDependencies {
 	return cli.EndDependencies{Store: a.store, Reaper: a.remote, Confirm: ctl, Rows: ctl}
 }
 
+// paste wires the command's local pasteboard/screenshot sources and the
+// remote runner to the application's agterm control client.
+func (a *application) paste() cli.PasteDependencies {
+	ctl := a.control
+	if ctl == nil {
+		ctl = agterm.NewCtl("", "", nil, nil, nil)
+	}
+	return cli.PasteDependencies{
+		Store: a.store, Clipboard: a.clipboard, Screenshots: a.screenshots,
+		Remote: a.pasteRemote, Panes: ctl,
+	}
+}
+
 // setup wires agr setup. Without agtermctl it still writes the files, to the
 // default config directory, and leaves the reload to agterm's next start. The
-// key for End remote session is asked only on a terminal.
-func (a *application) setup(out io.Writer, endKey string) cli.SetupDependencies {
+// key for End remote session is asked only on a terminal; Paste never prompts.
+func (a *application) setup(out io.Writer, endKey, pasteKey string) cli.SetupDependencies {
 	self, _ := os.Executable()
 	home, _ := os.UserHomeDir()
-	deps := cli.SetupDependencies{Agr: self, Home: home, Out: out, EndKey: endKey}
+	deps := cli.SetupDependencies{Agr: self, Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey}
 	if a.control != nil && agterm.CtlPath() != "" {
 		deps.Config = a.control
 	}
@@ -129,7 +146,8 @@ func newApplication() *application {
 	client := cli.NewDaemonClient(dirs)
 	app := &application{
 		dirs: dirs, control: control, status: status, remote: remoteRunner,
-		tty: &remote.ExecTTY{}, store: store, bridge: client,
+		tty: &remote.ExecTTY{}, store: store, bridge: client, pasteRemote: remoteRunner,
+		clipboard: pasteboard.NewClipboard(nil), screenshots: pasteboard.NewScreenshots(nil, ""),
 		installer: remoteRunner, openRemote: remoteRunner, cwd: remoteRunner,
 		doctor: cli.DoctorDependencies{
 			LocalVersion: version, SocketPath: sockPath, AppVersion: status,
@@ -168,6 +186,8 @@ var (
 	_ cli.Labeler                             = (*agterm.Ctl)(nil)
 	_ cli.Panes                               = (*agterm.Ctl)(nil)
 	_ cli.RemoteCwd                           = (*remote.Runner)(nil)
+	_ cli.PasteUploader                       = (*remote.Runner)(nil)
+	_ cli.PastePanes                          = (*agterm.Ctl)(nil)
 	_ cli.HandledPanes                        = (*handled.Store)(nil)
 	_ cli.RowBindings                         = (*bindings.Store)(nil)
 	_ cli.Confirmer                           = (*agterm.Ctl)(nil)
