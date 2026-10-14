@@ -131,8 +131,8 @@ ctrl+a>v ─ agterm keymap ─▶ agr paste <row> <pane-id>        (Mac)
   Spotlight (`mdfind`) is not used: it lags behind new files and would pick an older one.
   Accept the file only if it is under 5 minutes old.
   **Thumbnail delay**: with the floating thumbnail on, a key pressed within ~5 s of ⌘⇧4 finds
-  the previous screenshot (if under 5 min) or nothing. Open question for the user (see the
-  end of this plan): have `agr setup` turn the thumbnail off, or only document it.
+  the previous screenshot (if under 5 min) or nothing. Decided: agr never changes macOS
+  settings; the README says to wait for the thumbnail, click it away, or turn it off.
 - **Remote verb**: `paste-put <name>`. The name must pass `valid_token`, else exit 2 with
   nothing written. Writes stdin to `$HOME/.cache/agr/paste/<stamp>-<name>` via a `mktemp`
   file in the same directory (removed by `trap` on failure) + `mv`, then prints the header
@@ -175,8 +175,7 @@ live agent rows.
 - [ ] record the result here and choose the delivery. Typed works → `Ctl.Type` without a
       newline. Only paste works → the keymap line also passes `{AGT_PANE}` for
       `session paste --pane`, and the user's clipboard is **replaced** by the path text
-      (restoring an image or Finder files through text tools would lose them; a full JXA
-      snapshot/restore is out of scope unless the user asks). Neither → typed (Claude still
+      (decided: no snapshot/restore). Neither → typed (Claude still
       `Read`s a plain image path) and note it in the README
 - [ ] probe the JXA script once per source **from a keymap command** (the real caller):
       Finder ⌘C of two files, ⌃⌘⇧4 image, Copy Image from a browser, empty clipboard.
@@ -286,7 +285,9 @@ live agent rows.
 ### Task 7: [Final] Update documentation
 
 - [ ] README: "Paste a screenshot" section (key, sources, remote location, 7-day prune,
-      `agr install <host>` needed) + `paste` in the command list + keymap line
+      `agr install <host>` needed; the thumbnail delay with its three workarounds, incl.
+      `defaults write com.apple.screencapture show-thumbnail -bool false`; on the paste
+      branch, that the clipboard ends up holding the path) + `paste` in the command list + keymap line
 - [ ] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
@@ -296,12 +297,3 @@ live agent rows.
   uploads to the same host; a local row → error HUD.
 - `agr install homelab` after release (new remote verb).
 - release notes (v1.2.0): the key, the sources, `agr setup` then `agr install <host>`.
-
-## Open questions (for the user)
-
-- **Screenshot thumbnail**: macOS writes a ⌘⇧4 file only after the floating thumbnail
-  goes away (~5 s). Should `agr setup` turn the thumbnail off
-  (`defaults write com.apple.screencapture show-thumbnail -bool false`), or should this
-  only be documented?
-- **Clipboard on the paste branch**: if Task 1 shows Claude attaches only *pasted* paths,
-  is replacing the clipboard with the path text acceptable?
