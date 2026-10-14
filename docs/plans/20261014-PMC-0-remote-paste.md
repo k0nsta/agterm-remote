@@ -223,20 +223,20 @@ post-completion manual check in a genuinely throwaway row.
 - Create: `internal/pasteboard/pasteboard.go` (JXA clipboard + screenshot finder, darwin exec
   behind an injectable runner), `internal/pasteboard/pasteboard_test.go`
 
-- [ ] `Clipboard.Read(ctx, pngPath string) (Content, error)`: `Content{Files []string;
+- [x] `Clipboard.Read(ctx, pngPath string) (Content, error)`: `Content{Files []string;
       Image bool}` from the JXA JSON (the script from Task 1). Files before image data.
       Directories, non-regular and unreadable files → error naming the file
-- [ ] `Screenshots.Latest(ctx, now, maxAge) (string, bool, error)`: `defaults` folder and type
+- [x] `Screenshots.Latest(ctx, now, maxAge) (string, bool, error)`: `defaults` folder and type
       (non-zero exit = unset), newest regular file with that extension by mtime, age filter
-- [ ] `SafeName(index int, base string) string` for `[A-Za-z0-9._-]`, extension kept, ≤80
+- [x] `SafeName(index int, base string) string` for `[A-Za-z0-9._-]`, extension kept, ≤80
       bytes, no leading `.`/`-`; empty → `file`
-- [ ] tests with a fake runner: files win over an icon image, PNG only, TIFF-converted
+- [x] tests with a fake runner: files win over an icon image, PNG only, TIFF-converted
       reply, empty clipboard, malformed JSON, a folder refused
-- [ ] tests on a temp dir: `location` set / exit 1 → `~/Desktop`, `type` jpg, a `.mov` newer
+- [x] tests on a temp dir: `location` set / exit 1 → `~/Desktop`, `type` jpg, a `.mov` newer
       than the png ignored, a 6-minute-old file rejected
-- [ ] tests: `SafeName` with `Screenshot 2026-10-14 at 18.53.01.png` (spaces + U+202F),
+- [x] tests: `SafeName` with `Screenshot 2026-10-14 at 18.53.01.png` (spaces + U+202F),
       `../etc`, `.env`, a 200-byte name, a name with `'`
-- [ ] `make check` green
+- [x] `make check` green
 
 ### Task 4: `agr paste <row> <pane-id>`
 
