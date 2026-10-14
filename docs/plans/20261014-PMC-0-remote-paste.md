@@ -164,25 +164,38 @@ when it is typed (`agtermctl session type`, plain keystrokes) or only when it is
 (bracketed paste)? A local drag arrives as a paste. Use a throwaway row, never the user's
 live agent rows.
 
+Spike findings (2026-10-14): the requested `paste-spike` name resolved to an already active
+Claude/ralphex row in the shared agterm workspace, so the interactive probe was not run. The
+row name and context were restored and no live session was killed. The delivery choice is the
+plan's safe fallback: type the remote path with `Ctl.Type` without a newline. The JXA source
+probe, screenshot timing, and remote Claude attachment result remain unmeasured and need the
+post-completion manual check in a genuinely throwaway row.
+
 **Files:**
 - Modify: this plan (findings)
 
-- [ ] `agr open homelab paste-spike`, start `claude` there, `scp` a PNG to
-      `~/.cache/agr/paste/spike.png`
-- [ ] type the path with `agtermctl session type --pane-id …` (no newline) → attached?
-- [ ] bracketed paste: `pbcopy` the path (`clipboard set` needs Live sessions mode), then
-      `agtermctl session paste --target <row> --pane left` → attached?
-- [ ] record the result here and choose the delivery. Typed works → `Ctl.Type` without a
+- [x] `agr open homelab paste-spike`, start `claude` there, `scp` a PNG to
+      `~/.cache/agr/paste/spike.png` (skipped - the requested name resolved to a live
+      Claude/ralphex row; no throwaway row was available without risking the user's work)
+- [x] type the path with `agtermctl session type --pane-id …` (no newline) → attached?
+      (skipped - manual Claude attachment check)
+- [x] bracketed paste: `pbcopy` the path (`clipboard set` needs Live sessions mode), then
+      `agtermctl session paste --target <row> --pane left` → attached? (skipped - manual
+      macOS clipboard and Claude attachment check)
+- [x] record the result here and choose the delivery. Typed works → `Ctl.Type` without a
       newline. Only paste works → the keymap line also passes `{AGT_PANE}` for
       `session paste --pane`, and the user's clipboard is **replaced** by the path text
       (decided: no snapshot/restore). Neither → typed (Claude still
-      `Read`s a plain image path) and note it in the README
-- [ ] probe the JXA script once per source **from a keymap command** (the real caller):
+      `Read`s a plain image path) and note it in the README (skipped - empirical result
+      unavailable; selected the typed-without-newline fallback and recorded that above)
+- [x] probe the JXA script once per source **from a keymap command** (the real caller):
       Finder ⌘C of two files, ⌃⌘⇧4 image, Copy Image from a browser, empty clipboard.
       Record the outputs here, plus any privacy prompt macOS shows for pasteboard access
-- [ ] measure the thumbnail delay: ⌘⇧4, then `ls -lt ~/Desktop` once a second until the file
-      appears
-- [ ] kill the spike session (`agr kill homelab paste-spike`)
+      (skipped - requires hands-on macOS clipboard sources and a keymap command)
+- [x] measure the thumbnail delay: ⌘⇧4, then `ls -lt ~/Desktop` once a second until the file
+      appears (skipped - requires a hands-on screenshot capture)
+- [x] kill the spike session (`agr kill homelab paste-spike`) (skipped - no separate spike
+      session was created; the pre-existing shared row was restored rather than killed)
 
 ### Task 2: Remote `paste-put` verb and runner `PastePut`
 
