@@ -213,10 +213,20 @@ func (c *Ctl) PaneText(ctx context.Context, row, paneID string) (string, error) 
 	return string(out), nil
 }
 
+// Type types text into one pane without pressing Enter. It goes through stdin
+// so the text is never an agtermctl flag.
+func (c *Ctl) Type(ctx context.Context, row, paneID, text string) error {
+	return c.typeText(ctx, row, paneID, []byte(text))
+}
+
 // TypeLine types text into one pane followed by a newline, which runs it at a
 // shell prompt. It goes through stdin so the text is never an agtermctl flag.
 func (c *Ctl) TypeLine(ctx context.Context, row, paneID, text string) error {
-	out, exit, err := c.out.Output(ctx, []byte(text+"\n"), c.path, "session", "type", "--stdin", "--target", row, "--pane-id", paneID, "--socket", c.sock)
+	return c.typeText(ctx, row, paneID, []byte(text+"\n"))
+}
+
+func (c *Ctl) typeText(ctx context.Context, row, paneID string, text []byte) error {
+	out, exit, err := c.out.Output(ctx, text, c.path, "session", "type", "--stdin", "--target", row, "--pane-id", paneID, "--socket", c.sock)
 	if err != nil || exit != 0 {
 		if err == nil {
 			err = fmt.Errorf("command exited with status %d", exit)

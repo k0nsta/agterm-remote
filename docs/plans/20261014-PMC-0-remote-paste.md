@@ -246,24 +246,24 @@ post-completion manual check in a genuinely throwaway row.
   (`Type` without newline, or clipboard/paste per Task 1), `cmd/agr/run.go`,
   `cmd/agr/wire.go`
 
-- [ ] row from the argument, else `AGT_SESSION_ID`/`AGTERM_SESSION_ID` (as `runEnd`); pane
+- [x] row from the argument, else `AGT_SESSION_ID`/`AGTERM_SESSION_ID` (as `runEnd`); pane
       id may be empty
-- [ ] binding: the `ForRow(row)` entry with `PaneID == pane-id`, else the primary; none →
+- [x] binding: the `ForRow(row)` entry with `PaneID == pane-id`, else the primary; none →
       `not an agr row`. A scratch or unbound local pane on a bound row uses the primary's
       host. That's right for ⌘J's `agr shell`; a truly local pane gets a remote path
       (accepted, noted in the README)
-- [ ] sources in order (clipboard files/image, screenshot ≤5 min); none → nothing-to-paste
+- [x] sources in order (clipboard files/image, screenshot ≤5 min); none → nothing-to-paste
       error; total >50 MB → error before any upload
-- [ ] upload each file via `PastePut(host, SafeName(i, base), body)` with a 60 s timeout,
+- [x] upload each file via `PastePut(host, SafeName(i, base), body)` with a 60 s timeout,
       all or nothing; remove the Mac temp dir afterwards
-- [ ] deliver the paths + trailing space with the Task 1 method, by pane id, or the
+- [x] deliver the paths + trailing space with the Task 1 method, by pane id, or the
       primary pane when the id is empty; refuse non-printable
-- [ ] dispatch `paste` (listed in `--help`: `paste [row] [pane-id]  Send the clipboard or
+- [x] dispatch `paste` (listed in `--help`: `paste [row] [pane-id]  Send the clipboard or
       latest screenshot to a remote row`), wire deps
-- [ ] tests: pane-id binding vs primary fallback, empty pane id, row from env, local row,
+- [x] tests: pane-id binding vs primary fallback, empty pane id, row from env, local row,
       each source branch, two files with the same basename get distinct names, upload
       failure enters nothing, temp dir removed, a mismatch warning does not fail
-- [ ] `make check` green
+- [x] `make check` green
 
 ### Task 5: `agr setup` binds Paste to remote
 

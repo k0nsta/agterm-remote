@@ -117,3 +117,29 @@ func TestRunSetupRejectsBadArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestRunPasteUsesRowFromAgtermEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGT_SESSION_ID", "row-from-keymap")
+	t.Setenv("AGTERM_SESSION_ID", "")
+	var out, errout strings.Builder
+	if got := runWithApplication([]string{"paste"}, &out, &errout, &application{}); got != 1 {
+		t.Fatalf("run(paste) exit = %d, want 1 after using the environment row", got)
+	}
+	if strings.Contains(errout.String(), "no agterm row in the environment") {
+		t.Fatalf("run(paste) ignored AGT_SESSION_ID: %q", errout.String())
+	}
+}
+
+func TestRunPasteRequiresARowWhenNoArgumentOrEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGT_SESSION_ID", "")
+	t.Setenv("AGTERM_SESSION_ID", "")
+	var out, errout strings.Builder
+	if got := runWithApplication([]string{"paste"}, &out, &errout, &application{}); got != 2 {
+		t.Fatalf("run(paste) exit = %d, want usage error", got)
+	}
+	if !strings.Contains(errout.String(), "no agterm row in the environment") {
+		t.Fatalf("run(paste) stderr = %q, want missing-row usage", errout.String())
+	}
+}

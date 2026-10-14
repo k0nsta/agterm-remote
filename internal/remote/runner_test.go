@@ -243,6 +243,27 @@ func TestRunnerPastePutPassesArgvAndStdin(t *testing.T) {
 	}
 }
 
+func TestRunnerPastePutVersionMismatchWarnsWithoutFailing(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	ssh := &runnerSSH{body: []byte("agr\t0.9.0\n/home/remote/.cache/agr/paste/20261014183000-0-image.png\n")}
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	path, err := NewRunnerWithVersion(ssh, dirs, "1.0.0").PastePut(context.Background(), "host", "0-image.png", []byte("body"))
+	if err != nil {
+		t.Fatalf("PastePut() error = %v, want warning only", err)
+	}
+	if path == "" || !strings.Contains(logs.String(), "version mismatch") {
+		t.Fatalf("PastePut() path/log = %q/%q, want path and mismatch warning", path, logs.String())
+	}
+}
+
 func TestRunnerPastePutRejectsInvalidReplies(t *testing.T) {
 	t.Helper()
 	dirs := pathstest.Dirs(t)

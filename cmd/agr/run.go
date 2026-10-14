@@ -30,6 +30,7 @@ Commands:
   shell <host> [--cwd <dir>]
                           Open a plain remote login shell (no session)
   end [row]                Kill a row's remote sessions and close the row
+  paste [row] [pane-id]   Send the clipboard or latest screenshot to a remote row
   setup [--end-key <chord>]
                           Make agterm's ⌘D and ⌘J follow a remote row; add End remote session
 
@@ -54,6 +55,7 @@ var commandHandlers = map[string]commandHandler{
 	"doctor":  runDoctor,
 	"shell":   runShell,
 	"end":     runEnd,
+	"paste":   runPaste,
 	"setup":   runSetup,
 	// Hook entry points, run by agterm's hooks.conf rather than by hand, so
 	// they stay out of --help.
@@ -119,6 +121,26 @@ func runEnd(ctx context.Context, app *application, args []string, _, errw io.Wri
 		return 2
 	}
 	return cli.RunEnd(ctx, row, app.end(), errw)
+}
+
+// runPaste takes the row and pane id from keymap arguments, or the row from
+// the environment when invoked by hand inside agterm.
+func runPaste(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
+	if len(args) > 2 {
+		_, _ = fmt.Fprintln(errw, "usage: agr paste [row] [pane-id]")
+		return 2
+	}
+	row := optionalArg(args, 0)
+	for _, key := range []string{"AGT_SESSION_ID", "AGTERM_SESSION_ID"} {
+		if row == "" {
+			row = os.Getenv(key)
+		}
+	}
+	if row == "" {
+		_, _ = fmt.Fprintln(errw, "usage: agr paste [row] [pane-id] (no agterm row in the environment)")
+		return 2
+	}
+	return cli.RunPaste(ctx, row, optionalArg(args, 1), app.paste(), errw)
 }
 
 func runSetup(ctx context.Context, app *application, args []string, out, errw io.Writer) int {

@@ -366,6 +366,11 @@ func TestCtlPaneTextAndTypeLineTargetThePaneByID(t *testing.T) {
 	if err := ctl.TypeLine(ctx, "row-1", "P", "--help"); err != nil {
 		t.Fatalf("TypeLine() error = %v", err)
 	}
+	outputter.EXPECT().Output(gomock.Any(), []byte("/tmp/image.png "), testCtlPath, "session", "type", "--stdin", "--target", "row-1", "--pane-id", "P", "--socket", testCtlSock).
+		Return(nil, 0, nil)
+	if err := ctl.Type(ctx, "row-1", "P", "/tmp/image.png "); err != nil {
+		t.Fatalf("Type() error = %v", err)
+	}
 	outputter.EXPECT().Output(gomock.Any(), gomock.Any(), testCtlPath, "session", "type", "--stdin", "--target", "row-1", "--pane-id", "gone", "--socket", testCtlSock).
 		Return([]byte("error: unknown pane"), 1, nil)
 	if err := ctl.TypeLine(ctx, "row-1", "gone", "x"); err == nil || !strings.Contains(err.Error(), "unknown pane") {
