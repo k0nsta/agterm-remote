@@ -74,6 +74,9 @@ func Paste(ctx context.Context, row, paneID string, deps PasteDependencies) erro
 		if !remote.Printable(path) {
 			return fmt.Errorf("refusing to type a non-printable remote path")
 		}
+		if strings.ContainsAny(path, " \t") {
+			return fmt.Errorf("refusing to type remote path %q: it contains whitespace", path)
+		}
 		paths = append(paths, path)
 	}
 

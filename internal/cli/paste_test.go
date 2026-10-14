@@ -253,6 +253,7 @@ func TestPasteDoesNotTypeWhenAnUploadFailsOrPathIsNotPrintable(t *testing.T) {
 	}{
 		{name: "second upload fails", upload: &pasteUploaderFake{failAt: 1, err: errors.New("network down")}, want: "upload 1-second.txt: network down"},
 		{name: "remote path is not printable", upload: nonPrintablePasteUploader{}, want: "refusing to type a non-printable remote path"},
+		{name: "remote home has a space", upload: spacedPasteUploader{}, want: "contains whitespace"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Helper()
@@ -275,6 +276,12 @@ type nonPrintablePasteUploader struct{}
 
 func (nonPrintablePasteUploader) PastePut(context.Context, string, string, []byte) (string, error) {
 	return "/home/remote/.cache/agr/paste/bad\x1bpath", nil
+}
+
+type spacedPasteUploader struct{}
+
+func (spacedPasteUploader) PastePut(_ context.Context, _, name string, _ []byte) (string, error) {
+	return "/srv/user data/.cache/agr/paste/20261014-" + name, nil
 }
 
 func TestPasteRemovesClipboardTempDirectoryAndRejectsOversize(t *testing.T) {
