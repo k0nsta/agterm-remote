@@ -20,6 +20,9 @@ const (
 	maxPasteBytes      int64 = 50 * 1024 * 1024
 	pasteScreenshotAge       = 5 * time.Minute
 	pasteUploadTimeout       = 60 * time.Second
+
+	bracketedPasteStart = "\x1b[200~"
+	bracketedPasteEnd   = "\x1b[201~"
 )
 
 // PasteDependencies are the collaborators of Paste.
@@ -37,9 +40,10 @@ type pasteFile struct {
 }
 
 // Paste selects local paste content, uploads it to the host represented by
-// row, and types the resulting remote paths into the requested pane. The
-// terminal line is deliberately left unsubmitted so Claude Code can handle
-// the path as it would a local drag.
+// row, and sends the resulting remote paths to the requested pane as one
+// bracketed paste. Claude Code attaches a pasted image path as [Image #N], as
+// it does a local drag, but leaves a typed one as text; the line is not
+// submitted and the Mac clipboard is not touched.
 func Paste(ctx context.Context, row, paneID string, deps PasteDependencies) error {
 	if ctx == nil {
 		return errors.New("nil paste context")
@@ -88,7 +92,7 @@ func Paste(ctx context.Context, row, paneID string, deps PasteDependencies) erro
 	if !remote.Printable(line) {
 		return errors.New("refusing to type a non-printable remote path")
 	}
-	if err := deps.Panes.Type(ctx, row, targetPaneID, line); err != nil {
+	if err := deps.Panes.Type(ctx, row, targetPaneID, bracketedPasteStart+line+bracketedPasteEnd); err != nil {
 		return err
 	}
 	return nil

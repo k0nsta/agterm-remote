@@ -181,7 +181,8 @@ or disable the delay with:
 defaults write com.apple.screencapture show-thumbnail -bool false
 ```
 
-The path is typed, not pasted, so your Mac clipboard is left unchanged.
+The paths arrive as one bracketed paste, so Claude Code shows each image as
+`[Image #N]`, as it does for a local drag. Your Mac clipboard is not touched.
 
 ### What each piece is
 

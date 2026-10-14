@@ -133,7 +133,7 @@ func TestPasteUsesPaneBindingAndKeepsMultipleBasenamesDistinct(t *testing.T) {
 	if !reflect.DeepEqual(uploader.calls, wantCalls) {
 		t.Fatalf("uploads = %#v, want %#v", uploader.calls, wantCalls)
 	}
-	wantText := "/home/remote/.cache/agr/paste/20261014-0-image.png /home/remote/.cache/agr/paste/20261014-1-image.png "
+	wantText := "\x1b[200~/home/remote/.cache/agr/paste/20261014-0-image.png /home/remote/.cache/agr/paste/20261014-1-image.png \x1b[201~"
 	if !reflect.DeepEqual(panes.panes, []string{"R"}) || !reflect.DeepEqual(panes.texts, []string{wantText}) {
 		t.Fatalf("typed panes/text = %#v/%#v, want R/%q", panes.panes, panes.texts, wantText)
 	}

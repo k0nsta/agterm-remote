@@ -164,12 +164,13 @@ when it is typed (`agtermctl session type`, plain keystrokes) or only when it is
 (bracketed paste)? A local drag arrives as a paste. Use a throwaway row, never the user's
 live agent rows.
 
-Spike findings (2026-10-14): the requested `paste-spike` name resolved to an already active
-Claude/ralphex row in the shared agterm workspace, so the interactive probe was not run. The
-row name and context were restored and no live session was killed. The delivery choice is the
-plan's safe fallback: type the remote path with `Ctl.Type` without a newline. The JXA source
-probe, screenshot timing, and remote Claude attachment result remain unmeasured and need the
-post-completion manual check in a genuinely throwaway row.
+Spike findings (2026-10-15, run by hand after the autonomous run skipped it; that run had
+bound the orchestrating row to `paste-spike`, since removed): on `homelab`, inside tmux, Claude
+Code leaves a **typed** path as text, while the same path sent through `agtermctl session
+type` wrapped in `ESC[200~ … ESC[201~` becomes `[Image #N]`. Two space-separated paths in one
+paste give two images; a trailing space is fine. So delivery is `Ctl.Type` with a bracketed
+paste: no `session paste`, and the Mac clipboard is never replaced. The JXA source probe and the
+thumbnail timing are covered by the Post-Completion check.
 
 **Files:**
 - Modify: this plan (findings)
