@@ -18,14 +18,6 @@ import (
 	"time"
 )
 
-// Runner executes one local command and returns its stdout. It is deliberately
-// small: osascript and defaults both communicate their useful result on
-// stdout, while their exit status is enough for the screenshot defaults
-// fallbacks.
-type Runner interface {
-	Run(ctx context.Context, name string, args ...string) ([]byte, error)
-}
-
 // ExecRunner is the production command runner.
 type ExecRunner struct{}
 

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/k0nsta/agterm-remote/internal/pasteboard/mocks"
+	"go.uber.org/mock/gomock"
 )
 
 type commandCall struct {
@@ -17,17 +20,22 @@ type commandCall struct {
 	args []string
 }
 
-type fakeRunner struct {
-	calls   []commandCall
-	respond func(string, []string) ([]byte, error)
+// recordingRunner is a generated Runner mock that records every call and
+// answers through respond.
+type recordingRunner struct {
+	*mocks.MockRunner
+	calls []commandCall
 }
 
-func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
-	f.calls = append(f.calls, commandCall{name: name, args: append([]string(nil), args...)})
-	if f.respond == nil {
-		return nil, nil
-	}
-	return f.respond(name, args)
+func newRunner(t *testing.T, respond func(string, []string) ([]byte, error)) *recordingRunner {
+	t.Helper()
+	r := &recordingRunner{MockRunner: mocks.NewMockRunner(gomock.NewController(t))}
+	r.EXPECT().Run(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, name string, args ...string) ([]byte, error) {
+			r.calls = append(r.calls, commandCall{name: name, args: append([]string(nil), args...)})
+			return respond(name, args)
+		}).AnyTimes()
+	return r
 }
 
 func TestClipboardReadFilesWinOverImage(t *testing.T) {
@@ -41,12 +49,12 @@ func TestClipboardReadFilesWinOverImage(t *testing.T) {
 	if err := os.WriteFile(second, []byte("two"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := &fakeRunner{respond: func(name string, args []string) ([]byte, error) {
+	runner := newRunner(t, func(name string, args []string) ([]byte, error) {
 		if name != "osascript" || len(args) != 5 || args[0] != "-l" || args[1] != "JavaScript" || args[2] != "-e" {
 			t.Fatalf("osascript call = %q %#v", name, args)
 		}
 		return []byte(fmt.Sprintf(`{"files":[%q,%q],"image":true}`, first, second)), nil
-	}}
+	})
 
 	got, err := (Clipboard{Runner: runner}).Read(context.Background(), filepath.Join(dir, "image.png"))
 	if err != nil {
@@ -78,9 +86,9 @@ func TestClipboardReadImageAndEmptyResponses(t *testing.T) {
 		{name: "empty clipboard", body: `{}`, want: Content{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			runner := &fakeRunner{respond: func(string, []string) ([]byte, error) {
+			runner := newRunner(t, func(string, []string) ([]byte, error) {
 				return []byte(tc.body), nil
-			}}
+			})
 			got, err := (Clipboard{Runner: runner}).Read(context.Background(), filepath.Join(t.TempDir(), "image.png"))
 			if err != nil {
 				t.Fatalf("Read() error = %v", err)
@@ -95,9 +103,9 @@ func TestClipboardReadImageAndEmptyResponses(t *testing.T) {
 func TestClipboardReadRejectsMalformedJSONAndFolders(t *testing.T) {
 	t.Helper()
 	t.Run("malformed JSON", func(t *testing.T) {
-		runner := &fakeRunner{respond: func(string, []string) ([]byte, error) {
+		runner := newRunner(t, func(string, []string) ([]byte, error) {
 			return []byte("not json"), nil
-		}}
+		})
 		if _, err := (Clipboard{Runner: runner}).Read(context.Background(), filepath.Join(t.TempDir(), "image.png")); err == nil || !strings.Contains(err.Error(), "invalid response") {
 			t.Fatalf("Read() error = %v, want invalid response", err)
 		}
@@ -105,9 +113,9 @@ func TestClipboardReadRejectsMalformedJSONAndFolders(t *testing.T) {
 
 	t.Run("folder", func(t *testing.T) {
 		folder := t.TempDir()
-		runner := &fakeRunner{respond: func(string, []string) ([]byte, error) {
+		runner := newRunner(t, func(string, []string) ([]byte, error) {
 			return []byte(fmt.Sprintf(`{"files":[%q]}`, folder)), nil
-		}}
+		})
 		if _, err := (Clipboard{Runner: runner}).Read(context.Background(), filepath.Join(t.TempDir(), "image.png")); err == nil || !strings.Contains(err.Error(), folder) || !strings.Contains(err.Error(), "not a regular file") {
 			t.Fatalf("Read() error = %v, want named folder refusal", err)
 		}
@@ -115,9 +123,9 @@ func TestClipboardReadRejectsMalformedJSONAndFolders(t *testing.T) {
 
 	t.Run("unreadable or missing", func(t *testing.T) {
 		missing := filepath.Join(t.TempDir(), "missing.png")
-		runner := &fakeRunner{respond: func(string, []string) ([]byte, error) {
+		runner := newRunner(t, func(string, []string) ([]byte, error) {
 			return []byte(fmt.Sprintf(`{"files":[%q]}`, missing)), nil
-		}}
+		})
 		if _, err := (Clipboard{Runner: runner}).Read(context.Background(), filepath.Join(t.TempDir(), "image.png")); err == nil || !strings.Contains(err.Error(), missing) {
 			t.Fatalf("Read() error = %v, want named unreadable file", err)
 		}
@@ -142,7 +150,7 @@ func TestScreenshotsLatestUsesConfiguredLocationAndType(t *testing.T) {
 	}
 	setModTime(t, jpg, now.Add(-time.Minute))
 	setModTime(t, mov, now.Add(-30*time.Second))
-	runner := &fakeRunner{respond: func(name string, args []string) ([]byte, error) {
+	runner := newRunner(t, func(name string, args []string) ([]byte, error) {
 		if name != "defaults" {
 			t.Fatalf("command = %q %#v, want defaults", name, args)
 		}
@@ -155,7 +163,7 @@ func TestScreenshotsLatestUsesConfiguredLocationAndType(t *testing.T) {
 			t.Fatalf("unexpected defaults key: %#v", args)
 			return nil, nil
 		}
-	}}
+	})
 
 	got, ok, err := (Screenshots{Runner: runner, Home: home}).Latest(context.Background(), now, 5*time.Minute)
 	if err != nil {
@@ -179,12 +187,12 @@ func TestScreenshotsLatestFallsBackToDesktopAndPNG(t *testing.T) {
 		t.Fatal(err)
 	}
 	setModTime(t, old, now.Add(-6*time.Minute))
-	runner := &fakeRunner{respond: func(name string, args []string) ([]byte, error) {
+	runner := newRunner(t, func(name string, args []string) ([]byte, error) {
 		if args[len(args)-1] == "location" {
 			return nil, errors.New("defaults: exit status 1")
 		}
 		return nil, errors.New("defaults: exit status 1")
-	}}
+	})
 
 	got, ok, err := (Screenshots{Runner: runner, Home: home}).Latest(context.Background(), now, 5*time.Minute)
 	if err != nil {
