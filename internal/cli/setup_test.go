@@ -175,6 +175,61 @@ func TestWireKeymap(t *testing.T) {
 	}
 }
 
+func TestWirePasteKeymap(t *testing.T) {
+	t.Helper()
+	paste := testAgr + ` paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"`
+	for _, tc := range []struct {
+		name string
+		in   string
+		key  string
+		want string
+	}{
+		{
+			name: "fresh command",
+			key:  "ctrl+a>v",
+			want: pasteKeyNote + "\n" + `command "Paste to remote" ctrl+a>v --error-hud ` + paste + "\n",
+		},
+		{
+			name: "existing command keeps its chord and is repointed",
+			in:   `command "Paste to remote" cmd+shift+v --error-hud "$HOME/go/bin/agr" paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"` + "\n",
+			want: `command "Paste to remote" cmd+shift+v --error-hud ` + paste + "\n",
+		},
+		{
+			name: "duplicate is dropped and its chord carries",
+			in: `command "Paste to remote" --error-hud agr paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"` + "\n" +
+				"map cmd+k clear\n\n" + pasteKeyNote + "\n" +
+				`command "Paste to remote" ctrl+a>v --error-hud '/Users/me/.local/bin/agr' paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"` + "\n",
+			want: `command "Paste to remote" ctrl+a>v --error-hud ` + paste + "\n" +
+				"map cmd+k clear\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := wirePasteKeymap(tc.in, testAgr, tc.key)
+			if got != tc.want {
+				t.Fatalf("wirePasteKeymap() =\n%s\nwant\n%s", got, tc.want)
+			}
+			if again := wirePasteKeymap(got, testAgr, tc.key); again != got {
+				t.Fatalf("second wirePasteKeymap() changed the file:\n%s", again)
+			}
+		})
+	}
+}
+
+func TestKeymapBindsChord(t *testing.T) {
+	t.Helper()
+	for _, line := range []string{
+		"map x|ctrl+a>v clear",
+		`command "Other" ctrl+a>v noop`,
+	} {
+		if !keymapBindsChord(splitLines(line+"\n"), defaultPasteKey) {
+			t.Fatalf("keymapBindsChord(%q) = false, want true", line)
+		}
+	}
+	if keymapBindsChord(splitLines("map x|ctrl+a>c clear\n"), defaultPasteKey) {
+		t.Fatal("keymapBindsChord reported an unrelated chord as a conflict")
+	}
+}
+
 type agtermConfigFake struct {
 	hooks, keymap string
 	pathsErr      error
@@ -225,6 +280,88 @@ func TestSetupWritesAgtermFilesAndReloads(t *testing.T) {
 	}
 	if asked != 1 {
 		t.Fatalf("asked for a key %d times, want once: the second run finds the command", asked)
+	}
+}
+
+func TestSetupWiresPasteWithDefaultAndExplicitKeys(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	config := &agtermConfigFake{hooks: filepath.Join(dir, "hooks.conf"), keymap: filepath.Join(dir, "keymap.conf")}
+	var out bytes.Buffer
+	deps := SetupDependencies{Config: config, Agr: "/opt/homebrew/bin/agr", Home: dir, Out: &out, EndKey: "ctrl+a>x"}
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	keymap := readFile(t, config.keymap)
+	if !strings.Contains(keymap, `command "Paste to remote" ctrl+a>v --error-hud `+testAgr+` paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"`) {
+		t.Fatalf("keymap.conf = %q, want the default Paste chord", keymap)
+	}
+	if !strings.Contains(out.String(), "Paste to remote runs agr paste") {
+		t.Fatalf("output = %q, want the Paste reload message", out.String())
+	}
+
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("second Setup() error = %v", err)
+	}
+	if got := readFile(t, config.keymap); strings.Count(got, `command "Paste to remote"`) != 1 {
+		t.Fatalf("keymap.conf = %q, want one Paste command", got)
+	}
+}
+
+func TestSetupKeepsExistingPasteChordAndRebindsExplicitly(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	config := &agtermConfigFake{hooks: filepath.Join(dir, "hooks.conf"), keymap: filepath.Join(dir, "keymap.conf")}
+	if err := os.MkdirAll(filepath.Dir(config.keymap), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.keymap, []byte(`map x|ctrl+a>v clear`+"\n"+
+		`command "Paste to remote" cmd+shift+v --error-hud "$HOME/go/bin/agr" paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps := SetupDependencies{Config: config, Agr: "/opt/homebrew/bin/agr", Home: dir, EndKey: "ctrl+a>x"}
+	var out bytes.Buffer
+	deps.Out = &out
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	keymap := readFile(t, config.keymap)
+	if !strings.Contains(keymap, `command "Paste to remote" cmd+shift+v --error-hud `+testAgr+` paste`) {
+		t.Fatalf("keymap.conf = %q, want the existing Paste chord", keymap)
+	}
+
+	deps.PasteKey = "cmd+shift+p"
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup(--paste-key) error = %v", err)
+	}
+	keymap = readFile(t, config.keymap)
+	if !strings.Contains(keymap, `command "Paste to remote" cmd+shift+p --error-hud `+testAgr+` paste`) {
+		t.Fatalf("keymap.conf = %q, want the explicit Paste chord", keymap)
+	}
+}
+
+func TestSetupLeavesPasteUnboundOnConflictAndReportsHint(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	config := &agtermConfigFake{hooks: filepath.Join(dir, "hooks.conf"), keymap: filepath.Join(dir, "keymap.conf")}
+	if err := os.MkdirAll(filepath.Dir(config.keymap), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.keymap, []byte("map x|ctrl+a>v clear\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Setup(context.Background(), SetupDependencies{
+		Config: config, Agr: "/opt/homebrew/bin/agr", Home: dir, EndKey: "ctrl+a>x", Out: &out,
+	}); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	keymap := readFile(t, config.keymap)
+	if !strings.Contains(keymap, `command "Paste to remote" --error-hud `+testAgr+` paste`) {
+		t.Fatalf("keymap.conf = %q, want Paste without a chord", keymap)
+	}
+	if !strings.Contains(out.String(), "Paste to remote has no key") || !strings.Contains(out.String(), "--paste-key") {
+		t.Fatalf("output = %q, want the Paste no-key hint", out.String())
 	}
 }
 

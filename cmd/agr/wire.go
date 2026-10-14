@@ -101,11 +101,11 @@ func (a *application) paste() cli.PasteDependencies {
 
 // setup wires agr setup. Without agtermctl it still writes the files, to the
 // default config directory, and leaves the reload to agterm's next start. The
-// key for End remote session is asked only on a terminal.
-func (a *application) setup(out io.Writer, endKey string) cli.SetupDependencies {
+// key for End remote session is asked only on a terminal; Paste never prompts.
+func (a *application) setup(out io.Writer, endKey, pasteKey string) cli.SetupDependencies {
 	self, _ := os.Executable()
 	home, _ := os.UserHomeDir()
-	deps := cli.SetupDependencies{Agr: self, Home: home, Out: out, EndKey: endKey}
+	deps := cli.SetupDependencies{Agr: self, Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey}
 	if a.control != nil && agterm.CtlPath() != "" {
 		deps.Config = a.control
 	}

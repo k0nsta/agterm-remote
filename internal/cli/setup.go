@@ -27,15 +27,22 @@ type SetupDependencies struct {
 	// EndKey is the agterm chord for the End remote session command (--end-key);
 	// empty keeps the key an existing command has.
 	EndKey string
+	// PasteKey is the agterm chord for the Paste to remote command
+	// (--paste-key); empty keeps an existing chord or chooses the default when
+	// it is available.
+	PasteKey string
 	// AskKey asks for that chord when no command runs agr end yet; nil (not a
 	// terminal) adds the command without a key.
 	AskKey func() (string, error)
 }
 
 const (
-	endName    = `"End remote session"`
-	hooksNote  = "# agr setup: on a row bound with `agr open`, ⌘D opens <name>-2 and ⌘J a shell on its host"
-	keymapNote = "# agr setup: end a row's remote work (confirm, kill its sessions, close the row)"
+	endName         = `"End remote session"`
+	pasteName       = `"Paste to remote"`
+	hooksNote       = "# agr setup: on a row bound with `agr open`, ⌘D opens <name>-2 and ⌘J a shell on its host"
+	keymapNote      = "# agr setup: end a row's remote work (confirm, kill its sessions, close the row)"
+	pasteKeyNote    = "# agr setup: paste Mac clipboard files or screenshots into a remote row"
+	defaultPasteKey = "ctrl+a>v"
 )
 
 // Setup wires agterm to agr on this Mac: the pane.split and pane.scratch
@@ -76,13 +83,20 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 	if err != nil {
 		return err
 	}
+	paste, err := pasteKey(keymapPath, deps, key)
+	if err != nil {
+		return err
+	}
 	agr := remote.QuoteRemoteCommand(deps.Agr)
 	for _, file := range []struct {
 		path    string
 		rewrite func(string) string
 	}{
 		{hooksPath, func(content string) string { return wireHooks(content, agr) }},
-		{keymapPath, func(content string) string { return wireKeymap(content, agr, key) }},
+		{keymapPath, func(content string) string {
+			content = wireKeymap(content, agr, key)
+			return wirePasteKeymap(content, agr, paste)
+		}},
 	} {
 		changed, err := rewriteFile(file.path, file.rewrite)
 		if err != nil {
@@ -96,6 +110,9 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 	}
 	if key == "" && !keymapHasKey(keymapPath) {
 		_, _ = fmt.Fprintln(out, "End remote session has no key: run it from agterm's command palette, or bind one with `agr setup --end-key 'ctrl+a>x'`")
+	}
+	if paste == "" && !keymapHasKey(keymapPath, "paste") {
+		_, _ = fmt.Fprintln(out, "Paste to remote has no key: run it from agterm's command palette, or bind one with `agr setup --paste-key 'ctrl+a>v'`")
 	}
 	if !reachable {
 		_, _ = fmt.Fprintln(out, "start agterm, or run `agtermctl hooks reload` and `agtermctl keymap reload`, to apply")
@@ -114,7 +131,7 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 	if len(problems) > 0 {
 		return fmt.Errorf("agterm reports problems: %s", strings.Join(problems, ", "))
 	}
-	_, _ = fmt.Fprintln(out, "agterm reloaded: ⌘D and ⌘J follow a remote row; End remote session runs agr end")
+	_, _ = fmt.Fprintln(out, "agterm reloaded: ⌘D and ⌘J follow a remote row; End remote session runs agr end; Paste to remote runs agr paste")
 	return nil
 }
 
@@ -180,7 +197,7 @@ func isHookPair(kind, verb string) bool {
 // command without one.
 func endKey(keymapPath string, deps SetupDependencies) (string, error) {
 	key := strings.TrimSpace(deps.EndKey)
-	if key == "" && deps.AskKey != nil && endCommandLine(splitLines(readConf(keymapPath))) < 0 {
+	if key == "" && deps.AskKey != nil && commandLine(splitLines(readConf(keymapPath)), "end") < 0 {
 		answer, err := deps.AskKey()
 		if err != nil {
 			return "", err
@@ -193,38 +210,78 @@ func endKey(keymapPath string, deps SetupDependencies) (string, error) {
 	return key, nil
 }
 
-// wireKeymap points the custom command that runs `<agr> end` at agr, keeping
-// its name and options, and binds it to key when one is given; with no such
-// command it appends End remote session, bound to key or to nothing. A later
-// command running agr end is dropped with its note (agterm rejects a repeated
-// name); its chord moves to the first when that has none.
+// pasteKey chooses a requested chord, an existing Paste chord, or the
+// default chord when no map or command line already owns it. Paste never
+// prompts: setup can be run unattended and the default is intentionally
+// conservative when the keymap already has a conflicting binding.
+func pasteKey(keymapPath string, deps SetupDependencies, occupied ...string) (string, error) {
+	key := strings.TrimSpace(deps.PasteKey)
+	lines := splitLines(readConf(keymapPath))
+	if key == "" {
+		for _, line := range lines {
+			if agrWord(line, confToken.FindAllStringIndex(line, -1), "paste") > 0 {
+				if existing := chord(line, "paste"); existing != "" {
+					key = existing
+					break
+				}
+			}
+		}
+		defaultAvailable := !keymapBindsChord(lines, defaultPasteKey)
+		if len(occupied) > 0 && chordListContains(occupied[0], defaultPasteKey) {
+			defaultAvailable = false
+		}
+		if key == "" && defaultAvailable {
+			key = defaultPasteKey
+		}
+	}
+	if key != "" && (strings.HasPrefix(key, "-") || strings.ContainsAny(key, " \t'\"#") || !remote.Printable(key)) {
+		return "", fmt.Errorf("invalid key %q: use an agterm chord such as ctrl+a>x", key)
+	}
+	return key, nil
+}
+
+// wireKeymap points the custom command that runs `<agr> end` at agr. End and
+// Paste both use wireCommand so repointing, deduplication, and chord carrying
+// stay identical.
 func wireKeymap(content, agr, key string) string {
+	return wireCommand(content, agr, key, "end", endName, keymapNote, `end "{AGT_SESSION_ID}"`)
+}
+
+func wirePasteKeymap(content, agr, key string) string {
+	return wireCommand(content, agr, key, "paste", pasteName, pasteKeyNote, `paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"`)
+}
+
+// wireCommand points a custom command running verb at agr, keeping its name
+// and options, and binds it to key when one is given; with no such command it
+// appends the named command. A later command running the same verb is dropped
+// with its note; its chord moves to the first when that has none.
+func wireCommand(content, agr, key, verb, name, note, invocation string) string {
 	lines := splitLines(content)
-	i := endCommandLine(lines)
+	i := commandLine(lines, verb)
 	if i >= 0 {
 		kept := lines[:i+1]
 		for _, line := range lines[i+1:] {
-			if agrWord(line, confToken.FindAllStringIndex(line, -1)) < 0 {
+			if agrWord(line, confToken.FindAllStringIndex(line, -1), verb) < 0 {
 				kept = append(kept, line)
 				continue
 			}
-			if key == "" && endChord(lines[i]) == "" {
-				key = endChord(line)
+			if key == "" && chord(lines[i], verb) == "" {
+				key = chord(line, verb)
 			}
-			kept = dropNote(kept, keymapNote)
+			kept = dropNote(kept, note)
 		}
 		lines = kept
 	}
 	if i < 0 {
-		line := "command " + endName
+		line := "command " + name
 		if key != "" {
 			line += " " + key
 		}
-		return joinLines(lines, keymapNote, []string{fmt.Sprintf(`%s --error-hud %s end "{AGT_SESSION_ID}"`, line, agr)})
+		return joinLines(lines, note, []string{fmt.Sprintf("%s --error-hud %s %s", line, agr, invocation)})
 	}
 	line := lines[i]
 	spans := confToken.FindAllStringIndex(line, -1)
-	at := agrWord(line, spans)
+	at := agrWord(line, spans, verb)
 	line = line[:spans[at][0]] + agr + line[spans[at][1]:]
 	if key != "" {
 		// The chord, when there is one, is the word after the name.
@@ -238,45 +295,87 @@ func wireKeymap(content, agr, key string) string {
 	return joinLines(lines, "", nil)
 }
 
-// endCommandLine is the index of the first custom command running agr end,
-// or -1.
-func endCommandLine(lines []string) int {
+// commandLine is the index of the first custom command running agr verb, or
+// -1.
+func commandLine(lines []string, verb string) int {
 	for i, line := range lines {
-		if agrWord(line, confToken.FindAllStringIndex(line, -1)) > 0 {
+		if agrWord(line, confToken.FindAllStringIndex(line, -1), verb) > 0 {
 			return i
 		}
 	}
 	return -1
 }
 
-// agrWord is the index of the `<agr>` word followed by `end` on a command
+// agrWord is the index of the `<agr>` word followed by verb on a command
 // line, or -1.
-func agrWord(line string, spans [][]int) int {
+func agrWord(line string, spans [][]int, verb string) int {
 	if len(spans) < 4 || word(line, spans[0]) != "command" {
 		return -1
 	}
 	for j := len(spans) - 2; j > 1; j-- {
-		if isAgr(word(line, spans[j])) && word(line, spans[j+1]) == "end" {
+		if isAgr(word(line, spans[j])) && word(line, spans[j+1]) == verb {
 			return j
 		}
 	}
 	return -1
 }
 
-// keymapHasKey reports whether the agr end command in the file has a chord.
-func keymapHasKey(name string) bool {
+// keymapHasKey reports whether the agr command for verb in the file has a
+// chord. With no verb it retains the End-specific behavior.
+func keymapHasKey(name string, verbs ...string) bool {
+	verb := "end"
+	if len(verbs) > 0 {
+		verb = verbs[0]
+	}
 	lines := splitLines(readConf(name))
-	i := endCommandLine(lines)
-	return i >= 0 && endChord(lines[i]) != ""
+	i := commandLine(lines, verb)
+	return i >= 0 && chord(lines[i], verb) != ""
 }
 
-// endChord is the chord of a command line running agr end, or empty.
-func endChord(line string) string {
+// chord is the chord of a command line running agr verb, or empty.
+func chord(line, verb string) string {
 	spans := confToken.FindAllStringIndex(line, -1)
-	if agrWord(line, spans) > 2 && !strings.HasPrefix(word(line, spans[2]), "-") {
+	if agrWord(line, spans, verb) > 2 && !strings.HasPrefix(word(line, spans[2]), "-") {
 		return word(line, spans[2])
 	}
 	return ""
+}
+
+func keymapBindsChord(lines []string, key string) bool {
+	for _, line := range lines {
+		spans := confToken.FindAllStringIndex(line, -1)
+		if len(spans) == 0 {
+			continue
+		}
+		switch word(line, spans[0]) {
+		case "map":
+			if len(spans) > 1 && chordListContains(word(line, spans[1]), key) {
+				return true
+			}
+		case "command":
+			if commandChord(line) != "" && chordListContains(commandChord(line), key) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func commandChord(line string) string {
+	spans := confToken.FindAllStringIndex(line, -1)
+	if len(spans) <= 2 || word(line, spans[0]) != "command" || strings.HasPrefix(word(line, spans[2]), "-") {
+		return ""
+	}
+	return word(line, spans[2])
+}
+
+func chordListContains(chords, key string) bool {
+	for _, chord := range strings.Split(chords, "|") {
+		if chord == key {
+			return true
+		}
+	}
+	return false
 }
 
 // dropNote removes a trailing note setup wrote, and the blank line it put

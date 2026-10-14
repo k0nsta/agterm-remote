@@ -271,23 +271,23 @@ post-completion manual check in a genuinely throwaway row.
 - Modify: `internal/cli/setup.go`, `internal/cli/setup_test.go`, `cmd/agr/run.go`
   (`--paste-key`), `cmd/agr/wire.go`
 
-- [ ] generalize the End helpers over the verb (`commandLine(lines, verb)`,
+- [x] generalize the End helpers over the verb (`commandLine(lines, verb)`,
       `agrWord(…, verb)`, `chord(…)`) so End and Paste share repoint/dedupe/carry-chord logic
-- [ ] Paste line: `command "Paste to remote" <key> --error-hud <agr> paste
+- [x] Paste line: `command "Paste to remote" <key> --error-hud <agr> paste
       "{AGT_SESSION_ID}" "{AGT_PANE_ID}"`, with its own note
-- [ ] key: `--paste-key` if given, else keep the existing chord, else `ctrl+a>v` if no other
+- [x] key: `--paste-key` if given, else keep the existing chord, else `ctrl+a>v` if no other
       `map`/`command` line binds it (chords split on `|`), else no key + a message. agterm's
       built-in defaults are not in keymap.conf; a clash there surfaces as the existing
       "agterm reports problems" error
-- [ ] `AskKey` stays End-only: the paste key is never prompted for
-- [ ] `runSetup`: parse `--end-key` and `--paste-key` in any order (each at most once,
+- [x] `AskKey` stays End-only: the paste key is never prompted for
+- [x] `runSetup`: parse `--end-key` and `--paste-key` in any order (each at most once,
       non-empty), usage `agr setup [--end-key <chord>] [--paste-key <chord>]`; update the
       final "agterm reloaded…" line and add a Paste "no key" hint
-- [ ] tests: fresh file, existing paste line repointed with its chord kept, `ctrl+a>v`
+- [x] tests: fresh file, existing paste line repointed with its chord kept, `ctrl+a>v`
       already bound elsewhere (also as `x|ctrl+a>v`) → no key, `--paste-key` rebinds,
       duplicate dropped with note, End behavior unchanged (existing cases still pass)
-- [ ] `cmd/agr` tests: flag parsing (both flags, either order, repeated, missing value)
-- [ ] `make check` green
+- [x] `cmd/agr` tests: flag parsing (both flags, either order, repeated, missing value)
+- [x] `make check` green
 
 ### Task 6: Verify acceptance criteria
 

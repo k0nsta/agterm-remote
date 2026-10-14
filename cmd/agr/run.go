@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/cli"
@@ -31,8 +32,8 @@ Commands:
                           Open a plain remote login shell (no session)
   end [row]                Kill a row's remote sessions and close the row
   paste [row] [pane-id]   Send the clipboard or latest screenshot to a remote row
-  setup [--end-key <chord>]
-                          Make agterm's ⌘D and ⌘J follow a remote row; add End remote session
+  setup [--end-key <chord>] [--paste-key <chord>]
+                          Make agterm's ⌘D and ⌘J follow a remote row; add End and Paste commands
 
 Options:
   --help, -h               Show this help
@@ -145,15 +146,35 @@ func runPaste(ctx context.Context, app *application, args []string, _, errw io.W
 
 func runSetup(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
 	var endKey string
-	switch {
-	case len(args) == 0:
-	case len(args) == 2 && args[0] == "--end-key" && args[1] != "":
-		endKey = args[1]
-	default:
-		_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>]")
-		return 2
+	var pasteKey string
+	seenEnd, seenPaste := false, false
+	for i := 0; i < len(args); i++ {
+		if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" || strings.HasPrefix(args[i+1], "-") {
+			_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+			return 2
+		}
+		switch args[i] {
+		case "--end-key":
+			if seenEnd {
+				_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+				return 2
+			}
+			seenEnd = true
+			endKey = args[i+1]
+		case "--paste-key":
+			if seenPaste {
+				_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+				return 2
+			}
+			seenPaste = true
+			pasteKey = args[i+1]
+		default:
+			_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+			return 2
+		}
+		i++
 	}
-	return cli.RunSetup(ctx, app.setup(out, endKey), errw)
+	return cli.RunSetup(ctx, app.setup(out, endKey, pasteKey), errw)
 }
 
 func runOnSplit(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
