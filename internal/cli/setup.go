@@ -46,10 +46,10 @@ const (
 )
 
 // Setup wires agterm to agr on this Mac: the pane.split and pane.scratch
-// hooks that make ⌘D and ⌘J follow a remote row, and the keymap command that
-// runs agr end. Lines that already run an agr have only the binary's path
-// replaced, so a rebound key or a second run changes nothing else; missing
-// lines are appended. agterm then reloads both files.
+// hooks that make ⌘D and ⌘J follow a remote row, and the keymap commands that
+// run agr end and agr paste. Lines that already run an agr have only the
+// binary's path replaced, so a rebound or removed key or a second run changes
+// nothing else; missing lines are appended. agterm then reloads both files.
 func Setup(ctx context.Context, deps SetupDependencies) error {
 	if !filepath.IsAbs(deps.Agr) {
 		return fmt.Errorf("cannot locate the agr binary (%q)", deps.Agr)
@@ -210,8 +210,8 @@ func endKey(keymapPath string, deps SetupDependencies) (string, error) {
 	return key, nil
 }
 
-// pasteKey chooses a requested chord, an existing Paste chord, or the
-// default chord when no map or command line already owns it. Paste never
+// pasteKey chooses a requested chord, an existing Paste chord, or, for a
+// first Paste command only, the default chord when nothing already owns it. Paste never
 // prompts: setup can be run unattended and the default is intentionally
 // conservative when the keymap already has a conflicting binding.
 func pasteKey(keymapPath string, deps SetupDependencies, occupied ...string) (string, error) {
@@ -230,7 +230,7 @@ func pasteKey(keymapPath string, deps SetupDependencies, occupied ...string) (st
 		if len(occupied) > 0 && chordListContains(occupied[0], defaultPasteKey) {
 			defaultAvailable = false
 		}
-		if key == "" && defaultAvailable {
+		if key == "" && defaultAvailable && commandLine(lines, "paste") < 0 {
 			key = defaultPasteKey
 		}
 	}

@@ -340,6 +340,24 @@ func TestSetupKeepsExistingPasteChordAndRebindsExplicitly(t *testing.T) {
 	}
 }
 
+func TestSetupKeepsAnUnboundPasteCommandUnbound(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	config := &agtermConfigFake{hooks: filepath.Join(dir, "hooks.conf"), keymap: filepath.Join(dir, "keymap.conf")}
+	unbound := `command "Paste to remote" --error-hud ` + testAgr + ` paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"`
+	if err := os.WriteFile(config.keymap, []byte(unbound+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps := SetupDependencies{Config: config, Agr: "/opt/homebrew/bin/agr", Home: dir, EndKey: "ctrl+a>x", Out: &bytes.Buffer{}}
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	keymap := readFile(t, config.keymap)
+	if !strings.Contains(keymap, unbound) || strings.Contains(keymap, defaultPasteKey) {
+		t.Fatalf("keymap.conf = %q, want the Paste command left without a chord", keymap)
+	}
+}
+
 func TestSetupLeavesPasteUnboundOnConflictAndReportsHint(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()

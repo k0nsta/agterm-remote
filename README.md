@@ -128,10 +128,12 @@ On a row opened with `agr open`, agterm's own keys can follow the remote host:
 ```sh
 agr setup                        # asks for the End key; Enter skips it
 agr setup --end-key 'ctrl+a>x'   # bind or change it later
+agr setup --paste-key 'ctrl+a>v' # Paste gets ctrl+a>v when first added and free
 ```
 
 It writes these lines with the binary's own path, then reloads agterm. Lines
-that already run agr only get the path updated, so your key stays as it is:
+that already run agr only get the path updated, so your key, or a key you
+removed, stays as it is:
 
 ```text
 # hooks.conf
