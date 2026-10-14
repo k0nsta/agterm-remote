@@ -54,13 +54,16 @@ type pasteUploadCall struct {
 }
 
 type pasteUploaderFake struct {
-	calls  []pasteUploadCall
-	failAt int
-	err    error
+	calls     []pasteUploadCall
+	deadlines []time.Time
+	failAt    int
+	err       error
 }
 
-func (f *pasteUploaderFake) PastePut(_ context.Context, host, name string, body []byte) (string, error) {
+func (f *pasteUploaderFake) PastePut(ctx context.Context, host, name string, body []byte) (string, error) {
 	f.calls = append(f.calls, pasteUploadCall{host: host, name: name, body: append([]byte(nil), body...)})
+	deadline, _ := ctx.Deadline()
+	f.deadlines = append(f.deadlines, deadline)
 	if f.failAt >= 0 && len(f.calls)-1 == f.failAt {
 		return "", f.err
 	}
@@ -290,10 +293,15 @@ func TestPasteRemovesClipboardTempDirectoryAndRejectsOversize(t *testing.T) {
 	panes := &pastePanesFake{}
 	clipboard := &pasteClipboardFake{content: pasteboard.Content{Image: true}, imageBody: []byte("image")}
 	store := newPasteStore(t, bindings.Binding{Row: "row-1", PaneID: "L", Pane: "left", Host: "host", Name: "main"})
+	started := time.Now()
 	if err := Paste(context.Background(), "row-1", "L", PasteDependencies{
 		Store: store, Clipboard: clipboard, Screenshots: &pasteScreenshotsFake{}, Remote: uploader, Panes: panes,
 	}); err != nil {
 		t.Fatalf("image Paste() error = %v", err)
+	}
+	if len(uploader.deadlines) != 1 || uploader.deadlines[0].IsZero() ||
+		uploader.deadlines[0].After(time.Now().Add(pasteUploadTimeout)) || uploader.deadlines[0].Before(started.Add(pasteUploadTimeout)) {
+		t.Fatalf("upload deadlines = %v, want one %v from the paste", uploader.deadlines, pasteUploadTimeout)
 	}
 	if len(clipboard.calls) != 1 {
 		t.Fatal("clipboard was not read")
@@ -302,26 +310,40 @@ func TestPasteRemovesClipboardTempDirectoryAndRejectsOversize(t *testing.T) {
 		t.Fatalf("clipboard temp directory still exists: stat error = %v", err)
 	}
 
-	large := filepath.Join(t.TempDir(), "large.bin")
-	file, err := os.Create(large)
+	dir := t.TempDir()
+	large := sparsePasteFile(t, dir, "large.bin", maxPasteBytes+1)
+	half := sparsePasteFile(t, dir, "half-1.bin", maxPasteBytes/2+1)
+	otherHalf := sparsePasteFile(t, dir, "half-2.bin", maxPasteBytes/2+1)
+	for name, files := range map[string][]string{
+		"one file over the limit":  {large},
+		"two files over the limit": {half, otherHalf},
+	} {
+		uploader.calls = nil
+		err := Paste(context.Background(), "row-1", "L", PasteDependencies{
+			Store: store, Clipboard: &pasteClipboardFake{content: pasteboard.Content{Files: files}},
+			Screenshots: &pasteScreenshotsFake{}, Remote: uploader, Panes: panes,
+		})
+		if err == nil || err.Error() != "paste is larger than 50 MB" {
+			t.Fatalf("%s: error = %v", name, err)
+		}
+		if len(uploader.calls) != 0 {
+			t.Fatalf("%s: uploaded %d files", name, len(uploader.calls))
+		}
+	}
+}
+
+func sparsePasteFile(t *testing.T, dir, name string, size int64) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	file, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Truncate(maxPasteBytes + 1); err != nil {
+	if err := file.Truncate(size); err != nil {
 		t.Fatal(err)
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	uploader.calls = nil
-	err = Paste(context.Background(), "row-1", "L", PasteDependencies{
-		Store: store, Clipboard: &pasteClipboardFake{content: pasteboard.Content{Files: []string{large}}},
-		Screenshots: &pasteScreenshotsFake{}, Remote: uploader, Panes: panes,
-	})
-	if err == nil || err.Error() != "paste is larger than 50 MB" {
-		t.Fatalf("oversize error = %v", err)
-	}
-	if len(uploader.calls) != 0 {
-		t.Fatalf("oversize paste uploaded %#v", uploader.calls)
-	}
+	return path
 }
