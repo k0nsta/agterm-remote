@@ -291,9 +291,9 @@ post-completion manual check in a genuinely throwaway row.
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] each Overview source works, and a local row and an empty clipboard give the errors
-- [ ] old remote → install hint; non-printable name never entered
-- [ ] `make check` green (test, lint, shellcheck, check-remote)
+- [x] each Overview source works, and a local row and an empty clipboard give the errors
+- [x] old remote → install hint; non-printable name never entered
+- [x] `make check` green (test, lint, shellcheck, check-remote)
 
 ### Task 7: [Final] Update documentation
 
