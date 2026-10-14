@@ -175,8 +175,9 @@ func (r *Runner) ResolveAgrPath(ctx context.Context, host string) (string, error
 }
 
 // Data invokes a data-producing remote verb, verifies agr's handshake header,
-// and returns only the body after that header. An unreachable host is checked
-// before header parsing so offline hosts never receive an installation hint.
+// and returns only the body after that header. An unreachable host and a run
+// cut short by ctx are checked before header parsing, so neither an offline
+// host nor a timeout ever receives an installation hint.
 func (r *Runner) Data(ctx context.Context, host, verb string, args ...string) ([]byte, error) {
 	return r.data(ctx, host, nil, verb, args...)
 }
@@ -199,7 +200,7 @@ func (r *Runner) data(ctx context.Context, host string, stdin []byte, verb strin
 	remoteArgv = append(remoteArgv, filepath.Join(home, remoteAgrPath), verb)
 	remoteArgv = append(remoteArgv, args...)
 	body, runErr := r.sshClient().Run(ctx, host, stdin, remoteArgv...)
-	if errors.Is(runErr, ErrUnreachable) {
+	if errors.Is(runErr, ErrUnreachable) || (runErr != nil && ctx.Err() != nil) {
 		return body, runErr
 	}
 	version, payload, headerErr := parseDataHeader(body)

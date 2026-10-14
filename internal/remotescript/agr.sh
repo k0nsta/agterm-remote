@@ -577,6 +577,7 @@ paste_put() {
 	[ "$#" -eq 1 ] || usage 2
 	name=$1
 	valid_token "$name" || { printf '%s\n' 'agr: invalid paste name' >&2; exit 2; }
+	header
 
 	umask 077
 	dir=$HOME/.cache/agr/paste
@@ -591,7 +592,6 @@ paste_put() {
 	target=$dir/$stamp-$name
 	mv "$tmp" "$target"
 	tmp=
-	header
 	printf '%s\n' "$target"
 }
 

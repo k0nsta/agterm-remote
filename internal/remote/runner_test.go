@@ -159,6 +159,24 @@ func TestRunnerDataUnreachablePrecedesNotInstalled(t *testing.T) {
 	}
 }
 
+func TestRunnerPastePutCutShortIsNotInstallHint(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	if err := SaveHostInfo(dirs, "host", HostInfo{Home: "/home/remote"}); err != nil {
+		t.Fatalf("SaveHostInfo() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ssh := &runnerSSH{err: context.Canceled}
+	_, err := NewRunnerWithVersion(ssh, dirs, "1.0.0").PastePut(ctx, "host", "0-image.png", []byte("body"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("PastePut() error = %v, want the context error", err)
+	}
+	if errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("PastePut() error = %v, must not be ErrNotInstalled", err)
+	}
+}
+
 func TestRunnerDataMismatchWarnsAndReturnsPayload(t *testing.T) {
 	t.Helper()
 	dirs := pathstest.Dirs(t)

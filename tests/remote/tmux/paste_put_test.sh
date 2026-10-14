@@ -42,3 +42,14 @@ printf 'fresh' > "$fresh"
 printf 'new' | run_agr paste-put 1-new.txt >/dev/null
 [ ! -e "$old" ] || { printf '%s\n' 'old paste was not pruned' >&2; exit 1; }
 [ -f "$fresh" ] || { printf '%s\n' 'fresh paste was pruned' >&2; exit 1; }
+
+if [ "$(id -u)" -ne 0 ]; then
+	chmod 500 "$paste_dir"
+	set +e
+	failed_output=$(printf 'x' | run_agr paste-put 2-x.txt 2>/dev/null)
+	failed_rc=$?
+	set -e
+	chmod 700 "$paste_dir"
+	[ "$failed_rc" -ne 0 ] || { printf '%s\n' 'unwritable paste dir did not fail' >&2; exit 1; }
+	assert_eq "agr${tab}@VERSION@" "$(printf '%s\n' "$failed_output" | sed -n '1p')" 'a failed write still prints the header first'
+fi
