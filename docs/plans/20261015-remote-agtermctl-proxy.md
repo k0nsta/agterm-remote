@@ -52,6 +52,12 @@ Decided by the user (not open):
   `agr overlay` plan and reuses its reviewed transport rules.
 - **Trust, scoped**: a host may read, may write only to panes bound to it (including ones it
   created), and is refused anything that runs or reads something on the Mac.
+- **Orchestrator grant**: a host session started for a local orchestrator may also message that
+  orchestrator's pane. See Technical Details > Orchestrator grant.
+- **Host with a real agtermctl** (a Mac running agterm): `agr install` skips the proxy there.
+- **Status from hosts is scoped too**: a `session_id` status event is applied only to a row
+  that has a pane bound to the sending host. This closes the unscoped path in
+  `event.go:63-67`.
 
 ## Context (from discovery)
 
@@ -292,6 +298,30 @@ Refused, with the reason named: `pick`, `ask`, `dashboard`, `quick`, `workspace`
 - **`--url`**: `localhost`, `127.*`, `[::1]` and `0.0.0.0` get a warning on stderr (localhost
   means the Mac). It is not a security control.
 
+### Orchestrator grant
+
+- **The option**: `agr open … --orchestrator <row-id>:<pane-id>` records a local orchestrator
+  pane in the new binding (`bindings.Binding.Orchestrator`, empty by default).
+  - Both values must be full ids of a live pane (`tree --json`) that is **not** bound to any
+    host.
+  - The orchestrator passes its own `$AGTERM_SESSION_ID:$AGTERM_PANE_ID`. A row created from a
+    host with `session new` gets no grant, since its caller is already host-owned.
+- **What it allows**: only `session type` and `notify`, and only into that exact pane.
+  `session text` is already a read.
+- **When**: only while the pane's foreground is a **program**, not a shell. In
+  `tree --json`, `foreground` is present and `foregroundShell` absent. If the orchestrator
+  Claude has exited, typing would run Mac shell commands, so the call is refused.
+- **Lifetime**: the grant ends when the binding does (row close, `agr end`, stale-status
+  cleanup).
+
+### Status events (`session_id` path)
+
+- `receiver.Listener.route` applies a `session_id` status only when `ForRow(session_id)` has a
+  pane bound to this host; otherwise it logs and drops the event.
+- `session`-name events are unchanged; they already resolve through this host's bindings.
+- This breaks cookbook-format senders whose rows were never opened with `agr open`. The
+  release notes say so.
+
 ### `agr open` / `agr run` / attach (Mac and remote)
 
 - **`agr open <host> <name> [--cwd D] [--command CMD]`**: `CMD` runs only when the remote
@@ -313,6 +343,9 @@ Refused, with the reason named: `pick`, `ask`, `dashboard`, `quick`, `workspace`
 
 - **Install**: `~/.local/bin/agtermctl` is a sh wrapper, `exec "$HOME/.local/bin/agr" ctl
   "$@"`, written by `remoteScriptWrite`.
+  - If a login shell on the host already finds an `agtermctl` that is not agr's proxy (a Mac
+    running agterm), install skips the proxy and says so.
+  - A proxy agr wrote earlier, recognised by a marker line, is updated.
   - `agr doctor` probes whether the host's `agtermctl` in a login shell is the proxy, and
     whether `~/.local/bin` is on PATH there.
 - **Arguments**: `agr ctl` finds file options from a small table (`--html`); each must be a
@@ -371,11 +404,18 @@ Use throwaway rows only, local and on `homelab`; record results here.
 
 - [ ] `agr open … [--command CMD]`, and `attach --env/--command` behind the remote-version gate
 - [ ] the remote `attach` applies env and command per the spike, and validates the values
+- [ ] `agr open … --orchestrator <row>:<pane>`: validated against `tree --json` (live, not
+      host-bound) and stored in `bindings.Binding.Orchestrator` (JSON field `orchestrator`,
+      omitted when empty; old files still load)
 - [ ] `agr run <host> [--cwd D] -- argv…`
 - [ ] the Mac-side shell quoting helper (`internal/proxy/quote.go`)
-- [ ] tests (Go): argv for `--command`, env pairs, invalid values, the old-remote gate (no env,
-      `--command` refused), `agr run` argv, and quoting with `'`, `"`, `;`, `$()`, a backtick and
-      a newline
+- [ ] tests (Go):
+  - argv for `--command`, env pairs, invalid values
+  - the old-remote gate: no env, `--command` refused
+  - `--orchestrator`: valid, malformed, host-bound pane refused, unknown pane refused, binding
+    round-trip
+  - `agr run` argv
+  - quoting with `'`, `"`, `;`, `$()`, a backtick and a newline
 - [ ] tests (remote): a new tmux session sees the env and runs CMD; re-attach refreshes the env
       and doesn't re-run CMD; the same for zmx
 - [ ] `make check` must pass before Task 3
@@ -433,6 +473,9 @@ Use throwaway rows only, local and on `homelab`; record results here.
     `split close`, `swap`, `overlay navigate`, `run-job`, `hud --file`, `background`,
     `--persistent`, `--browse`, `pick`, `ask`, `dashboard`)
   - `--target=X` and `--command=` forms
+  - the orchestrator grant: `session type`/`notify` into the granted pane allowed while it runs
+    a program; refused when it is at a shell prompt, for another pane of that row, and for any
+    other leaf
   - prefix and `active` refused; stale self ids mapped
   - the unbound split pane of an owned row refused; a detached pane refused
   - `session close` with one unowned `--target` refused
@@ -480,7 +523,8 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - `have python3` or exit 1
   - the python3 client: header from argv and env, wait for ack, then the body, demux the
     frames, the messages, quiet Ctrl-C
-- [ ] install writes the wrapper (0755); the doctor probe and report
+- [ ] install writes the wrapper (0755), skips it when a non-agr `agtermctl` is found, and
+      updates an earlier agr proxy (marker line); the doctor probe and report
 - [ ] `shellcheck -s sh` clean
 - [ ] remote tests against a fake python3 server on a short socket path, which the test kills
       itself:
@@ -492,7 +536,20 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - outside a session → refused; zmx covers the session lookup
 - [ ] `make check` must pass before Task 7
 
-### Task 7: Verify acceptance criteria
+### Task 7: Scope `session_id` status events to bound rows
+
+**Files:**
+- Modify: `internal/receiver/listener.go`, `internal/receiver/dependency.go` (the `Resolver`
+  gains `ForRow`), `internal/receiver/listener_test.go`,
+  `internal/receiver/mocks/dependency_mock.go` (generated)
+
+- [ ] `route`: a `session_id` event is applied only when `ForRow(id)` has a binding for
+      `l.host`; otherwise log `status for unbound row <id> from <host> dropped`
+- [ ] tests: a bound row is applied; an unbound row is dropped; a row bound to another host is
+      dropped; `session` events unchanged
+- [ ] `make test` must pass before Task 8
+
+### Task 8: Verify acceptance criteria
 
 - [ ] from a throwaway remote row on `homelab`, with unchanged tools:
   - a `decide.py` panel round trip; `show-image.sh`
@@ -501,11 +558,13 @@ Use throwaway rows only, local and on `homelab`; record results here.
     detached pane
   - `session new --command 'claude …'` gives a bound homelab row running it
   - `session restore` on that row reattaches after an agterm restart
+  - a worker opened with `--orchestrator` types into the local orchestrator pane while Claude
+    runs there, and is refused once it is at a shell prompt
 - [ ] status events unchanged; refusal, old-daemon, old-remote and bridge messages as
       documented; `agr down` returns within `teardownTimeout` during a blocking call
 - [ ] `make check` green
 
-### Task 8: [Final] Update documentation
+### Task 9: [Final] Update documentation
 
 - [ ] README "Remote agterm control":
   - what works unchanged; the allowlist; full ids only; one-file pages
@@ -520,7 +579,10 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - `--js` pages run in agterm on the Mac and can reach its network; the localhost warning is not
     a control
   - `events` streams the Mac's whole feed
-  - the existing status `session_id` path is unchanged and still unscoped
+  - the orchestrator grant: which pane, which leaves, and the foreground-program rule
+  - status `session_id` events are scoped to bound rows; cookbook senders on rows not opened with
+    `agr open` are dropped
+  - the proxy is skipped on hosts that have a real agtermctl
 - [ ] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
@@ -531,18 +593,10 @@ Use throwaway rows only, local and on `homelab`; record results here.
     is skill-side: treat `agr` as running on a remote row, or poll `session text`.
   - The README notes this class of break for other users.
 - **Spawning workers on a host from the Mac**: `spawn-agent --host <host>` on top of `agr open
-  --command` (skill-side; the worktree via `ssh host git …`).
+  --command … --orchestrator "$AGTERM_SESSION_ID:$AGTERM_PANE_ID"` (skill-side; the worktree via
+  `ssh host git …`).
 - Manual check on `homelab`: the Task 7 round trips with the real agterm; Ctrl-C during a
   `--block` overlay closes it.
 - Restart the Mac `agr daemon` after upgrading. Release notes: `brew upgrade agr`, restart the
-  daemon, `agr install <host>`, re-open rows to pick up the environment.
-
-## Open questions
-
-- **Remote worker → local orchestrator**: under the scoped policy a homelab worker cannot
-  type into the local row that spawned it. Allow writes to that row, recorded when it runs
-  `agr open` or `session new` for the host? Or keep the policy strictly host-scoped?
-- **A real agtermctl on the host** (a Mac running agterm): install the proxy anyway (it
-  shadows the real one in agr rows), or skip the proxy on such hosts?
-- **Status `session_id` path**: it is unscoped today (`event.go:63-67`), so a host can set
-  status on any row. Restrict it to rows bound to the host in this plan, or leave it?
+  daemon, `agr install <host>`, re-open rows to pick up the environment; a breaking note for
+  cookbook-format `session_id` status senders.
