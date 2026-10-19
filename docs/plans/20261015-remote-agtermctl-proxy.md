@@ -35,6 +35,12 @@ What this enables:
   row is bound right away.
 - **Workers on a host from the Mac**: `agr open <host> <name> --command …` is the building
   block local tools use.
+- **Handoff to a local agent, with consent**: a remote session may `session type` into a local
+  pane running Claude or Codex that it has no grant for. agterm asks the user first (Allow once
+  / Allow this host here / Deny). Mac → remote typing already works today.
+- **An `agr` skill for Claude**: agr ships a skill, installed on the Mac and on each host. It
+  teaches Claude what "on <host>" means, how to wrap any agterm spawn for a host, and how to
+  hand off from a remote row. Other users' skills then work by composition, with no changes.
 
 Known limits, documented rather than hidden:
 
@@ -47,13 +53,19 @@ Known limits, documented rather than hidden:
 
 Decided by the user (not open):
 
-- **Scope**: all four items above.
+- **Scope**: all six items above.
 - **Generic**: an agtermctl proxy, not agr-specific verbs. This supersedes the earlier
   `agr overlay` plan and reuses its reviewed transport rules.
 - **Trust, scoped**: a host may read, may write only to panes bound to it (including ones it
-  created), and is refused anything that runs or reads something on the Mac.
+  created), and is refused anything that runs or reads something on the Mac. The one widening
+  is `session type` into a local agent pane under a grant (Technical Details > Grants).
 - **Orchestrator grant**: a host session started for a local orchestrator may also message that
-  orchestrator's pane. See Technical Details > Orchestrator grant.
+  orchestrator's pane. See Technical Details > Grants.
+- **Consent grant**: any other pane can be messaged after the user allows it in an agterm `ask`
+  dialog; "Allow for this pair" is remembered like an orchestrator grant. See Technical
+  Details > Grants.
+- **Skill**: agr ships a generic `agr` skill (this repo). The user's own `spawn-agent` and
+  `teardown-agent` gain `--host` in machine-setup (Post-Completion).
 - **Host with a real agtermctl** (a Mac running agterm): `agr install` skips the proxy there.
 - **Status from hosts is scoped too**: a `session_id` status event is applied only to a row
   that has a pane bound to the sending host. This closes the unscoped path in
@@ -102,6 +114,11 @@ Decided by the user (not open):
     - `session hud --file`, `session background image`
     - `--url … --persistent/--browse`
     - `session new --command`, `session overlay open COMMAND`, `session restore CMD`
+- **Dialogs**: `agterm.Ctl.Confirm` (`internal/agterm/ctl.go:283`) runs `ask open TITLE
+  --message … --button id=Label … --default … --target <row>`; exit 2 is a cancel, and the
+  answer is `{"result":"answered","id":…}`. `agr end` already confirms through it.
+- **Skills**: Claude Code reads `~/.claude/skills/<name>/SKILL.md`. agterm installs its own
+  `agterm` skill the same way, with an `<!-- agterm-skill -->` marker.
 - **Remote tests**: `tests/remote/{tmux,zmx}` with `lib.sh`.
 - **homelab** uses `AGR_RELAY=python3`; the Mac daemon running now predates 1.2.0.
 
@@ -128,6 +145,9 @@ Decided by the user (not open):
   - streaming runner, cancellation, concurrency cap, temp-file lifetime
   - `agr open --command` / env export with remote-version gating
   - `agr run`
+  - grants: the program rule per surface, the sanitiser, consent outcomes, the re-check after
+    the answer, per-host anti-spam, grants carried over a re-bind
+  - the skill: embed, marker, install rules
 - **remote (sh)**: `tests/remote/{tmux,zmx}/proxy_test.sh` run the installed proxy against a
   fake python3 bridge server.
 - Every test-only helper takes `*testing.T` first and calls `t.Helper()`.
@@ -227,7 +247,7 @@ Allowlist, driven by what the four skills use; anything else is added only when 
 | `events` (`--json`, `--run`, `--after`) | read | streams the Mac's whole event feed (README Security) |
 | `session text` | read | row/pane must be bound to this host; `--pane-id` injected |
 | `session overlay result`, `session overlay text` | read | owned row |
-| `session type` (`--stdin` reads stdin) | write, pane | `--pane-id` injected; target pane owned and attached |
+| `session type` (`--stdin` reads stdin) | write, pane | `--pane-id` injected; target pane owned and attached, or a local pane with a grant or consent (Grants) |
 | `session status`, `session context`, `session rename` | write, row | owned row |
 | `session hud open/update/close` (message options only, no `--file`) | write, row | owned row |
 | `session overlay open --html @i [--js] [--block] [--size-percent] [--pane-id]` | write, pane | file uploaded; `--cwd` dropped; cancel hook = overlay close |
@@ -298,21 +318,83 @@ Refused, with the reason named: `pick`, `ask`, `dashboard`, `quick`, `workspace`
 - **`--url`**: `localhost`, `127.*`, `[::1]` and `0.0.0.0` get a warning on stderr (localhost
   means the Mac). It is not a security control.
 
-### Orchestrator grant
+### Grants
 
-- **The option**: `agr open … --orchestrator <row-id>:<pane-id>` records a local orchestrator
-  pane in the new binding (`bindings.Binding.Orchestrator`, empty by default).
-  - Both values must be full ids of a live pane (`tree --json`) that is **not** bound to any
-    host.
-  - The orchestrator passes its own `$AGTERM_SESSION_ID:$AGTERM_PANE_ID`. A row created from a
-    host with `session new` gets no grant, since its caller is already host-owned.
-- **What it allows**: only `session type` and `notify`, and only into that exact pane.
-  `session text` is already a read.
-- **When**: only while the pane's foreground is a **program**, not a shell. In
-  `tree --json`, `foreground` is present and `foregroundShell` absent. If the orchestrator
-  Claude has exited, typing would run Mac shell commands, so the call is refused.
-- **Lifetime**: the grant ends when the binding does (row close, `agr end`, stale-status
-  cleanup).
+A grant lets a caller message one **local** pane it does not own. Grants live on the caller's
+binding: `bindings.Binding.Grants []Grant` (JSON `grants`, omitted when empty; old files still
+load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent`.
+
+- **Scope is the host**: the header's `session` is chosen by the host, so any process on that
+  host can claim any of its session names. A grant is therefore treated, worded and documented
+  as "anything on `<host>` may type into this pane", never as one session's.
+- **What a grant allows**: only `session type`, only into that exact pane. `notify` stays as in
+  the allowlist (caller's row only). `session text` stays limited to host-bound panes; grants do
+  not widen reads.
+- **Local targets only**: a pane bound to any host is never a grant or consent target. Its
+  `foreground` always reads `agr open …`, so the program rule below can't see a remote shell.
+  Mac → remote typing already works; host → other host is out of scope.
+- **The program rule** (checked on every call, granted or consented):
+  - each surface is mapped to its own fields: left → `foreground` / `foregroundShell`, right →
+    `splitForeground` / `splitForegroundShell` (only when `hasSplit`); a scratch or any surface
+    without these fields is **unknown**
+  - allowed only when the basename of `foreground[0]` is in the agent list (default `claude`,
+    `codex`; Task 1 confirms the argv Claude Code shows). A shell, an unknown foreground, or any
+    other program (`python3`, `vim`, `less` run commands) is refused
+  - read from one `tree --json` immediately before `session type`; the small window between that
+    read and the typing is documented
+- **Typed text is sanitised** (granted and consented typing, not owned panes):
+  - refused if it contains C0 controls other than `\n` and `\t`, DEL, or Unicode Cf characters
+    (bidi, zero-width). That blocks `\e[Z` (Claude's mode cycle), `\e[201~` (paste end) and
+    hidden text
+  - at most 64 KiB
+- **`session type` schema for grants**: `--select` and `--pane` refused.
+- **Lifetime**: a grant ends with the caller's binding (row close, `agr end`, stale-status
+  cleanup). A re-attach of the same host and name (`agr open` again, `session restore` after an
+  agterm restart, the daemon's pre-bind) **carries the grants over**: `bindings.upsert` copies
+  `Grants` when it replaces an entry with the same host and name. A grant whose target pane is
+  gone is refused by `Authorize`, and the daemon drops it from the store.
+
+**Orchestrator grant** (set up front):
+- `agr open … --orchestrator <row-id>:<pane-id>` adds one `orchestrator` grant to the new
+  binding.
+- Both values must be full ids of a live local pane (`tree --json`, not bound to any host).
+- The orchestrator's shell must expand `$AGTERM_SESSION_ID:$AGTERM_PANE_ID` itself (double
+  quotes in the spawning command); expanded later, the variables would name the new row.
+- A row created from a host with `session new` gets no grant, since its caller is already
+  host-owned, and a host-sent `--command` can't inject `--orchestrator` through the rewrites
+  (every value is quoted; tested).
+
+**Consent grant** (asked on first use):
+- **Trigger**: `session type` into a local pane with no grant. Every other write leaf on such a
+  pane is refused as before, with no dialog.
+- **Target pane**: `--target` must be a full row id. With `--pane-id`, that pane. Without it,
+  the row's one pane that passes the program rule; with zero or two, the call is refused and
+  the message lists the row's pane ids.
+- **Checks before the dialog**: the program rule and the sanitiser. A call that can't proceed
+  never asks the user.
+- **Dialog**: `ask open --no-block --pane-id <target pane> --target <row>` (no `--follow`), so
+  it sits on the pane the text would go to:
+  - title: `Anything on <host> wants to type into “<target row name>”`
+  - message: `From session <name> on <host>:` then the first 300 characters of the text between
+    `⟦ ⟧` delimiters (Cf characters shown escaped), plus `… (<n> characters)` when cut; the
+    text can't pass for dialog wording
+  - buttons: `once=Allow once`, `pair=Allow <host> here until it closes`, `deny=Deny`
+    (default `deny`)
+- **Waiting**: the daemon polls `ask result <id>`; on a client EOF, a host shutdown or 120 s it
+  runs `ask cancel <id>`, so a dead dialog never stays up to be clicked.
+- **Outcome**:
+  - `once`: the program rule is checked **again** (fresh `tree --json`), then the call runs;
+    nothing is stored
+  - `pair`: the same re-check, the grant stored on the caller's binding (found by host and name
+    under the store lock), then the call runs
+  - a re-check failure after the answer: refused with `the pane is no longer running an agent`
+  - `deny`, a cancel or no answer in 120 s: refused with `the user declined` / `no answer`
+- **Anti-spam, per host**:
+  - one open consent dialog per host; a second consent call while it is open is refused with
+    `a request to the user is already open`
+  - after a deny, a timeout or a client cancel, consent calls from that host to the same target
+    row are refused without a dialog for 60 s
+- **Concurrency**: a call waiting on the dialog counts toward the 16-call cap.
 
 ### Status events (`session_id` path)
 
@@ -361,6 +443,42 @@ Refused, with the reason named: `pick`, `ask`, `dashboard`, `quick`, `workspace`
   - outside an agr session: `agtermctl (via agr): not inside a row opened with agr open`
 - Ctrl-C exits 130 quietly.
 
+### The `agr` skill
+
+- **Source**: `internal/skill/SKILL.md`, embedded with `go:embed`. Its first body line is
+  `<!-- agr-skill <version> -->`.
+- **Install**:
+  - Mac: `agr setup` writes `~/.claude/skills/agr/SKILL.md`.
+  - Host: `agr install <host>` writes the same file to the host's `~/.claude/skills/agr/`
+    (`~/.claude` exists by then: `mergeHooks` creates it). One more `sshClient().Run` with a
+    new `skillWriteScript` (sh): write when the file is missing or carries the marker, else
+    print `kept`. Best-effort, like `ensureTerminfo`: a failure becomes a report line, not an
+    install error.
+  - Both overwrite only a file that is missing or carries the `agr-skill` marker. A
+    user-edited file without the marker is left alone, with a notice.
+  - `agr skill` prints it to stdout, for other agents (Codex `AGENTS.md`, etc.).
+- **Content** (bullets and commands, no host names baked in):
+  - **Triggers**: "on <host>", "from <host>", "remote session/worker", "hand off to <row>",
+    and a host the user names that `agr ls <host>` accepts.
+  - **Spawn on a host from the Mac**: keep the user's own spawn skill and wrap its program.
+    - `session new --command X` becomes `session new --command "agr open <host> <name> --cwd
+      <dir> --command 'X' --orchestrator $AGTERM_SESSION_ID:$AGTERM_PANE_ID"`, run from the
+      orchestrator's own shell so the variables expand to the orchestrator.
+    - Quoting rule: when X contains `'`, write X to a script on the host (over ssh) and pass
+      `--command 'sh <script>'` instead.
+    - Filesystem steps (worktree, brief file) run over `ssh <host>`.
+    - Confirm it started with `session text`, not `foreground` (that reads `agr`).
+  - **Teardown**: `agr end <row>` (the user confirms), or `agr kill <host> <name>` plus
+    `agtermctl session close`; remote worktree cleanup over `ssh <host>`.
+  - **On a remote row** (`AGTERM_SOCKET=agr-proxy`): `agtermctl` is the proxy.
+    - Full ids only, from `tree --json`.
+    - The allowlist; refused leaves say why.
+    - **Handoff**: find the target row by name in `tree --json`, then `session type --target
+      <id> [--pane-id <p>] --stdin`. Only a local pane running `claude`/`codex`; plain text, no
+      control characters, at most 64 KiB. The user gets a dialog; on refusal, say so and fall
+      back to the clipboard.
+  - **Messages from the Mac to a remote row**: plain `agtermctl session type` works today.
+
 ## What Goes Where
 
 - **Implementation Steps**: code, tests, README in this repo.
@@ -390,6 +508,13 @@ Use throwaway rows only, local and on `homelab`; record results here.
     it?
   - exit code and stdout for ⌘W and for a submit
   - what the `--js` page bridge exposes beyond submit
+- [ ] `ask` (agtermctl 0.36.0 has `open --no-block`, `result <id>`, `cancel <id>`,
+      `--pane-id`, `--hotkey`):
+  - the `ask result` JSON states (pending, answered, cancelled)
+  - whether any key other than Return can pick a button with no `--hotkey` (the user may be
+    typing in that row when it opens); whether two dialogs can stack on one row
+  - how `--message` renders 300 characters, newlines and the `⟦ ⟧` delimiters
+- [ ] the agent list: the `foreground` argv agterm shows for Claude Code and Codex
 - [ ] `agtermctl help` for each allowed leaf: confirm option names and which leaves read stdin;
       finalise the schemas
 - [ ] update Technical Details with the results
@@ -398,22 +523,30 @@ Use throwaway rows only, local and on `homelab`; record results here.
 
 **Files:**
 - Modify: `internal/cli/open.go`, `internal/cli/open_test.go`, `internal/remotescript/agr.sh`,
-  `cmd/agr/run.go`, `tests/remote/tmux/*`, `tests/remote/zmx/*`
+  `cmd/agr/run.go`, `cmd/agr/wire.go`, `internal/bindings/store.go`,
+  `internal/bindings/store_test.go`, `internal/cli/dependency.go`,
+  `internal/cli/mocks/dependency_mock.go` (generated), `internal/agterm/ctl.go` (a tree read
+  with panes, bindings and foregrounds), `tests/remote/tmux/*`, `tests/remote/zmx/*`
 - Create: `internal/cli/run.go`, `internal/cli/run_test.go`, `internal/proxy/quote.go`,
   `internal/proxy/quote_test.go`
 
 - [ ] `agr open … [--command CMD]`, and `attach --env/--command` behind the remote-version gate
 - [ ] the remote `attach` applies env and command per the spike, and validates the values
+- [ ] `bindings.Binding.Grants` (`Grant{Row, PaneID, Kind}`, JSON `grants`, omitted when
+      empty; old files still load); `upsert` carries `Grants` over when it replaces an entry with
+      the same host and name; `AddGrant(host, name, grant)` and `DropGrant` find the entry under
+      the store lock
 - [ ] `agr open … --orchestrator <row>:<pane>`: validated against `tree --json` (live, not
-      host-bound) and stored in `bindings.Binding.Orchestrator` (JSON field `orchestrator`,
-      omitted when empty; old files still load)
+      host-bound) and stored as an `orchestrator` grant
 - [ ] `agr run <host> [--cwd D] -- argv…`
 - [ ] the Mac-side shell quoting helper (`internal/proxy/quote.go`)
 - [ ] tests (Go):
   - argv for `--command`, env pairs, invalid values
   - the old-remote gate: no env, `--command` refused
-  - `--orchestrator`: valid, malformed, host-bound pane refused, unknown pane refused, binding
-    round-trip
+  - `--orchestrator`: valid, malformed, host-bound pane refused, unknown pane refused
+  - `Grants` round-trip, and a bindings file without `grants` still loads
+  - a re-bind of the same host and name keeps the grants; a different name doesn't
+  - `AddGrant` on a binding that disappeared is an error, not a new entry
   - `agr run` argv
   - quoting with `'`, `"`, `;`, `$()`, a backtick and a newline
 - [ ] tests (remote): a new tmux session sees the env and runs CMD; re-attach refreshes the env
@@ -447,7 +580,7 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - `session_id` refused; unknown session refused
   - client EOF cancels; `Serve` returns promptly while the sink blocks
   - `MarkAlive`
-- [ ] `make test` must pass before Task 4
+- [ ] `make check` must pass before Task 4
 
 ### Task 4: Parser, allowlist and ownership
 
@@ -460,7 +593,7 @@ Use throwaway rows only, local and on `homelab`; record results here.
       positionals, `--`)
 - [ ] the allowlist table, with a schema per leaf
 - [ ] `Authorize(ctx, host, caller, header, argv)` → normalised call (targets, pane ids,
-      files, commands) or a refusal:
+      files, commands), **needs consent** (Technical Details > Grants), or a refusal:
   - full ids and self markers only
   - injected `--target` / `--pane-id`
   - per-pane binding to this host
@@ -473,14 +606,27 @@ Use throwaway rows only, local and on `homelab`; record results here.
     `split close`, `swap`, `overlay navigate`, `run-job`, `hud --file`, `background`,
     `--persistent`, `--browse`, `pick`, `ask`, `dashboard`)
   - `--target=X` and `--command=` forms
-  - the orchestrator grant: `session type`/`notify` into the granted pane allowed while it runs
-    a program; refused when it is at a shell prompt, for another pane of that row, and for any
-    other leaf
+  - grants (both kinds): `session type` into the granted pane allowed while its foreground is
+    `claude` or `codex`; refused at a shell, for `python3`/`vim`, for an unknown foreground,
+    for a scratch surface, for another pane of that row, and for any other leaf (`notify`
+    included)
+  - the program rule per surface: left uses `foreground`, right uses `splitForeground` only
+    with `hasSplit`
+  - the sanitiser: `\e`, `\e[Z`, `\e[201~`, `\r`, DEL, a bidi and a zero-width character
+    refused; `\n` and `\t` allowed; 64 KiB limit; `--select` and `--pane` refused
+  - consent: `session type` into an ungranted local agent pane returns **needs consent** (the
+    resolved row and pane, the preview), never a plain allow; a pane bound to any host is
+    refused with no consent; a shell or sanitiser failure is refused with no consent; any
+    other write leaf is refused
+  - a grant whose target pane is gone is refused and reported for dropping (the daemon drops
+    it; `Authorize` stays pure)
+  - consent pane resolution: `--pane-id` given; omitted with exactly one program pane; omitted
+    with zero or two (refused, the message lists the pane ids)
   - prefix and `active` refused; stale self ids mapped
   - the unbound split pane of an owned row refused; a detached pane refused
   - `session close` with one unowned `--target` refused
   - `events --run` allowed
-- [ ] `make test` must pass before Task 5
+- [ ] `make check` must pass before Task 5
 
 ### Task 5: Rewrites, streaming execution, daemon wiring
 
@@ -501,6 +647,17 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - temp lifetime and the 24 h sweep
   - goroutines tracked so `stopHost` returns within `teardownTimeout`
   - leftovers cleared at start
+- [ ] the consent flow (Technical Details > Grants):
+  - `agterm.Ctl`: `AskOpen` (`--no-block`, returns the id), `AskResult`, `AskCancel`.
+    `Confirm` stays as it is (its argv and exit-2 behaviour pinned by a test)
+  - title and message: `Anything on <host> …`, the session name, the target row name, the
+    preview in `⟦ ⟧` with Cf escaped
+  - poll `ask result`; `ask cancel` on client EOF, host shutdown or 120 s
+  - after `once`/`pair`, re-check the program rule on a fresh `tree --json` before typing;
+    `pair` stores the grant via `AddGrant`
+  - one open dialog per host; 60 s refusal per host and target row after a deny, a timeout or
+    a client cancel
+  - drop grants `Authorize` reports as gone
 - [ ] wire it in `cmd/agr/wire.go` with compile-time interface assertions
 - [ ] tests:
   - each rewrite's exact argv and Mac shell string
@@ -509,7 +666,13 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - streaming order of stdout and stderr; exit passthrough; `-1` becomes 1
   - cancel kills the process and runs the overlay-close hook on a live ctx
   - host shutdown while a call blocks; the 17th concurrent call refused
-- [ ] `make test` must pass before Task 6
+  - consent: each button; cancel; timeout (`ask cancel` called); a second call from the same
+    host while a dialog is open, from another session name too; the 60 s refusal after a deny,
+    a timeout and a client cancel; EOF during the dialog cancels it and stores nothing; a
+    stored `pair` grant lets the next call through with no dialog
+  - the re-check: program pane, then the dialog, then a shell pane → refused after `once`
+  - the dialog title and message: cut at 300 characters, delimiters, Cf escaped
+- [ ] `make check` must pass before Task 6
 
 ### Task 6: Remote proxy (`agr ctl`, `~/.local/bin/agtermctl`, doctor)
 
@@ -536,7 +699,34 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - outside a session → refused; zmx covers the session lookup
 - [ ] `make check` must pass before Task 7
 
-### Task 7: Scope `session_id` status events to bound rows
+### Task 7: The `agr` skill
+
+**Files:**
+- Create: `internal/skill/SKILL.md`, `internal/skill/skill.go`, `internal/skill/skill_test.go`,
+  `internal/cli/skill.go`, `internal/cli/skill_test.go`
+- Modify: `internal/cli/setup.go`, `internal/cli/setup_test.go`, `internal/remote/install.go`,
+  `internal/remote/install_test.go`, `internal/remote/hooks.go` (the new `skillWriteScript`
+  beside `hooksWriteScript`), `cmd/agr/run.go`, `cmd/agr/wire.go`
+- Create: `tests/remote/tmux/skill_install_test.sh`
+
+- [ ] write `SKILL.md` per Technical Details > The `agr` skill: frontmatter `name: agr` and a
+      `description` that lists the triggers; marker line; spawn, teardown, remote-row and
+      handoff sections; no host names
+- [ ] `internal/skill`: the embedded bytes, the version stamped into the marker, and
+      `Install(dir)`, which writes only when the file is missing or carries the marker
+- [ ] `agr setup` installs it on the Mac; `agr install <host>` installs it on the host with
+      `skillWriteScript` after `mergeHooks`, best-effort (a report line, never an install error)
+- [ ] `agr skill` prints it
+- [ ] tests:
+  - the marker and version present; the frontmatter parses; no `homelab` or other host literal
+  - install: missing file written; marked file replaced; unmarked file left alone with a notice
+  - setup and remote install call it; a remote write failure is a report line and install
+    still succeeds
+  - `skill_install_test.sh`: missing → written; marked → replaced; unmarked → `kept`
+  - `agr skill` output equals the embedded bytes
+- [ ] `make check` must pass before Task 8
+
+### Task 8: Scope `session_id` status events to bound rows
 
 **Files:**
 - Modify: `internal/receiver/listener.go`, `internal/receiver/dependency.go` (the `Resolver`
@@ -547,9 +737,9 @@ Use throwaway rows only, local and on `homelab`; record results here.
       `l.host`; otherwise log `status for unbound row <id> from <host> dropped`
 - [ ] tests: a bound row is applied; an unbound row is dropped; a row bound to another host is
       dropped; `session` events unchanged
-- [ ] `make test` must pass before Task 8
+- [ ] `make check` must pass before Task 9
 
-### Task 8: Verify acceptance criteria
+### Task 9: Verify acceptance criteria
 
 - [ ] from a throwaway remote row on `homelab`, with unchanged tools:
   - a `decide.py` panel round trip; `show-image.sh`
@@ -560,17 +750,31 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - `session restore` on that row reattaches after an agterm restart
   - a worker opened with `--orchestrator` types into the local orchestrator pane while Claude
     runs there, and is refused once it is at a shell prompt
+  - handoff: `session type` into a local Claude row opens the dialog on that row; **Allow
+    once** types it, the next call asks again; **Allow for this pair** types it and the next
+    call goes straight through; **Deny** refuses and a retry within 60 s gets no dialog
+  - Ctrl-C on the host during the dialog closes it and stores nothing; no answer for 120 s
+    closes it
+  - a target row in a hidden workspace: where the dialog appears
+  - a host-bound target row is refused with no dialog
+  - a second request from another session on the same host while a dialog is open is refused
+- [ ] the skill: on the Mac, "spawn a worker on homelab for X" makes Claude wrap the spawn in
+      `agr open … --command`; on the host, "hand this to <local row>" makes the remote Claude
+      call `session type` and the dialog appears
 - [ ] status events unchanged; refusal, old-daemon, old-remote and bridge messages as
       documented; `agr down` returns within `teardownTimeout` during a blocking call
 - [ ] `make check` green
 
-### Task 9: [Final] Update documentation
+### Task 10: [Final] Update documentation
 
 - [ ] README "Remote agterm control":
   - what works unchanged; the allowlist; full ids only; one-file pages
   - the `foreground` limitation
   - how to request a new leaf
   - `agr open --command`, `agr run`
+  - handoff with consent, from the user's side (the dialog and its three buttons)
+  - the `agr` skill: where it is installed, `agr skill`, and how a user's own skills compose
+    with it (wrap the spawned program in `agr open <host> <name> --command`)
 - [ ] README "Requirements": python3 on the host; Mac daemon and remote both at least this
       release
 - [ ] README "Failure modes": the proxy messages
@@ -579,7 +783,9 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - `--js` pages run in agterm on the Mac and can reach its network; the localhost warning is not
     a control
   - `events` streams the Mac's whole feed
-  - the orchestrator grant: which pane, which leaves, and the foreground-program rule
+  - grants: orchestrator and consent; a grant covers **anything on that host**; local agent
+    panes only (`claude`, `codex`); `session type` only; the sanitiser; the 60 s refusal; a
+    pair grant lasts as long as the caller's binding, re-attaches included
   - status `session_id` events are scoped to bound rows; cookbook senders on rows not opened with
     `agr open` are dropped
   - the proxy is skipped on hosts that have a real agtermctl
@@ -592,10 +798,18 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - `spawn-agent` will break on its `foreground == claude` poll (it reads `agr`). The fix there
     is skill-side: treat `agr` as running on a remote row, or poll `session text`.
   - The README notes this class of break for other users.
-- **Spawning workers on a host from the Mac**: `spawn-agent --host <host>` on top of `agr open
-  --command … --orchestrator "$AGTERM_SESSION_ID:$AGTERM_PANE_ID"` (skill-side; the worktree via
-  `ssh host git …`).
-- Manual check on `homelab`: the Task 7 round trips with the real agterm; Ctrl-C during a
+- **`--host` in the user's skills** (machine-setup, after this ships):
+  - `spawn-agent.sh --host <host> [--repo <remote path>]`:
+    - the worktree via `ssh <host> 'cd <repo> && git worktree add …'`
+    - the brief copied with `scp`
+    - the row from `session new --command "agr open <host> <name> --cwd <wt> --command 'claude
+      …' --orchestrator $AGTERM_SESSION_ID:$AGTERM_PANE_ID"`
+    - the start check through `session text`
+    - the remote repo path comes from `--repo`, else a per-host default in the skill's config
+  - `teardown-agent --host <host>`: `agr end <row>` (the user confirms), then the remote
+    worktree and branch removed over ssh
+  - trigger phrases in both skills' descriptions: "on <host>", "from <host>"
+- Manual check on `homelab`: the Task 9 round trips with the real agterm; Ctrl-C during a
   `--block` overlay closes it.
 - Restart the Mac `agr daemon` after upgrading. Release notes: `brew upgrade agr`, restart the
   daemon, `agr install <host>`, re-open rows to pick up the environment; a breaking note for
