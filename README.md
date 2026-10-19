@@ -184,6 +184,20 @@ defaults write com.apple.screencapture show-thumbnail -bool false
 The paths arrive as one bracketed paste, so Claude Code shows each image as
 `[Image #N]`, as it does for a local drag. Your Mac clipboard is not touched.
 
+### Links
+
+With tmux `mouse on`, tmux takes a plain ⌘-click; use ⇧⌘-click to open a link
+on a remote row. A URL that wraps is found only up to the line end. For whole
+links, let tmux 3.4+ pass OSC 8 through and make Claude Code emit it on the
+host:
+
+```sh
+# ~/.tmux.conf
+set -as terminal-features ',*:hyperlinks'
+# ~/.profile (FORCE_HYPERLINK also writes link codes into pipes and files)
+export FORCE_HYPERLINK=1
+```
+
 ### What each piece is
 
 | Piece | What it is | ⌘W closes the row | End (`agr end`) |
