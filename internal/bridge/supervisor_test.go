@@ -232,3 +232,147 @@ func writeExecutable(t *testing.T, path string) {
 		t.Fatalf("write ssh shim: %v", err)
 	}
 }
+
+func TestSupervisorReclaimsRemoteSocketAfterForwardFailure(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	localDir := t.TempDir()
+	logPath := filepath.Join(localDir, "bridge-key.log")
+	if err := os.WriteFile(logPath, []byte("Error: remote port forwarding failed for listen path /remote/agr.sock\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		sshPath = "/usr/bin/ssh"
+	}
+
+	exitedAt := func() *mocks.MockProcess {
+		process := mocks.NewMockProcess(ctrl)
+		process.EXPECT().Wait().Return(nil)
+		return process
+	}
+	failed, reclaim := exitedAt(), exitedAt()
+	last := mocks.NewMockProcess(ctrl)
+	lastDone := make(chan struct{})
+	last.EXPECT().Wait().DoAndReturn(func() error {
+		<-lastDone
+		return nil
+	})
+	last.EXPECT().Stop(gomock.Any()).DoAndReturn(func(time.Duration) error {
+		close(lastDone)
+		return nil
+	})
+
+	runner := mocks.NewMockProcessRunner(ctrl)
+	supervisor := bridge.New("host", "key", "/remote/agr.sock", filepath.Join(localDir, "recv.sock"), runner)
+	wantReclaim := []string{
+		sshPath,
+		"-o", "BatchMode=yes",
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ConnectTimeout=10",
+		"host",
+		"--", "rm -f -- '/remote/agr.sock'",
+	}
+	restarted := make(chan struct{})
+	gomock.InOrder(
+		runner.EXPECT().Start(gomock.Any(), gomock.Any(), logPath).DoAndReturn(func(_ context.Context, argv []string, path string) (bridge.Process, error) {
+			// The failure line belongs to this run: it is written after the
+			// supervisor took the log offset, like ssh writes it.
+			file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = file.Close() }()
+			if _, err := file.WriteString("Error: remote port forwarding failed for listen path /remote/agr.sock\n"); err != nil {
+				t.Fatal(err)
+			}
+			return failed, nil
+		}),
+		runner.EXPECT().Start(gomock.Any(), gomock.Any(), logPath).DoAndReturn(func(_ context.Context, argv []string, _ string) (bridge.Process, error) {
+			if !reflect.DeepEqual(argv, wantReclaim) {
+				t.Errorf("reclaim argv = %#v, want %#v", argv, wantReclaim)
+			}
+			return reclaim, nil
+		}),
+		runner.EXPECT().Start(gomock.Any(), gomock.Any(), logPath).DoAndReturn(func(_ context.Context, argv []string, _ string) (bridge.Process, error) {
+			if len(argv) < 2 || argv[1] != "-N" {
+				t.Errorf("start after reclaim argv = %#v, want the bridge", argv)
+			}
+			close(restarted)
+			return last, nil
+		}),
+	)
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- supervisor.Run(context.Background()) }()
+	select {
+	case <-restarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not restart the bridge after reclaiming the socket")
+	}
+	supervisor.Stop()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop")
+	}
+}
+
+func TestSupervisorDoesNotReclaimWithoutForwardFailure(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	localDir := t.TempDir()
+	logPath := filepath.Join(localDir, "bridge-key.log")
+	// An older run's failure must not trigger a reclaim for a later exit.
+	if err := os.WriteFile(logPath, []byte("Error: remote port forwarding failed for listen path /remote/agr.sock\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	first := mocks.NewMockProcess(ctrl)
+	first.EXPECT().Wait().Return(nil)
+	second := mocks.NewMockProcess(ctrl)
+	secondDone := make(chan struct{})
+	second.EXPECT().Wait().DoAndReturn(func() error {
+		<-secondDone
+		return nil
+	})
+	second.EXPECT().Stop(gomock.Any()).DoAndReturn(func(time.Duration) error {
+		close(secondDone)
+		return nil
+	})
+
+	runner := mocks.NewMockProcessRunner(ctrl)
+	supervisor := bridge.New("host", "key", "/remote/agr.sock", filepath.Join(localDir, "recv.sock"), runner)
+	restarted := make(chan struct{})
+	gomock.InOrder(
+		runner.EXPECT().Start(gomock.Any(), gomock.Any(), logPath).Return(first, nil),
+		runner.EXPECT().Start(gomock.Any(), gomock.Any(), logPath).DoAndReturn(func(_ context.Context, argv []string, _ string) (bridge.Process, error) {
+			if len(argv) < 2 || argv[1] != "-N" {
+				t.Errorf("start after a plain exit argv = %#v, want the bridge, not a reclaim", argv)
+			}
+			close(restarted)
+			return second, nil
+		}),
+	)
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- supervisor.Run(context.Background()) }()
+	select {
+	case <-restarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not restart the bridge")
+	}
+	supervisor.Stop()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not stop")
+	}
+}

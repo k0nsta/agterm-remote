@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -18,7 +20,14 @@ const (
 	connectionPromotionDelay = 5 * time.Second
 	processStopGrace         = 2 * time.Second
 	processKillWait          = 1 * time.Second
+	reclaimTimeout           = 15 * time.Second
+	// forwardFailureScan bounds how much new bridge log is read after an exit.
+	forwardFailureScan = 64 << 10
 )
+
+// forwardFailure is what OpenSSH prints when the remote listen path of a -R
+// forward cannot be bound, followed by the path.
+const forwardFailure = "remote port forwarding failed for listen path "
 
 // State is the externally visible bridge state.
 type State string
@@ -178,6 +187,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			return nil
 		}
 
+		logOffset := logSize(s.logPath())
 		process, err := s.start(ctx)
 		if err != nil {
 			if s.stopping(ctx) {
@@ -231,6 +241,9 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		}
 		s.clearProcess(process)
 		s.setState(StateDown)
+		if s.forwardFailed(logOffset) {
+			s.reclaimRemoteSocket(ctx)
+		}
 		previous = Next(previous, time.Since(started))
 		if !s.wait(ctx, previous) {
 			return nil
@@ -278,6 +291,91 @@ func (s *Supervisor) start(ctx context.Context) (Process, error) {
 		s.mu.Unlock()
 	}
 	return process, err
+}
+
+// forwardFailed reports whether the bridge run that started at logOffset
+// failed to bind the remote socket.
+func (s *Supervisor) forwardFailed(logOffset int64) bool {
+	path := s.logPath()
+	if path == "" || s.remoteSock == "" {
+		return false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	if _, err := file.Seek(logOffset, io.SeekStart); err != nil {
+		return false
+	}
+	output, err := io.ReadAll(io.LimitReader(file, forwardFailureScan))
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(output, []byte(forwardFailure+s.remoteSock))
+}
+
+// reclaimRemoteSocket unlinks the remote socket path that blocked the
+// forward, so the next start binds at once. ssh's StreamLocalBindUnlink=yes
+// cannot do this for a -R forward: the remote sshd decides, and its own
+// StreamLocalBindUnlink defaults to no. Without this, a socket file left by a
+// dropped connection blocks every restart until someone deletes it, and one
+// still held by a connection the server has not timed out yet blocks it for
+// ClientAliveInterval x ClientAliveCountMax. Unlinking is what "the new bridge
+// reclaims the per-host socket" means: an older listener keeps an orphaned
+// inode that no relay can reach.
+func (s *Supervisor) reclaimRemoteSocket(ctx context.Context) {
+	s.mu.RLock()
+	runner, sshPath := s.runner, s.sshPath
+	s.mu.RUnlock()
+	argv := []string{
+		sshPath,
+		"-o", "BatchMode=yes",
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ConnectTimeout=10",
+		s.host,
+		"--", "rm -f -- " + shellQuote(s.remoteSock),
+	}
+	process, err := runner.Start(ctx, argv, s.logPath())
+	if err != nil {
+		log.Printf("warning: reclaim remote bridge socket on %s: %v", s.host, err)
+		return
+	}
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- process.Wait() }()
+	select {
+	case err := <-waitCh:
+		if err != nil {
+			log.Printf("warning: reclaim remote bridge socket on %s: %v", s.host, err)
+			return
+		}
+		log.Printf("reclaimed remote bridge socket %s on %s", s.remoteSock, s.host)
+	case <-ctx.Done():
+		_ = process.Stop(processStopGrace)
+	case <-s.stop:
+		_ = process.Stop(processStopGrace)
+	case <-time.After(reclaimTimeout):
+		log.Printf("warning: reclaim remote bridge socket on %s: timed out", s.host)
+		_ = process.Stop(processStopGrace)
+	}
+}
+
+// shellQuote quotes one word for the remote login shell that ssh hands the
+// command to.
+func shellQuote(word string) string {
+	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
+}
+
+func logSize(path string) int64 {
+	if path == "" {
+		return 0
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
 
 func (s *Supervisor) logPath() string {
