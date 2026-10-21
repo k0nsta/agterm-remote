@@ -38,6 +38,8 @@ func TestSupervisorUsesExactReverseSSHArgvAndPromotesOnEvent(t *testing.T) {
 		sshPath,
 		"-N",
 		"-o", "BatchMode=yes",
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "StreamLocalBindUnlink=yes",
 		"-o", "ServerAliveInterval=15",

@@ -253,10 +253,17 @@ func (s *Supervisor) start(ctx context.Context) (Process, error) {
 			sshPath = "/usr/bin/ssh"
 		}
 	}
+	// ControlMaster=no and ControlPath=none keep the tunnel off a shared
+	// connection from the user's ssh_config. Through a mux master, the -R
+	// forward belongs to the master and outlives this ssh: after the first
+	// exit every restart fails with "remote port forwarding failed" until the
+	// master dies, and a master left on a dead TCP connection never does.
 	argv := []string{
 		sshPath,
 		"-N",
 		"-o", "BatchMode=yes",
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
 		"-o", "ExitOnForwardFailure=yes",
 		"-o", "StreamLocalBindUnlink=yes",
 		"-o", "ServerAliveInterval=15",
