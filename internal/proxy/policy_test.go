@@ -814,3 +814,31 @@ func TestPreviewPartsCutsAtThreeHundredCharacters(t *testing.T) {
 		t.Fatalf("PreviewParts(405) = %q (%d runes), total %d, cut %v, want 300 runes with ⏎ and ⇥", shown, len([]rune(shown)), total, cut)
 	}
 }
+
+func TestAttachedAcceptsOpenFlagsAnywhere(t *testing.T) {
+	b := bind(t, rowCaller, paneCaller, "left", testHost, "w1")
+	tests := []struct {
+		name string
+		fg   []string
+		want bool
+	}{
+		{"plain", []string{"agr", "open", testHost, "w1"}, true},
+		{"no name", []string{"agr", "open", testHost}, true},
+		{"flag before host", []string{"agr", "open", "--cwd", "/srv", testHost, "w1"}, true},
+		{"flag between", []string{"agr", "open", testHost, "--parent", "p", "w1"}, true},
+		{"flags after", []string{"agr", "open", testHost, "w1", "--command", "claude", "--orchestrator", "x"}, true},
+		{"other host", []string{"agr", "open", "--cwd", "/srv", "cloud", "w1"}, false},
+		{"other name", []string{"agr", "open", "--cwd", "/srv", testHost, "w2"}, false},
+		{"flag without value", []string{"agr", "open", testHost, "--cwd"}, false},
+		{"only flags", []string{"agr", "open", "--cwd", "/srv"}, false},
+		{"not open", []string{"agr", "run", "--cwd", "/srv", testHost}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			row := agterm.TreeRow{ID: rowCaller, Surfaces: surfaces(t, "left", paneCaller), Foreground: tt.fg}
+			if got := attached(row, b); got != tt.want {
+				t.Fatalf("attached(%v) = %v, want %v", tt.fg, got, tt.want)
+			}
+		})
+	}
+}

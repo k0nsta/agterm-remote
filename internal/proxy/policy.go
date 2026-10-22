@@ -519,16 +519,26 @@ func attached(row agterm.TreeRow, b bindings.Binding) bool {
 		return false
 	}
 	argv, _, ok := foreground(row, surface.Kind)
-	if !ok || len(argv) < 3 {
+	if !ok || len(argv) < 3 || path.Base(argv[0]) != "agr" || argv[1] != "open" {
 		return false
 	}
-	if path.Base(argv[0]) != "agr" || argv[1] != "open" || argv[2] != b.Host {
+	// open's valued flags may sit anywhere after the verb (cmd/agr parseOpenArgs).
+	var positional []string
+	for i := 2; i < len(argv); i++ {
+		switch argv[i] {
+		case "--cwd", "--parent", "--command", "--orchestrator":
+			if i+1 >= len(argv) {
+				return false
+			}
+			i++
+		default:
+			positional = append(positional, argv[i])
+		}
+	}
+	if len(positional) == 0 || positional[0] != b.Host {
 		return false
 	}
-	if len(argv) > 3 && !strings.HasPrefix(argv[3], "-") && argv[3] != b.Name {
-		return false
-	}
-	return true
+	return len(positional) < 2 || positional[1] == b.Name
 }
 
 // SanitizeTyped checks text typed into a pane the host does not own: valid
