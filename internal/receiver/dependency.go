@@ -28,6 +28,11 @@ type Liveness interface {
 
 // CtlSink runs one agtermctl call from a remote host and returns its exit
 // code. It must return once ctx is canceled (client gone or shutdown).
+//
+// Admit takes the host's call slot before the body is read; the context it
+// returns goes to Ctl, and release must be called once the call ends. A
+// non-empty reason refuses the call.
 type CtlSink interface {
+	Admit(ctx context.Context) (admitted context.Context, release func(), reason string)
 	Ctl(ctx context.Context, req proxy.Request, frames proxy.FrameWriter) int
 }

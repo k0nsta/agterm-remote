@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -378,6 +379,18 @@ type ctlCall struct {
 type funcCtl struct {
 	calls chan ctlCall
 	run   func(ctx context.Context, req proxy.Request, frames proxy.FrameWriter) int
+	// admitWhy, when set, makes Admit refuse.
+	admitWhy string
+	admitted atomic.Int32
+	released atomic.Int32
+}
+
+func (c *funcCtl) Admit(ctx context.Context) (context.Context, func(), string) {
+	if c.admitWhy != "" {
+		return ctx, nil, c.admitWhy
+	}
+	c.admitted.Add(1)
+	return ctx, func() { c.released.Add(1) }, ""
 }
 
 func (c *funcCtl) Ctl(ctx context.Context, req proxy.Request, frames proxy.FrameWriter) int {
@@ -502,6 +515,41 @@ func TestListenerCtlAcksBeforeBodyAndReadsLargeBody(t *testing.T) {
 	}
 	if got := readAll(t, reader, conn); got != "x 0\n" {
 		t.Fatalf("frames = %q", got)
+	}
+}
+
+func TestListenerCtlAdmitRefusalComesBeforeAckAndBody(t *testing.T) {
+	t.Helper()
+	ctl := newFuncCtl(func(context.Context, proxy.Request, proxy.FrameWriter) int { return 0 })
+	ctl.admitWhy = "too many calls in flight"
+	_, path, stop := ctlListener(t, ctl, nil, true)
+	defer stop()
+
+	conn, reader := dialCtl(t, path)
+	if _, err := io.WriteString(conn, ctlHeader("api", []int{1000}, 10)); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	got := readAll(t, reader, conn)
+	if strings.Contains(got, "ack") || !strings.Contains(got, "too many calls in flight") {
+		t.Fatalf("reply = %q, want a refusal with no ack", got)
+	}
+}
+
+func TestListenerCtlHoldsSlotWhileBodyStalls(t *testing.T) {
+	t.Helper()
+	ctl := newFuncCtl(func(context.Context, proxy.Request, proxy.FrameWriter) int { return 0 })
+	_, path, stop := ctlListener(t, ctl, nil, true)
+	defer stop()
+
+	conn, reader := dialCtl(t, path)
+	if _, err := io.WriteString(conn, ctlHeader("api", []int{1000}, 0)); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if got := readLine(t, reader, conn); got != "ack 1\n" {
+		t.Fatalf("reply = %q, want ack 1", got)
+	}
+	if ctl.admitted.Load() != 1 || ctl.released.Load() != 0 {
+		t.Fatalf("admitted %d released %d, want 1 and 0 while the body is pending", ctl.admitted.Load(), ctl.released.Load())
 	}
 }
 

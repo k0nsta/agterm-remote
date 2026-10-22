@@ -188,6 +188,19 @@ func (h *hostCtl) enter() string {
 	return ""
 }
 
+// admittedKey marks a context whose call already holds a slot of one hostCtl.
+type admittedKey struct{}
+
+// Admit takes a call slot before the listener reads the call's body, so a
+// stalled upload counts toward the cap. The returned context makes Ctl skip
+// its own entry; release gives the slot back. A non-empty reason is a refusal.
+func (h *hostCtl) Admit(ctx context.Context) (context.Context, func(), string) {
+	if why := h.enter(); why != "" {
+		return ctx, nil, why
+	}
+	return context.WithValue(ctx, admittedKey{}, h), h.leave, ""
+}
+
 func (h *hostCtl) leave() {
 	h.mu.Lock()
 	h.calls--
@@ -281,10 +294,12 @@ func headerOf(req proxy.Request) proxy.Header {
 
 // Ctl implements receiver.CtlSink: authorize, rewrite, run.
 func (h *hostCtl) Ctl(ctx context.Context, req proxy.Request, frames proxy.FrameWriter) int {
-	if why := h.enter(); why != "" {
-		return refuse(frames, why)
+	if owner, _ := ctx.Value(admittedKey{}).(*hostCtl); owner != h {
+		if why := h.enter(); why != "" {
+			return refuse(frames, why)
+		}
+		defer h.leave()
 	}
-	defer h.leave()
 	if why := h.versionRefusal(ctx); why != "" {
 		return refuse(frames, why)
 	}

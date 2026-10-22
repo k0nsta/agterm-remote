@@ -170,6 +170,22 @@ func (m *MockCtlSink) EXPECT() *MockCtlSinkMockRecorder {
 	return m.recorder
 }
 
+// Admit mocks base method.
+func (m *MockCtlSink) Admit(ctx context.Context) (context.Context, func(), string) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Admit", ctx)
+	ret0, _ := ret[0].(context.Context)
+	ret1, _ := ret[1].(func())
+	ret2, _ := ret[2].(string)
+	return ret0, ret1, ret2
+}
+
+// Admit indicates an expected call of Admit.
+func (mr *MockCtlSinkMockRecorder) Admit(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Admit", reflect.TypeOf((*MockCtlSink)(nil).Admit), ctx)
+}
+
 // Ctl mocks base method.
 func (m *MockCtlSink) Ctl(ctx context.Context, req proxy.Request, frames proxy.FrameWriter) int {
 	m.ctrl.T.Helper()

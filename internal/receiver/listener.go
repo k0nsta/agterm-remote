@@ -236,6 +236,15 @@ func (l *Listener) serveCtl(ctx context.Context, conn net.Conn, reader *bufio.Re
 	}
 	req := header.Request(l.host, binding)
 
+	// The slot is taken before the body is read, so stalled uploads count
+	// toward the per-host cap instead of allocating unbounded memory.
+	ctx, release, why := l.ctl.Admit(ctx)
+	if why != "" {
+		refuse(why)
+		return
+	}
+	defer release()
+
 	if _, err := io.WriteString(conn, "ack 1\n"); err != nil {
 		return
 	}
