@@ -796,6 +796,21 @@ func (a *authz) load(ctx context.Context) error {
 			a.w.bound[key(b.PaneID)] = b
 		}
 	}
+	// The listener resolved the caller before the body upload, which can take
+	// a while. Authorize against the binding as it is now: an ended or
+	// replaced binding takes its grants with it.
+	current, found := bindings.Binding{}, false
+	for _, b := range all {
+		if b.Host == a.caller.Host && b.Name == a.caller.Name &&
+			strings.EqualFold(b.Row, a.caller.Row) && strings.EqualFold(b.PaneID, a.caller.PaneID) {
+			current, found = b, true
+			break
+		}
+	}
+	if !found {
+		return errors.New("the caller's binding no longer exists")
+	}
+	a.caller = current
 	for _, grant := range a.caller.Grants {
 		row, ok := a.w.rows[key(grant.Row)]
 		if ok {
@@ -955,6 +970,11 @@ func (a *authz) rowScope() Decision {
 		list := panes(row)
 		if len(list) == 0 {
 			return refuse("%s: row %s has no pane", a.leaf.name(), row.ID)
+		}
+		for _, surface := range row.Surfaces {
+			if surface.Kind != "left" && surface.Kind != "right" {
+				return refuse("%s: row %s has a local %s terminal the host does not own (a row-level call needs every pane of the row)", a.leaf.name(), row.ID, surface.Kind)
+			}
 		}
 		for _, surface := range list {
 			if why := a.checkOwned(row, surface); why != "" {

@@ -130,8 +130,26 @@ func (f *fixture) policy(t *testing.T) *Policy {
 	tree := mocks.NewMockTreeReader(ctrl)
 	tree.EXPECT().TreeRows(gomock.Any()).Return(f.rows, nil).AnyTimes()
 	binds := mocks.NewMockBindingLoader(ctrl)
-	binds.EXPECT().Load().Return(f.binds, nil).AnyTimes()
+	binds.EXPECT().Load().Return(f.storeWithCaller(t), nil).AnyTimes()
 	return NewPolicy(tree, binds)
+}
+
+// storeWithCaller is f.binds with the caller's entry (grants included) as
+// f.caller has it now; a caller that is not in f.binds is added.
+func (f *fixture) storeWithCaller(t *testing.T) []bindings.Binding {
+	t.Helper()
+	var out []bindings.Binding
+	seen := false
+	for _, b := range f.binds {
+		if b.Host == f.caller.Host && b.Name == f.caller.Name {
+			b, seen = f.caller, true
+		}
+		out = append(out, b)
+	}
+	if !seen {
+		out = append(out, f.caller)
+	}
+	return out
 }
 
 func (f *fixture) authorize(t *testing.T, argv ...string) Decision {
@@ -424,12 +442,37 @@ func TestAuthorizeStateReadFailures(t *testing.T) {
 	wantRefuse(t, got, "cannot read agterm state")
 }
 
-func TestAuthorizeRowWithoutSplitStillHasScratchIgnored(t *testing.T) {
+func TestAuthorizeRowLevelRefusesLocalScratch(t *testing.T) {
 	f := newFixture(t)
-	// a scratch surface is not a pane a host can own, so it does not count
-	// against a row-level call.
+	// a scratch terminal is a local Mac shell the host cannot own, so a
+	// row-level call that would take it down is refused.
 	f.row(t, rowCaller).Surfaces = surfaces(t, "left", paneCaller, "scratch", testID+"40")
-	wantAllow(t, f.authorize(t, "session", "rename", "x"))
+	wantRefuse(t, f.authorize(t, "session", "rename", "x"), "local scratch terminal")
+	wantRefuse(t, f.authorize(t, "session", "close"), "local scratch terminal")
+}
+
+func TestAuthorizeRefusesWhenCallerBindingIsGone(t *testing.T) {
+	f := newFixture(t)
+	f.grant(t, bindings.Grant{Row: rowAgent, PaneID: paneAgent, Kind: bindings.GrantConsent})
+	wantAllow(t, f.authorize(t, "session", "type", "--target", rowAgent, "hi"))
+	// agr end removed the binding while the body was still uploading.
+	var left []bindings.Binding
+	for _, b := range f.binds {
+		if b.Name != f.caller.Name {
+			left = append(left, b)
+		}
+	}
+	f.binds = left
+	f.caller.Grants = nil
+	ctrl := gomock.NewController(t)
+	tree := mocks.NewMockTreeReader(ctrl)
+	tree.EXPECT().TreeRows(gomock.Any()).Return(f.rows, nil).AnyTimes()
+	binds := mocks.NewMockBindingLoader(ctrl)
+	binds.EXPECT().Load().Return(f.binds, nil).AnyTimes()
+	stale := f.caller
+	stale.Grants = []bindings.Grant{{Row: rowAgent, PaneID: paneAgent, Kind: bindings.GrantConsent}}
+	got := NewPolicy(tree, binds).Authorize(context.Background(), testHost, stale, f.hdr, []string{"session", "type", "--target", rowAgent, "hi"}, nil)
+	wantRefuse(t, got, "binding no longer exists")
 }
 
 func TestAuthorizeConsentPaneResolution(t *testing.T) {
