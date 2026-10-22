@@ -18,6 +18,8 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/handled"
 	"github.com/k0nsta/agterm-remote/internal/pasteboard"
 	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/proxy"
+	"github.com/k0nsta/agterm-remote/internal/receiver"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 	"golang.org/x/term"
 )
@@ -167,6 +169,8 @@ func newApplication() *application {
 	app.daemon = daemon.New(daemon.Config{
 		Dirs: dirs, UI: control, Remote: remoteRunner, Events: control,
 		Rows: control, Sink: status, Supervisors: bridgeFactory{}, Bindings: store,
+		Ctl: control, Authorizer: proxy.NewPolicy(control, store), ProxyStore: store,
+		Rewriter: &proxy.Rewriter{Agr: stableAgr(), Root: dirs.Proxy(), Sessions: remoteRunner, Binds: store},
 		// No Logger: injecting one makes Daemon.openLog return early, so
 		// dirs.Log() is never created. The daemon is normally started detached
 		// with stdio on /dev/null, so a stderr logger discards every
@@ -183,6 +187,14 @@ var (
 	_ daemon.EventSource                      = (*agterm.Ctl)(nil)
 	_ daemon.Rows                             = (*agterm.Ctl)(nil)
 	_ daemon.StatusSink                       = (*agterm.Client)(nil)
+	_ daemon.CtlBackend                       = (*agterm.Ctl)(nil)
+	_ daemon.Authorizer                       = (*proxy.Policy)(nil)
+	_ daemon.Rewriter                         = (*proxy.Rewriter)(nil)
+	_ daemon.ProxyStore                       = (*bindings.Store)(nil)
+	_ proxy.TreeReader                        = (*agterm.Ctl)(nil)
+	_ proxy.BindingLoader                     = (*bindings.Store)(nil)
+	_ proxy.SessionLister                     = (*remote.Runner)(nil)
+	_ receiver.Resolver                       = (*bindings.Store)(nil)
 	_ cli.Picker                              = (*agterm.Ctl)(nil)
 	_ cli.Rows                                = (*agterm.Ctl)(nil)
 	_ cli.PaneTree                            = (*agterm.Ctl)(nil)

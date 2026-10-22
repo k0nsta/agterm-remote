@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 )
@@ -20,12 +21,21 @@ type Ctl struct {
 	run    Runner
 	out    Outputter
 	stream Streamer
+	exec   Executor
+}
+
+// CtlOption customises NewCtl.
+type CtlOption func(*Ctl)
+
+// WithExecutor replaces the process executor behind Exec.
+func WithExecutor(executor Executor) CtlOption {
+	return func(c *Ctl) { c.exec = executor }
 }
 
 // NewCtl constructs an agtermctl adapter. Nil dependencies are replaced by a
 // single process runner, which keeps production wiring small while allowing
 // tests to inject each command shape independently.
-func NewCtl(path, sock string, runner Runner, outputter Outputter, streamer Streamer) *Ctl {
+func NewCtl(path, sock string, runner Runner, outputter Outputter, streamer Streamer, options ...CtlOption) *Ctl {
 	if path == "" {
 		path = CtlPath()
 	}
@@ -42,7 +52,19 @@ func NewCtl(path, sock string, runner Runner, outputter Outputter, streamer Stre
 	if streamer == nil {
 		streamer = execRunner
 	}
-	return &Ctl{path: path, sock: sock, run: runner, out: outputter, stream: streamer}
+	ctl := &Ctl{path: path, sock: sock, run: runner, out: outputter, stream: streamer, exec: execRunner}
+	for _, option := range options {
+		option(ctl)
+	}
+	return ctl
+}
+
+// Exec runs agtermctl with args against the daemon's control socket, streaming
+// stdout and stderr to the writers. It returns the exit code; see
+// ExecRunner.Exec for what an error means.
+func (c *Ctl) Exec(ctx context.Context, stdin []byte, stdout, stderr io.Writer, args ...string) (int, error) {
+	full := append(append([]string(nil), args...), "--socket", c.sock)
+	return c.exec.Exec(ctx, stdin, stdout, stderr, c.path, full...)
 }
 
 // HudOpen opens an agterm HUD for a row.
@@ -241,14 +263,23 @@ func (c *Ctl) typeText(ctx context.Context, row, paneID string, text []byte) err
 // with the login shell's name beside them; a pane agterm cannot read leaves
 // them empty.
 type TreeRow struct {
-	ID                   string    `json:"id"`
-	Name                 string    `json:"name"`
-	Surfaces             []Surface `json:"surfaces"`
-	HasSplit             bool      `json:"hasSplit"`
-	Foreground           []string  `json:"foreground"`
-	ForegroundShell      string    `json:"foregroundShell"`
-	SplitForeground      []string  `json:"splitForeground"`
-	SplitForegroundShell string    `json:"splitForegroundShell"`
+	ID                   string        `json:"id"`
+	Name                 string        `json:"name"`
+	Surfaces             []Surface     `json:"surfaces"`
+	HasSplit             bool          `json:"hasSplit"`
+	Foreground           []string      `json:"foreground"`
+	ForegroundShell      string        `json:"foregroundShell"`
+	SplitForeground      []string      `json:"splitForeground"`
+	SplitForegroundShell string        `json:"splitForegroundShell"`
+	HTMLOverlays         []HTMLOverlay `json:"htmlOverlays"`
+}
+
+// HTMLOverlay is one page in a row's overlay slots. Pane is "left" or "right"
+// for a pane-scoped overlay and empty for a session-wide one.
+type HTMLOverlay struct {
+	ID    string `json:"id"`
+	Pane  string `json:"pane"`
+	State string `json:"state"`
 }
 
 // TreeRows returns every live row with its panes and foregrounds.
@@ -321,6 +352,107 @@ func (c *Ctl) Confirm(ctx context.Context, row, title, message, confirmID, confi
 		return false, fmt.Errorf("decode agterm ask: %w", err)
 	}
 	return answer.Result == "answered" && answer.ID == confirmID, nil
+}
+
+// AskButton is one button of a dialog.
+type AskButton struct {
+	ID    string
+	Label string
+}
+
+// AskRequest describes a dialog opened without waiting for the answer.
+type AskRequest struct {
+	Title   string
+	Message string
+	Buttons []AskButton
+	// Default is the id of the highlighted button.
+	Default string
+	// Row and PaneID anchor the dialog on the pane it concerns.
+	Row    string
+	PaneID string
+}
+
+// ErrAskPending means the row already has a dialog open; agterm allows one
+// per row.
+var ErrAskPending = errors.New("agterm: a dialog is already open on that row")
+
+// Dialog states reported by AskResult.
+const (
+	AskPending   = "pending"
+	AskCancelled = "cancelled"
+	AskAnswered  = "answered"
+)
+
+// AskAnswer is the current or final state of a dialog. ID is the pressed
+// button once State is AskAnswered.
+type AskAnswer struct {
+	State string
+	ID    string
+}
+
+// AskOpen opens a dialog without blocking and returns its id.
+func (c *Ctl) AskOpen(ctx context.Context, request AskRequest) (string, error) {
+	args := []string{"ask", "open", request.Title, "--message", request.Message}
+	for _, button := range request.Buttons {
+		args = append(args, "--button", button.ID+"="+button.Label)
+	}
+	args = append(args, "--default", request.Default, "--no-block",
+		"--pane-id", request.PaneID, "--target", request.Row, "--socket", c.sock)
+	out, exit, err := c.out.Output(ctx, nil, c.path, append([]string{}, args...)...)
+	if err != nil || exit != 0 {
+		if err == nil {
+			err = fmt.Errorf("command exited with status %d", exit)
+		}
+		if strings.Contains(string(out), "already pending") || strings.Contains(err.Error(), "already pending") {
+			return "", ErrAskPending
+		}
+		return "", commandError("ask open", out, exit, err)
+	}
+	var opened struct {
+		ID     string `json:"id"`
+		Result struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out), &opened); err != nil {
+		return "", fmt.Errorf("decode agterm ask: %w", err)
+	}
+	id := opened.ID
+	if id == "" {
+		id = opened.Result.ID
+	}
+	if id == "" {
+		return "", errors.New("decode agterm ask: no dialog id")
+	}
+	return id, nil
+}
+
+// AskResult reads a dialog without waiting: pending exits 1, cancelled 2 and
+// answered 0 in agtermctl.
+func (c *Ctl) AskResult(ctx context.Context, id string) (AskAnswer, error) {
+	out, exit, err := c.out.Output(ctx, nil, c.path, "ask", "result", id, "--socket", c.sock)
+	var body struct {
+		Result string `json:"result"`
+		ID     string `json:"id"`
+	}
+	decoded := json.Unmarshal(bytes.TrimSpace(out), &body) == nil
+	switch {
+	case exit == 2:
+		return AskAnswer{State: AskCancelled}, nil
+	case exit == 1 && decoded && body.Result == AskPending:
+		return AskAnswer{State: AskPending}, nil
+	case exit == 0 && err == nil && decoded && body.Result == AskAnswered:
+		return AskAnswer{State: AskAnswered, ID: body.ID}, nil
+	}
+	if err == nil {
+		err = fmt.Errorf("unexpected dialog state (exit %d)", exit)
+	}
+	return AskAnswer{}, commandError("ask result", out, exit, err)
+}
+
+// AskCancel closes a dialog that is still open.
+func (c *Ctl) AskCancel(ctx context.Context, id string) error {
+	return c.run.Run(ctx, c.path, "ask", "cancel", id, "--socket", c.sock)
 }
 
 // CloseRow closes an agterm row.

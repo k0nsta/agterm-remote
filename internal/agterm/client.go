@@ -20,7 +20,10 @@ const (
 	// MinTestedVersion is the oldest agterm version whose control behavior agr
 	// has been tested against.
 	MinTestedVersion = "0.25.0"
-	maxControlLine   = 1 << 20
+	// MinProxyVersion is the oldest agterm the agtermctl proxy works with: the
+	// allowlist is written against its option names.
+	MinProxyVersion = "0.36.0"
+	maxControlLine  = 1 << 20
 )
 
 // Client speaks one request/response exchange per Unix socket connection.

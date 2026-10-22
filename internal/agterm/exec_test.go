@@ -3,11 +3,15 @@ package agterm_test
 import (
 	"bufio"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 )
@@ -122,4 +126,78 @@ esac
 		t.Fatalf("write agtermctl shim: %v", err)
 	}
 	return path
+}
+
+// orderedWriter records every write of stdout ("o:") and stderr ("e:") in the
+// order they arrive.
+type orderedWriter struct {
+	mu     *sync.Mutex
+	events *[]string
+	kind   string
+}
+
+func (w orderedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	*w.events = append(*w.events, w.kind+string(p))
+	return len(p), nil
+}
+
+func TestExecRunnerExecStreamsStdoutAndStderrInOrderAndPassesTheExit(t *testing.T) {
+	t.Helper()
+	var mu sync.Mutex
+	var events []string
+	stdout := orderedWriter{&mu, &events, "o:"}
+	stderr := orderedWriter{&mu, &events, "e:"}
+	script := "printf one; sleep 0.2; printf two >&2; sleep 0.2; printf three; exit 3"
+	code, err := (&agterm.ExecRunner{}).Exec(context.Background(), nil, stdout, stderr, "sh", "-c", script)
+	if err != nil || code != 3 {
+		t.Fatalf("Exec() = %d, %v, want exit 3 and no error", code, err)
+	}
+	if got, want := strings.Join(events, "|"), "o:one|e:two|o:three"; got != want {
+		t.Fatalf("events = %q, want %q", got, want)
+	}
+}
+
+func TestExecRunnerExecDeliversStdin(t *testing.T) {
+	t.Helper()
+	var out strings.Builder
+	code, err := (&agterm.ExecRunner{}).Exec(context.Background(), []byte("typed text\n"), &out, &out, "cat")
+	if err != nil || code != 0 || out.String() != "typed text\n" {
+		t.Fatalf("Exec() = %d, %v, output %q, want stdin echoed", code, err, out.String())
+	}
+}
+
+func TestExecRunnerExecKillsTheProcessWhenTheContextEnds(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var code int
+	var err error
+	go func() {
+		defer close(done)
+		code, err = (&agterm.ExecRunner{}).Exec(ctx, nil, io.Discard, io.Discard, "sleep", "30")
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Exec() did not return after its context ended")
+	}
+	if code != -1 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("Exec() = %d, %v, want -1 and the context error", code, err)
+	}
+}
+
+func TestExecRunnerExecReportsAMissingBinaryAndASignal(t *testing.T) {
+	t.Helper()
+	code, err := (&agterm.ExecRunner{}).Exec(context.Background(), nil, io.Discard, io.Discard, "/nonexistent/agtermctl")
+	if code != -1 || err == nil {
+		t.Fatalf("missing binary: Exec() = %d, %v, want -1 and an error", code, err)
+	}
+	code, err = (&agterm.ExecRunner{}).Exec(context.Background(), nil, io.Discard, io.Discard, "sh", "-c", "kill -9 $$")
+	if code != -1 || err != nil {
+		t.Fatalf("signal: Exec() = %d, %v, want -1 and no error", code, err)
+	}
 }

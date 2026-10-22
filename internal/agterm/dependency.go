@@ -23,3 +23,10 @@ type Outputter interface {
 type Streamer interface {
 	Stream(ctx context.Context, name string, args ...string) (io.ReadCloser, func() error, error)
 }
+
+// Executor runs a command with live stdout and stderr and reports its exit
+// code, for calls whose output is streamed to someone else. It kills the
+// process when ctx is canceled.
+type Executor interface {
+	Exec(ctx context.Context, stdin []byte, stdout, stderr io.Writer, name string, args ...string) (int, error)
+}

@@ -35,7 +35,13 @@ type Config struct {
 	Sink        StatusSink
 	Supervisors Supervisors
 	Bindings    BindingStore
-	Logger      *log.Logger
+	// Ctl, Authorizer, Rewriter and ProxyStore together enable the agtermctl
+	// proxy; without Ctl a host's ctl call is refused as unavailable.
+	Ctl        CtlBackend
+	Authorizer Authorizer
+	Rewriter   Rewriter
+	ProxyStore ProxyStore
+	Logger     *log.Logger
 	// TeardownTimeout bounds how long stopHost and Close wait for goroutines
 	// to exit once told to; zero selects defaultTeardownTimeout.
 	TeardownTimeout time.Duration
@@ -56,6 +62,7 @@ type Daemon struct {
 	sink        StatusSink
 	supervisors Supervisors
 	store       BindingStore
+	proxy       *proxyService
 	logger      *log.Logger
 	// stdLogOutput is the standard logger's writer before openLog pointed it at
 	// the daemon log, restored by Close; nil when openLog did not redirect.
@@ -100,6 +107,7 @@ type hostRuntime struct {
 	hostKey    string
 	localSock  string
 	listener   *receiver.Listener
+	ctl        *hostCtl
 	cancel     context.CancelFunc
 	supervisor Supervisor
 	state      string
@@ -149,7 +157,7 @@ func New(config Config) *Daemon {
 	if timeout <= 0 {
 		timeout = defaultTeardownTimeout
 	}
-	return &Daemon{
+	d := &Daemon{
 		dirs:            dirs,
 		ui:              config.UI,
 		remote:          config.Remote,
@@ -164,6 +172,10 @@ func New(config Config) *Daemon {
 		ensured:         make(map[string]bool),
 		eventReset:      make(chan struct{}),
 	}
+	if config.Ctl != nil && config.Authorizer != nil && config.Rewriter != nil && config.ProxyStore != nil {
+		d.proxy = newProxyService(d, config)
+	}
+	return d
 }
 
 // waitWithin waits for wg with a deadline and reports whether it finished.
@@ -325,6 +337,9 @@ func (d *Daemon) Close() error {
 		}
 	}
 
+	if d.proxy != nil {
+		d.proxy.shim.close()
+	}
 	if err := os.Remove(d.dirs.Sock()); err != nil && !errors.Is(err, os.ErrNotExist) && closeErr == nil {
 		closeErr = err
 	}
@@ -441,6 +456,7 @@ func (d *Daemon) initialize(ctx context.Context) error {
 	if err := d.startControl(ctx); err != nil {
 		return err
 	}
+	d.startProxy(ctx, tempSweepEvery)
 
 	bound, err := d.store.Load()
 	if err != nil {
@@ -557,12 +573,21 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 	if marker, ok := supervisor.(aliveMarker); ok {
 		liveness = marker
 	}
-	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness, nil)
 	hostCtx, cancel := context.WithCancel(ctx)
+	// A nil interface, not a typed nil: the listener refuses ctl calls when it
+	// has no sink.
+	var ctlSink receiver.CtlSink
+	var hostProxy *hostCtl
+	if d.proxy != nil {
+		hostProxy = d.proxy.newHost(host, hostCtx)
+		ctlSink = hostProxy
+		hostProxy.versionRefusal(ctx)
+	}
+	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness, ctlSink)
 	stateSource, hasStateSource := supervisor.(interface{ Changes() <-chan bridge.State })
 	runtime := &hostRuntime{
 		host: host, hostKey: hostKey, localSock: localSock,
-		listener: listener, cancel: cancel, supervisor: supervisor,
+		listener: listener, ctl: hostProxy, cancel: cancel, supervisor: supervisor,
 		state: "down", since: time.Now().UTC(), attempts: 1,
 		torndown: make(chan struct{}),
 	}
@@ -572,7 +597,10 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 	// a Wait.
 	goroutines := 2
 	if hasStateSource {
-		goroutines = 3
+		goroutines++
+	}
+	if hostProxy != nil {
+		goroutines++
 	}
 	runtime.done.Add(goroutines)
 
@@ -672,6 +700,18 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 			defer d.children.Done()
 			defer runtime.done.Done()
 			d.watchHostStates(hostCtx, host, stateSource.Changes())
+		}()
+	}
+	if hostProxy != nil {
+		// Serve returns without waiting for the calls it handed to the sink, so
+		// the host's teardown waits for them here: they end once hostCtx is
+		// canceled, and their cancel hooks are bounded.
+		go func() {
+			defer d.children.Done()
+			defer runtime.done.Done()
+			<-hostCtx.Done()
+			hostProxy.shutdown()
+			d.proxy.shim.releaseHost(host)
 		}()
 	}
 	return nil

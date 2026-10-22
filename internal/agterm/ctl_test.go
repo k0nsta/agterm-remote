@@ -538,3 +538,133 @@ func TestCtlTreeRowsReportsCommandFailure(t *testing.T) {
 		t.Fatalf("TreeRows() error = %v", err)
 	}
 }
+
+func TestCtlExecAppendsTheSocketAndStreams(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	executor := mocks.NewMockExecutor(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, nil, nil, agterm.WithExecutor(executor))
+	var stdout, stderr strings.Builder
+	executor.EXPECT().Exec(gomock.Any(), []byte("in"), &stdout, &stderr, testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return(2, nil)
+	code, err := ctl.Exec(context.Background(), []byte("in"), &stdout, &stderr, "tree", "--json")
+	if code != 2 || err != nil {
+		t.Fatalf("Exec() = %d, %v, want 2 passed through", code, err)
+	}
+}
+
+func TestCtlAskOpenUsesExactArgvAndReadsTheID(t *testing.T) {
+	t.Helper()
+	request := agterm.AskRequest{
+		Title: "Anything on h wants to type", Message: "From session w1: ⟦hi⟧",
+		Buttons: []agterm.AskButton{{ID: "once", Label: "Allow once"}, {ID: "deny", Label: "Deny"}},
+		Default: "deny", Row: "row-1", PaneID: "pane-1",
+	}
+	args := []any{"ask", "open", request.Title, "--message", request.Message,
+		"--button", "once=Allow once", "--button", "deny=Deny", "--default", "deny", "--no-block",
+		"--pane-id", "pane-1", "--target", "row-1", "--socket", testCtlSock}
+	for _, tc := range []struct{ name, out string }{
+		{"bare", `{"id":"dlg-1"}`},
+		{"wrapped", `{"ok":true,"result":{"id":"dlg-1"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, args...).Return([]byte(tc.out), 0, nil)
+			id, err := ctl.AskOpen(context.Background(), request)
+			if err != nil || id != "dlg-1" {
+				t.Fatalf("AskOpen() = %q, %v, want dlg-1", id, err)
+			}
+		})
+	}
+}
+
+func TestCtlAskOpenFailures(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name    string
+		out     string
+		exit    int
+		err     error
+		pending bool
+	}{
+		{name: "dialog already pending", out: "error: ask already pending", exit: 1, err: errors.New("exit status 1"), pending: true},
+		{name: "other failure", out: "error: no session", exit: 1, err: errors.New("exit status 1")},
+		{name: "not json", out: "dlg-1"},
+		{name: "no id", out: `{"ok":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, gomock.Any()).Return([]byte(tc.out), tc.exit, tc.err)
+			_, err := ctl.AskOpen(context.Background(), agterm.AskRequest{Title: "t", Default: "d"})
+			if err == nil || errors.Is(err, agterm.ErrAskPending) != tc.pending {
+				t.Fatalf("AskOpen() error = %v, want a failure (pending %v)", err, tc.pending)
+			}
+		})
+	}
+}
+
+func TestCtlAskResultStates(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		out  string
+		exit int
+		err  error
+		want agterm.AskAnswer
+		fail bool
+	}{
+		{name: "pending", out: `{"result":"pending"}`, exit: 1, err: errors.New("exit status 1"), want: agterm.AskAnswer{State: agterm.AskPending}},
+		{name: "cancelled", out: `{"result":"cancelled"}`, exit: 2, err: errors.New("exit status 2"), want: agterm.AskAnswer{State: agterm.AskCancelled}},
+		{name: "answered", out: `{"result":"answered","id":"pair"}`, want: agterm.AskAnswer{State: agterm.AskAnswered, ID: "pair"}},
+		{name: "exit 1 but not pending", out: `{"result":"answered","id":"x"}`, exit: 1, err: errors.New("exit status 1"), fail: true},
+		{name: "error text", out: "error: no such dialog", exit: 1, err: errors.New("exit status 1"), fail: true},
+		{name: "exec failed", err: errors.New("no agtermctl"), fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "ask", "result", "dlg-1", "--socket", testCtlSock).
+				Return([]byte(tc.out), tc.exit, tc.err)
+			got, err := ctl.AskResult(context.Background(), "dlg-1")
+			if (err != nil) != tc.fail || got != tc.want {
+				t.Fatalf("AskResult() = %+v, %v, want %+v (failure %v)", got, err, tc.want, tc.fail)
+			}
+		})
+	}
+}
+
+func TestCtlAskCancelUsesExactArgv(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	runner := mocks.NewMockRunner(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, runner, nil, nil)
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "ask", "cancel", "dlg-1", "--socket", testCtlSock).Return(nil)
+	if err := ctl.AskCancel(context.Background(), "dlg-1"); err != nil {
+		t.Fatalf("AskCancel() error = %v", err)
+	}
+}
+
+func TestCtlTreeRowsDecodesHTMLOverlays(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	tree := `{"result":{"tree":{"workspaces":[{"sessions":[
+		{"id":"row-1","htmlOverlays":[{"id":"PG1","pane":"left","state":"loaded","javascript":true},{"id":"PG2","state":"loading"}]},
+		{"id":"row-2"}]}]}}}`
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return([]byte(tree), 0, nil)
+	rows, err := ctl.TreeRows(context.Background())
+	if err != nil {
+		t.Fatalf("TreeRows() error = %v", err)
+	}
+	want := []agterm.HTMLOverlay{{ID: "PG1", Pane: "left", State: "loaded"}, {ID: "PG2", State: "loading"}}
+	if len(rows[0].HTMLOverlays) != 2 || rows[0].HTMLOverlays[0] != want[0] || rows[0].HTMLOverlays[1] != want[1] || rows[1].HTMLOverlays != nil {
+		t.Fatalf("overlays = %+v / %+v, want %+v and none", rows[0].HTMLOverlays, rows[1].HTMLOverlays, want)
+	}
+}

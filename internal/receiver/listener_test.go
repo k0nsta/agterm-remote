@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -226,7 +227,7 @@ func waitForSocket(t *testing.T, path string) {
 
 func writeConnection(t *testing.T, path, body string) {
 	t.Helper()
-	conn, err := net.Dial("unix", path)
+	conn, err := dialSocket(path)
 	if err != nil {
 		t.Fatalf("dial receiver socket: %v", err)
 	}
@@ -367,7 +368,7 @@ func ctlHeader(session string, files []int, stdin int) string {
 
 func dialCtl(t *testing.T, path string) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	conn, err := net.Dial("unix", path)
+	conn, err := dialSocket(path)
 	if err != nil {
 		t.Fatalf("dial receiver socket: %v", err)
 	}
@@ -596,4 +597,17 @@ func TestListenerCtlMarksAlive(t *testing.T) {
 	if listener.LastEvent().IsZero() {
 		t.Fatal("LastEvent() is zero after a ctl call")
 	}
+}
+
+// dialSocket retries a refused dial: the socket file appears at bind, slightly before listen.
+func dialSocket(path string) (net.Conn, error) {
+	var conn net.Conn
+	var err error
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		conn, err = net.Dial("unix", path)
+		if err == nil || !errors.Is(err, syscall.ECONNREFUSED) {
+			break
+		}
+	}
+	return conn, err
 }

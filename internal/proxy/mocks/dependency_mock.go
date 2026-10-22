@@ -15,6 +15,7 @@ import (
 
 	agterm "github.com/k0nsta/agterm-remote/internal/agterm"
 	bindings "github.com/k0nsta/agterm-remote/internal/bindings"
+	remote "github.com/k0nsta/agterm-remote/internal/remote"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -94,4 +95,43 @@ func (m *MockBindingLoader) Load() ([]bindings.Binding, error) {
 func (mr *MockBindingLoaderMockRecorder) Load() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Load", reflect.TypeOf((*MockBindingLoader)(nil).Load))
+}
+
+// MockSessionLister is a mock of SessionLister interface.
+type MockSessionLister struct {
+	ctrl     *gomock.Controller
+	recorder *MockSessionListerMockRecorder
+	isgomock struct{}
+}
+
+// MockSessionListerMockRecorder is the mock recorder for MockSessionLister.
+type MockSessionListerMockRecorder struct {
+	mock *MockSessionLister
+}
+
+// NewMockSessionLister creates a new mock instance.
+func NewMockSessionLister(ctrl *gomock.Controller) *MockSessionLister {
+	mock := &MockSessionLister{ctrl: ctrl}
+	mock.recorder = &MockSessionListerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockSessionLister) EXPECT() *MockSessionListerMockRecorder {
+	return m.recorder
+}
+
+// Sessions mocks base method.
+func (m *MockSessionLister) Sessions(ctx context.Context, host string) ([]remote.Session, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Sessions", ctx, host)
+	ret0, _ := ret[0].([]remote.Session)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Sessions indicates an expected call of Sessions.
+func (mr *MockSessionListerMockRecorder) Sessions(ctx, host any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Sessions", reflect.TypeOf((*MockSessionLister)(nil).Sessions), ctx, host)
 }

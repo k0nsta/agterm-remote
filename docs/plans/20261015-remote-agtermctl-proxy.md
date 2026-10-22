@@ -733,23 +733,23 @@ bridge would get around the whole allowlist. Reviewed with Codex.
 - Modify: `internal/agterm/exec.go`, `internal/agterm/ctl.go` (+ tests),
   `internal/daemon/daemon.go`, `internal/daemon/dependency.go`, `cmd/agr/wire.go`
 
-- [ ] `Rewrite`: files, `session new` with name collision check and pre-bind, overlay
+- [x] `Rewrite`: files, `session new` with name collision check and pre-bind, overlay
       COMMAND with `cwd`, `restore`, URL warning, `<agr>` stable path
-- [ ] the page shim (`internal/daemon/pageshim.go`): loopback server, tokens bound to page ids,
+- [x] the page shim (`internal/daemon/pageshim.go`): loopback server, tokens bound to page ids,
       injected script, CSP header, one-transition state, `--block` semantics, limits, cleanup
       (Technical Details > Host pages)
-- [ ] the agterm streaming call (stdin, stdout, stderr; kill on ctx), exposed through a daemon
+- [x] the agterm streaming call (stdin, stdout, stderr; kill on ctx), exposed through a daemon
       interface
-- [ ] the daemon checks the agterm version once per host start (`Client.Version`); below
+- [x] the daemon checks the agterm version once per host start (`Client.Version`); below
       0.36.0 the sink refuses every call with the version message
-- [ ] the daemon implements `CtlSink`:
+- [x] the daemon implements `CtlSink`:
   - Authorize → Rewrite → run
   - cancel hook on a detached 2 s ctx
   - per-host cap of 16
   - temp lifetime and the 24 h sweep
   - goroutines tracked so `stopHost` returns within `teardownTimeout`
   - leftovers cleared at start
-- [ ] the consent flow (Technical Details > Grants):
+- [x] the consent flow (Technical Details > Grants):
   - `agterm.Ctl`: `AskOpen` (`--no-block`, returns the id), `AskResult`, `AskCancel`.
     `Confirm` stays as it is (its argv and exit-2 behaviour pinned by a test)
   - title and message: `Anything on <host> …`, the session name, the target row name, the
@@ -760,8 +760,8 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   - one open dialog per host; 60 s refusal per host and target row after a deny, a timeout or
     a client cancel
   - drop grants `Authorize` reports as gone
-- [ ] wire it in `cmd/agr/wire.go` with compile-time interface assertions
-- [ ] tests:
+- [x] wire it in `cmd/agr/wire.go` with compile-time interface assertions
+- [x] tests:
   - each rewrite's exact argv and Mac shell string
   - pre-bind after `session new`: a `restore` before `agr open` is the foreground is refused
     with the retry message, and authorised once it is

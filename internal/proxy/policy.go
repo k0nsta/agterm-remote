@@ -378,7 +378,10 @@ type Call struct {
 }
 
 // Args renders the normalised argv for the real agtermctl, without --socket.
-func (c Call) Args() []string {
+func (c Call) Args() []string { return c.render(c.Opts, c.Pos) }
+
+// render is Args with the options and positionals a rewrite substituted.
+func (c Call) render(opts []Opt, pos []string) []string {
 	args := append([]string(nil), c.Path...)
 	if c.Help {
 		return append(args, "--help")
@@ -396,7 +399,7 @@ func (c Call) Args() []string {
 			}
 		}
 	}
-	for _, opt := range c.Opts {
+	for _, opt := range opts {
 		if opt.Flag {
 			args = append(args, "--"+opt.Name)
 		} else {
@@ -405,13 +408,13 @@ func (c Call) Args() []string {
 	}
 	// positionals follow the options; `--` is needed only for one that
 	// starts like an option.
-	for _, word := range c.Pos {
+	for _, word := range pos {
 		if strings.HasPrefix(word, "-") {
 			args = append(args, "--")
 			break
 		}
 	}
-	return append(args, c.Pos...)
+	return append(args, pos...)
 }
 
 // Consent is what the daemon asks the user when a host wants to type into a
@@ -551,19 +554,56 @@ func SanitizeTyped(text []byte) error {
 	return nil
 }
 
-// Preview renders text for a consent dialog: at most 300 characters on one
-// line, a newline shown as ⏎ and a tab as ⇥, with the full length when cut.
-func Preview(text string) string {
+// PreviewParts cuts text for a consent dialog to its first 300 characters on
+// one line, a newline shown as ⏎ and a tab as ⇥. total is the full length in
+// characters and cut says whether anything was left out.
+func PreviewParts(text string) (shown string, total int, cut bool) {
 	runes := []rune(text)
-	cut := len(runes) > previewRunes
-	if cut {
+	total = len(runes)
+	if cut = total > previewRunes; cut {
 		runes = runes[:previewRunes]
 	}
-	shown := strings.NewReplacer("\n", "⏎", "\t", "⇥").Replace(string(runes))
+	return strings.NewReplacer("\n", "⏎", "\t", "⇥").Replace(string(runes)), total, cut
+}
+
+// Preview renders text for a consent dialog: at most 300 characters on one
+// line, with the full length when cut.
+func Preview(text string) string {
+	shown, total, cut := PreviewParts(text)
 	if cut {
-		shown += fmt.Sprintf("… (%d characters)", len([]rune(text)))
+		shown += fmt.Sprintf("… (%d characters)", total)
 	}
 	return shown
+}
+
+// CheckAgent applies the program rule to one pane again, on a fresh tree
+// read: the user's answer to a consent dialog can come long after Authorize
+// looked. It also fails when the pane has been bound to a host meanwhile.
+func (p *Policy) CheckAgent(ctx context.Context, row, paneID string) error {
+	rows, err := p.tree.TreeRows(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot read agterm state: %w", err)
+	}
+	all, err := p.binds.Load()
+	if err != nil {
+		return fmt.Errorf("cannot read bindings: %w", err)
+	}
+	for _, b := range all {
+		if strings.EqualFold(b.PaneID, paneID) {
+			return fmt.Errorf("pane %s is bound to a host", paneID)
+		}
+	}
+	for _, candidate := range rows {
+		if !strings.EqualFold(candidate.ID, row) {
+			continue
+		}
+		surface, ok := surfaceByID(candidate, paneID)
+		if !ok {
+			break
+		}
+		return p.agentRunning(candidate, surface.Kind)
+	}
+	return fmt.Errorf("pane %s is gone", paneID)
 }
 
 // Authorize decides one call. It is pure: it reads the tree and the bindings

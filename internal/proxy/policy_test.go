@@ -753,3 +753,64 @@ func TestAuthorizeSanitisesGrantedAndConsentedTypingOnly(t *testing.T) {
 	// an owned pane takes any text
 	wantAllow(t, f.authorizeStdin(t, bad, "session", "type", "--stdin"))
 }
+
+func TestCheckAgentAppliesTheProgramRuleAgain(t *testing.T) {
+	t.Helper()
+	f := newFixture(t)
+	policy := f.policy(t)
+	ctx := context.Background()
+	if err := policy.CheckAgent(ctx, rowAgent, paneAgent); err != nil {
+		t.Fatalf("CheckAgent() on a claude pane error = %v", err)
+	}
+	if err := policy.CheckAgent(ctx, rowShellCod, shellCodR); err != nil {
+		t.Fatalf("CheckAgent() on the codex split pane error = %v", err)
+	}
+	for _, tc := range []struct {
+		name, row, pane, want string
+	}{
+		{"shell pane", rowShellCod, shellCodL, "at a shell"},
+		{"scratch surface", rowScratch, scratchPane, "no readable program"},
+		{"pane bound to a host", rowSib, paneSib, "bound to a host"},
+		{"pane not in the row", rowAgent, paneGone, "is gone"},
+		{"row gone", rowGone, paneGone, "is gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := policy.CheckAgent(ctx, tc.row, tc.pane); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CheckAgent() error = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+	f.row(t, rowAgent).Foreground = nil
+	f.row(t, rowAgent).ForegroundShell = "zsh"
+	if err := f.policy(t).CheckAgent(ctx, rowAgent, paneAgent); err == nil {
+		t.Fatal("CheckAgent() after the pane became a shell error = nil")
+	}
+}
+
+func TestCheckAgentReportsStateReadFailures(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	tree := mocks.NewMockTreeReader(ctrl)
+	binds := mocks.NewMockBindingLoader(ctrl)
+	tree.EXPECT().TreeRows(gomock.Any()).Return(nil, errors.New("agterm down"))
+	if err := NewPolicy(tree, binds).CheckAgent(context.Background(), rowAgent, paneAgent); err == nil || !strings.Contains(err.Error(), "agterm down") {
+		t.Fatalf("CheckAgent() error = %v, want the tree failure", err)
+	}
+	tree.EXPECT().TreeRows(gomock.Any()).Return(nil, nil)
+	binds.EXPECT().Load().Return(nil, errors.New("disk"))
+	if err := NewPolicy(tree, binds).CheckAgent(context.Background(), rowAgent, paneAgent); err == nil || !strings.Contains(err.Error(), "disk") {
+		t.Fatalf("CheckAgent() error = %v, want the binding failure", err)
+	}
+}
+
+func TestPreviewPartsCutsAtThreeHundredCharacters(t *testing.T) {
+	t.Helper()
+	shown, total, cut := PreviewParts(strings.Repeat("é", 300))
+	if cut || total != 300 || len([]rune(shown)) != 300 {
+		t.Fatalf("PreviewParts(300) = %d runes, total %d, cut %v, want it whole", len([]rune(shown)), total, cut)
+	}
+	shown, total, cut = PreviewParts("a\nb\tc" + strings.Repeat("x", 400))
+	if !cut || total != 405 || len([]rune(shown)) != 300 || !strings.HasPrefix(shown, "a⏎b⇥c") {
+		t.Fatalf("PreviewParts(405) = %q (%d runes), total %d, cut %v, want 300 runes with ⏎ and ⇥", shown, len([]rune(shown)), total, cut)
+	}
+}
