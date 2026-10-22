@@ -49,7 +49,7 @@ func Install(dir, version string) (string, error) {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
 		return "", err
-	case !bytes.Contains(existing, []byte("\n"+Marker)):
+	case !bytes.HasPrefix(existing, []byte(Marker)) && !bytes.Contains(existing, []byte("\n"+Marker)):
 		return Kept, nil
 	case bytes.Equal(existing, want):
 		return Unchanged, nil
