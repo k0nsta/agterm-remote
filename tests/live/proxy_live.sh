@@ -289,7 +289,7 @@ pid_gone() {
 }
 
 daemon_ready() {
-	[ "$(tr -d '[:space:]' <"$PID_FILE" 2>/dev/null)" = "$TEST_DAEMON_PID" ]
+	[ -r "$PID_FILE" ] && [ "$(tr -d '[:space:]' <"$PID_FILE")" = "$TEST_DAEMON_PID" ]
 }
 
 # swap_in stops the running daemon, starts bin/agr's, and installs bin/agr's
@@ -398,16 +398,23 @@ check_overlay_round_trip() {
 check_page_isolation() {
 	step 'a host page cannot type, click or fetch out'
 	mk=$(new_local "${PREFIX}mk" cat)
-	python3 -I -c 'import http.server, sys
+	python3 -I -c 'import http.server, socketserver, sys
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        open(sys.argv[2], "a").write("hit\n")
+        f = open(sys.argv[2], "a")
+        f.write("hit\n")
+        f.close()
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
     log_message = lambda *a: None
-s = http.server.HTTPServer(("127.0.0.1", 0), H)
-open(sys.argv[1], "w").write(str(s.server_address[1]))
+class S(http.server.HTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+s = S(("127.0.0.1", 0), H)
+f = open(sys.argv[1], "w")
+f.write(str(s.server_address[1]))
+f.close()
 s.serve_forever()' "$WORK/port" "$WORK/hits" &
 	HELPER_PIDS="$HELPER_PIDS $!"
 	wait_for 'the fetch target' 10 test -s "$WORK/port"
@@ -464,9 +471,11 @@ check_type_refusals() {
 	assert_refused
 
 	step 'session type refused on a detached pane'
-	R4=$(new_remote "${PREFIX}r4")
-	host_sh "tmux detach-client -s '${PREFIX}r4'" >/dev/null 2>&1 || fail 'could not detach r4'
-	wait_for 'r4 to detach' 20 not_attached "$R4"
+	# Typed into a shell, so the row survives the detach as a local shell.
+	R4=$(new_local "${PREFIX}r4")
+	type_line "$R4" '' "'$AGR_BIN' open '$HOST' '${PREFIX}r4'"
+	wait_for "${PREFIX}r4 attached" 40 is_attached "$R4"
+	wait_for 'r4 to detach' 20 detach_r4 "$R4"
 	rr "$R1" "printf x | agtermctl session type --target $R4 --stdin"
 	assert_refused
 	assert_contains 'not attached' "$RR_OUT"
@@ -476,12 +485,20 @@ has_panes() {
 	[ -n "$(pane_of "$1" right)" ]
 }
 
+# detach_r4 ROW detaches the tmux client (it may not have attached yet, so the
+# caller retries) and reports whether the row has stopped being attached.
+detach_r4() {
+	host_sh "tmux detach-client -s '${PREFIX}r4'" >/dev/null 2>&1 || :
+	sleep 1
+	not_attached "$1"
+}
+
 not_attached() {
 	! is_attached "$1"
 }
 
 check_session_new() {
-	step 'session new --command gives a bound homelab row; type before attach is told to retry'
+	step 'session new --command gives a bound homelab row; an early type is typed or told to retry'
 	tries=0
 	while :; do
 		tries=$((tries + 1))
@@ -494,10 +511,14 @@ echo "typerc=\$?"
 EOF
 		)
 		rr "$R1" "$script"
+		# agr open is the foreground within milliseconds of session new, so the
+		# type usually wins the race; the retry refusal is pinned by unit tests.
+		# Whatever the timing, a refusal must carry the retry message.
 		case $RR_OUT in
+			*'typerc=0'*) break ;;
 			*'typerc=1'*'not attached yet; retry'* | *'not attached yet; retry'*'typerc=1'*) break ;;
 		esac
-		[ "$tries" -lt 3 ] || fail "type right after session new was not refused with the retry message: $RR_OUT"
+		[ "$tries" -lt 3 ] || fail "type right after session new: neither typed nor told to retry: $RR_OUT"
 	done
 	new_id=$(printf '%s\n' "$RR_OUT" | sed -n 's/^NEW=//p' | head -n 1)
 	[ -n "$new_id" ] || fail "session new printed no row id: $RR_OUT"
@@ -505,7 +526,7 @@ EOF
 	wait_for 'the marker program on the host' 40 screen_has "$new_id" agrlive-marker-up
 	ls_out=$("$AGR_BIN" ls "$HOST")
 	assert_contains "$name" "$ls_out"
-	assert_contains "$new_id" "$ls_out"
+	assert_contains "$name" "$(printf '%s\n' "$ls_out" | grep " bound")"
 }
 
 check_orchestrator() {
