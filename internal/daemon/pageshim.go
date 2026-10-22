@@ -133,6 +133,12 @@ func (p *page) outcome() (body []byte, exit int) {
 	return append(body, '\n'), exit
 }
 
+// errRowMissing means the row is not in the tree; maxMissingPolls consecutive
+// misses in wait dismiss the page so a closed row does not keep its token.
+var errRowMissing = errors.New("not in the tree")
+
+const maxMissingPolls = 8
+
 // pageShim is the daemon's one loopback server for host pages.
 type pageShim struct {
 	live pageLive
@@ -249,16 +255,18 @@ func (s *pageShim) releaseHost(host string) {
 	}
 }
 
-// inSlot finds the open page of host in a row's pane slot.
-func (s *pageShim) inSlot(host, row, side string) *page {
+// openInSlot lists the open pages of host in a row's pane slot. More than one
+// means a page was replaced and its watcher has not noticed yet.
+func (s *pageShim) openInSlot(host, row, side string) []*page {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var found []*page
 	for _, p := range s.pages {
 		if p.host == host && strings.EqualFold(p.row, row) && p.side == side && p.isOpen() {
-			return p
+			found = append(found, p)
 		}
 	}
-	return nil
+	return found
 }
 
 func (s *pageShim) lookup(token string) *page {
@@ -302,6 +310,7 @@ func (s *pageShim) address() string {
 func (s *pageShim) wait(ctx context.Context, p *page, interval time.Duration) bool {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	missing := 0
 	for {
 		select {
 		case <-p.done:
@@ -309,8 +318,18 @@ func (s *pageShim) wait(ctx context.Context, p *page, interval time.Duration) bo
 		case <-ctx.Done():
 			return false
 		case <-ticker.C:
-			if live, err := s.live(ctx, p.row, p.id()); err == nil && !live {
+			live, err := s.live(ctx, p.row, p.id())
+			switch {
+			case err == nil && !live:
 				p.transition(pageDismissed, "")
+			case errors.Is(err, errRowMissing):
+				// The row closed (or the tree is limited to another window
+				// for a while): give up only after it stays missing.
+				if missing++; missing >= maxMissingPolls {
+					p.transition(pageDismissed, "")
+				}
+			default:
+				missing = 0
 			}
 		}
 	}

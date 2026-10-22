@@ -940,7 +940,7 @@ func (a *authz) checkOwned(row agterm.TreeRow, surface agterm.Surface) string {
 		}
 		return fmt.Sprintf("pane %s is not bound to %s", surface.PaneID, a.host)
 	}
-	if a.leaf.write && !attached(row, b) {
+	if !attached(row, b) {
 		return fmt.Sprintf("pane %s is not attached yet; retry once `agr open` runs in it (a detached pane stays refused)", surface.PaneID)
 	}
 	return ""

@@ -96,7 +96,7 @@ func (s *proxyService) pageLive(ctx context.Context, row, pageID string) (bool, 
 		}
 		return false, nil
 	}
-	return false, fmt.Errorf("row %s is not in the tree", row)
+	return false, fmt.Errorf("row %s: %w", row, errRowMissing)
 }
 
 // clearTemp removes every leftover temp directory (daemon start).
@@ -420,7 +420,16 @@ func (h *hostCtl) driveShimPage(ctx context.Context, call proxy.Call) (code int,
 		return 0, false
 	}
 	target := call.Targets[0]
-	p := h.svc.shim.inSlot(h.host, target.Row, target.Side)
+	// Only the page agterm shows now may be driven; an older one still in the
+	// slot was replaced, so it is dismissed instead.
+	var p *page
+	for _, candidate := range h.svc.shim.openInSlot(h.host, target.Row, target.Side) {
+		if p == nil && h.svc.shim.current(ctx, candidate) {
+			p = candidate
+			continue
+		}
+		candidate.transition(pageDismissed, "")
+	}
 	if p == nil {
 		return 0, false
 	}

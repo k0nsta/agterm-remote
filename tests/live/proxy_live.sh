@@ -213,7 +213,8 @@ rr_start() {
 	RR_N=$((RR_N + 1))
 	RR_TAG=r$RR_N
 	base=$REMOTE_DIR/$RR_TAG
-	printf '{\n%s\n} >%s.out 2>&1\necho $? >%s.rc.tmp\nmv %s.rc.tmp %s.rc\n' "$3" "$base" "$base" "$base" "$base" |
+	# shellcheck disable=SC2016 # $HOME and $PATH expand on the host, not here
+	printf 'PATH="$HOME/.local/bin:$PATH"\n{\n%s\n} >%s.out 2>&1\necho $? >%s.rc.tmp\nmv %s.rc.tmp %s.rc\n' "$3" "$base" "$base" "$base" "$base" |
 		host_sh "cat > '$base.sh'"
 	type_line "$1" "$2" "sh $base.sh"
 }
