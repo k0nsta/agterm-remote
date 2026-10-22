@@ -11,3 +11,5 @@ agr	0.4.0
 sock	1
 legacy_targets	2
 legacy_agr_target	3
+agtermctl	proxy
+local_bin_path	1

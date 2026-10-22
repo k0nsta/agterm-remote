@@ -9,7 +9,7 @@ have() {
 
 usage() {
 	printf '%s\n' "agr $AGR_VERSION — remote session bridge" >&2
-	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|paste-put|status|--version} ..." >&2
+	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|paste-put|status|ctl|--version} ..." >&2
 	exit "${1:-2}"
 }
 
@@ -322,15 +322,20 @@ sock.sendall(sys.stdin.buffer.read())
 	return 0
 }
 
+# tmux_current_session prints the agr-owned session the calling pane belongs
+# to, and fails (printing nothing) outside tmux or outside an owned session.
+tmux_current_session() {
+	[ -n "${TMUX_PANE:-}" ] || return 1
+	cur=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || return 1
+	[ -n "$cur" ] || return 1
+	tmux_owned "$cur" || return 1
+	printf '%s\n' "$cur"
+}
+
 tmux_status() {
 	state=$1
 	shift
-	[ -n "${TMUX_PANE:-}" ] || exit 0
-	n=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || exit 0
-	[ -n "$n" ] || exit 0
-	if ! tmux_owned "$n"; then
-		exit 0
-	fi
+	n=$(tmux_current_session) || exit 0
 	label="$state@$(date +%s)"
 	if ! tmux set-option -t "=$n:" @agr_state "$label" 2>/dev/null; then
 		exit 0
@@ -593,12 +598,19 @@ EOF
 	return 0
 }
 
+# zmx_current_session prints the agr-owned session the caller runs in, and
+# fails (printing nothing) outside zmx or outside an owned session.
+zmx_current_session() {
+	[ -n "${ZMX_SESSION:-}" ] || return 1
+	v=$(zmx get "$ZMX_SESSION" agr 2>/dev/null) || return 1
+	[ "$v" = 1 ] || return 1
+	printf '%s\n' "$ZMX_SESSION"
+}
+
 zmx_status() {
 	state=$1
 	shift
-	[ -n "${ZMX_SESSION:-}" ] || exit 0
-	v=$(zmx get "$ZMX_SESSION" agr 2>/dev/null) || exit 0
-	[ "$v" = 1 ] || exit 0
+	zmx_current_session >/dev/null || exit 0
 	label="$state@$(date +%s)"
 	if ! zmx set "$ZMX_SESSION" "agr_state=$label" 2>/dev/null; then
 		exit 0
@@ -627,6 +639,183 @@ paste_put() {
 	mv "$tmp" "$target"
 	tmp=
 	printf '%s\n' "$target"
+}
+
+# ctl is the remote half of the agtermctl proxy: one header line, the Mac's
+# "ack 1" line, then the file and stdin bytes, then the o/e/x frames back. The
+# client is python3 (stdlib only); its source sits in single quotes, so a literal
+# single quote in it is written '\''.
+ctl() {
+	if ! have python3; then
+		printf '%s\n' 'agtermctl (via agr): python3 is required on this host' >&2
+		exit 1
+	fi
+	case "$AGR_MUX" in
+		tmux) ctl_session=$(tmux_current_session) || ctl_session= ;;
+		zmx) ctl_session=$(zmx_current_session) || ctl_session= ;;
+		*) ctl_session= ;;
+	esac
+	if [ -z "$ctl_session" ] || ! valid_token "$ctl_session"; then
+		printf '%s\n' 'agtermctl (via agr): not inside a row opened with agr open' >&2
+		exit 1
+	fi
+	ctl_py='
+import json
+import os
+import socket
+import sys
+
+PREFIX = "agtermctl (via agr): "
+FILE_OPTIONS = ("--html",)
+ACK_TIMEOUT = 5
+
+
+def fail(message, code=1):
+    sys.stderr.write(PREFIX + message + "\n")
+    sys.stderr.flush()
+    sys.exit(code)
+
+
+def read_file(path):
+    if not os.path.isfile(path):
+        fail("not a readable regular file: " + path)
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except OSError as error:
+        fail("cannot read " + path + ": " + error.strerror)
+
+
+def prepare(argv):
+    # File options become @<index>; the bytes travel after the ack.
+    files = []
+    out = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--":
+            out.extend(argv[index:])
+            break
+        if arg in FILE_OPTIONS and index + 1 < len(argv):
+            out.extend([arg, "@" + str(len(files))])
+            files.append(read_file(argv[index + 1]))
+            index += 2
+            continue
+        name, equals, value = arg.partition("=")
+        if equals and name in FILE_OPTIONS:
+            out.append(name + "=@" + str(len(files)))
+            files.append(read_file(value))
+            index += 1
+            continue
+        out.append(arg)
+        index += 1
+    return out, files
+
+
+def wants_stdin(argv):
+    for arg in argv:
+        if arg == "--":
+            return False
+        if arg == "--stdin":
+            return True
+    return False
+
+
+def read_line(sock, buf):
+    while b"\n" not in buf:
+        if len(buf) > 4096:
+            return None, buf
+        chunk = sock.recv(4096)
+        if not chunk:
+            return None, buf
+        buf += chunk
+    line, _, rest = buf.partition(b"\n")
+    return line, rest
+
+
+def demux(sock, buf):
+    # Frames: "o <n>" stdout, "e <n>" stderr, each followed by n bytes; one
+    # "x <code>" ends the call.
+    while True:
+        line, buf = read_line(sock, buf)
+        if line is None:
+            fail("the bridge to the Mac dropped")
+        kind, _, number = line.decode("ascii", "replace").partition(" ")
+        if kind == "x" and number.lstrip("-").isdigit():
+            code = int(number)
+            sys.exit(code if 0 <= code <= 255 else 1)
+        if kind not in ("o", "e") or not number.isdigit():
+            fail("unexpected reply from the Mac'\''s agr daemon")
+        size = int(number)
+        while len(buf) < size:
+            chunk = sock.recv(65536)
+            if not chunk:
+                fail("the bridge to the Mac dropped")
+            buf += chunk
+        data, buf = buf[:size], buf[size:]
+        stream = sys.stdout if kind == "o" else sys.stderr
+        try:
+            stream.buffer.write(data)
+            stream.buffer.flush()
+        except BrokenPipeError:
+            sys.exit(1)
+
+
+def main():
+    sock_path, session = sys.argv[1], sys.argv[2]
+    argv, files = prepare(sys.argv[3:])
+    stdin = b""
+    if wants_stdin(argv):
+        stdin = sys.stdin.buffer.read()
+    cwd = os.environ.get("PWD") or os.getcwd()
+    header = {
+        "cmd": "ctl",
+        "v": 1,
+        "session": session,
+        "self": {
+            "row": os.environ.get("AGTERM_SESSION_ID", ""),
+            "pane_id": os.environ.get("AGTERM_PANE_ID", ""),
+        },
+        "cwd": cwd,
+        "argv": argv,
+        "files": [len(data) for data in files],
+        "stdin": len(stdin),
+    }
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(ACK_TIMEOUT)
+    try:
+        sock.connect(sock_path)
+    except OSError:
+        fail("the bridge to the Mac is down (run agr up <host> on the Mac)")
+    old = "the Mac'\''s agr daemon is too old or not running"
+    try:
+        sock.sendall(json.dumps(header, separators=(",", ":")).encode("ascii") + b"\n")
+        line, buf = read_line(sock, b"")
+    except OSError:
+        fail(old)
+    if line is None:
+        fail(old)
+    sock.settimeout(None)
+    if line == b"ack 1":
+        try:
+            for data in files:
+                sock.sendall(data)
+            sock.sendall(stdin)
+        except OSError:
+            pass
+        buf = b""
+    else:
+        # A refusal before the ack arrives as frames; read them as they are.
+        buf = line + b"\n" + buf
+    demux(sock, buf)
+
+
+try:
+    main()
+except KeyboardInterrupt:
+    sys.exit(130)
+'
+	exec python3 -I -c "$ctl_py" "$AGR_SOCK" "$ctl_session" "$@"
 }
 
 attach_cwd=
@@ -768,6 +957,9 @@ dispatch() {
 				zmx) zmx_status "$state" "$@" ;;
 				*) exit 2 ;;
 			esac
+			;;
+		ctl)
+			ctl "$@"
 			;;
 		--version|-V)
 			[ "$#" -eq 0 ] || usage 2

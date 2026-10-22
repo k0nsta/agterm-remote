@@ -794,18 +794,18 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   `internal/cli/doctor_test.go`
 - Create: `tests/remote/tmux/proxy_test.sh`, `tests/remote/zmx/proxy_test.sh`
 
-- [ ] `agr ctl`:
+- [x] `agr ctl`:
   - the current-session helpers (status rebuilt on them, existing tests green)
   - `have python3` or exit 1
   - the python3 client: header from argv and env, wait for ack, then the body, demux the
     frames, the messages, quiet Ctrl-C
-- [ ] install writes the wrapper (0755), skips it when a non-agr `agtermctl` is found, and
+- [x] install writes the wrapper (0755), skips it when a non-agr `agtermctl` is found, and
       updates an earlier agr proxy (marker line); the doctor probe and report
-- [ ] `shellcheck -s sh` clean
-- [ ] Go tests: install skips the wrapper when a non-agr `agtermctl` is found, writes it when
+- [x] `shellcheck -s sh` clean
+- [x] Go tests: install skips the wrapper when a non-agr `agtermctl` is found, writes it when
       none is, updates a marked one; the probe parses the proxy and PATH facts
       (`testdata/probe.txt`); doctor prints both
-- [ ] remote tests against a fake python3 server on a short socket path, which the test kills
+- [x] remote tests against a fake python3 server on a short socket path, which the test kills
       itself:
   - header content (argv, `@i`, `self`, `cwd`)
   - the body is sent only after the ack

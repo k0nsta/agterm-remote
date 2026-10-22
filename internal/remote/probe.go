@@ -24,6 +24,11 @@ type ProbeResult struct {
 	Sock            bool
 	LegacyTargets   int
 	LegacyAgrTarget int
+	// Agtermctl is what a login shell on the host finds as agtermctl: "" none,
+	// "proxy" the wrapper agr installs, "other" anything else (a Mac running
+	// agterm). LocalBinOnPath says ~/.local/bin is on that login PATH.
+	Agtermctl      string
+	LocalBinOnPath bool
 	// Term is the local TERM the probe asked about (empty: not asked);
 	// TerminfoChecked says the host answered, Terminfo whether it has the
 	// entry, Tic whether it could compile one.
@@ -97,6 +102,24 @@ if have tmux; then
 	legacy_agr_target=$(tmux list-sessions -F '#{session_name}\t#{@agr_target}' 2>/dev/null | awk -F '\t' '$2 != "" { n++ } END { print n + 0 }')
 fi
 printf 'legacy_agr_target\t%s\n' "${legacy_agr_target:-0}"
+
+# The proxy wrapper is recognised by its marker line (proxyMarker).
+agtermctl_path=$(sh -lc 'command -v agtermctl' 2>/dev/null | sed -n '1p')
+if [ -z "$agtermctl_path" ] && [ -e "$HOME/.local/bin/agtermctl" ]; then
+	agtermctl_path=$HOME/.local/bin/agtermctl
+fi
+if [ -z "$agtermctl_path" ]; then
+	printf 'agtermctl\tMISSING\n'
+elif grep -q '^# agr-proxy-wrapper' "$agtermctl_path" 2>/dev/null; then
+	printf 'agtermctl\tproxy\n'
+else
+	printf 'agtermctl\tother\n'
+fi
+if sh -lc 'case ":$PATH:" in *":$HOME/.local/bin:"*) exit 0 ;; *) exit 1 ;; esac' 2>/dev/null; then
+	printf 'local_bin_path\t1\n'
+else
+	printf 'local_bin_path\t0\n'
+fi
 
 # $1 is the Mac's TERM (agterm: xterm-ghostty). A host without that terminfo
 # entry runs tmux and everything under it blind: no clipboard, odd keys.
@@ -183,6 +206,13 @@ func ParseProbe(body []byte) (ProbeResult, error) {
 			result.LegacyTargets, err = parseProbeCount(value)
 		case "legacy_agr_target":
 			result.LegacyAgrTarget, err = parseProbeCount(value)
+		case "agtermctl":
+			result.Agtermctl = parseMissing(value)
+			if result.Agtermctl != "" && result.Agtermctl != "proxy" && result.Agtermctl != "other" {
+				err = fmt.Errorf("invalid agtermctl state %q", value)
+			}
+		case "local_bin_path":
+			result.LocalBinOnPath, err = parseProbeBool(value)
 		case "terminfo":
 			result.TerminfoChecked = true
 			result.Terminfo, err = parseProbeBool(value)

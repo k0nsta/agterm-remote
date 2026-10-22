@@ -71,7 +71,7 @@ func TestDoctorCollectsAllBlocksWithoutLiveNetwork(t *testing.T) {
 		CtlPath:      "/Applications/agterm.app/Contents/MacOS/agtermctl",
 		Remote: doctorProbeFake{result: remote.ProbeResult{
 			AgrVersion: "1.0.0", ZmxVersion: "0.7.1", ZmxDir: "/run/user/1000/zmx",
-			ZmxLabels: true, NCU: true, Sock: true,
+			ZmxLabels: true, NCU: true, Sock: true, Agtermctl: "proxy", LocalBinOnPath: true,
 		}},
 		Daemon: doctorStatusFake{statuses: []daemon.HostStatus{{
 			Host: "home", State: "up", Since: "2026-09-04T12:00:00Z", Attempts: 2,
@@ -92,7 +92,8 @@ func TestDoctorCollectsAllBlocksWithoutLiveNetwork(t *testing.T) {
 		"local:", "agterm app: 0.26.0", "restore mode: live (recommended)",
 		"session context: yes", "mosh: yes", "remote (home):",
 		"agr remote: 1.0.0", "mux: zmx 0.7.1 (--labels), ZMX_DIR=/run/user/1000/zmx",
-		"relay: nc (-U)", "bridge socket: present", "daemon:",
+		"relay: nc (-U)", "bridge socket: present",
+		"agtermctl proxy: installed", "~/.local/bin on PATH: yes", "daemon:",
 		"home: state=up since=2026-09-04T12:00:00Z attempts=2 last event=2026-09-04T12:00:01Z",
 	} {
 		if !strings.Contains(output.String(), want) {
@@ -121,6 +122,7 @@ func TestRenderDoctorUnsupportedAndFailureStates(t *testing.T) {
 		"session context: n/a (agterm < 0.26)",
 		"agr remote: 0.9.0 (version mismatch; run: agr install home)",
 		"mux: tmux 3.4", "relay: python3", "terminfo (xterm-ghostty): MISSING (run: agr install home)", "daemon:\n  not running",
+		"agtermctl proxy: MISSING (run: agr install home)", "~/.local/bin on PATH: NO",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("doctor output = %q, want %q", got, want)
@@ -172,4 +174,17 @@ type doctorProbeFunc func(context.Context, string) (remote.ProbeResult, error)
 
 func (f doctorProbeFunc) Probe(ctx context.Context, host string) (remote.ProbeResult, error) {
 	return f(ctx, host)
+}
+
+func TestRenderDoctorForeignAgtermctl(t *testing.T) {
+	t.Helper()
+	report := DoctorReport{
+		Host:   "home",
+		Remote: RemoteDoctorReport{Probe: remote.ProbeResult{Agtermctl: "other", LocalBinOnPath: true}},
+	}
+	var output strings.Builder
+	RenderDoctor(report, &output)
+	if want := "agtermctl proxy: not used (the host has its own agtermctl)"; !strings.Contains(output.String(), want) {
+		t.Fatalf("doctor output = %q, want %q", output.String(), want)
+	}
 }

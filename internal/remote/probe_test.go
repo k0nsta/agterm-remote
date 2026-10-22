@@ -35,6 +35,8 @@ func TestParseProbe(t *testing.T) {
 		Sock:            true,
 		LegacyTargets:   2,
 		LegacyAgrTarget: 3,
+		Agtermctl:       "proxy",
+		LocalBinOnPath:  true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ParseProbe() = %#v, want %#v", got, want)
@@ -59,6 +61,28 @@ func TestParseProbeMissingValuesAndUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestParseProbeAgtermctl(t *testing.T) {
+	t.Helper()
+	tests := []struct {
+		body    string
+		want    string
+		wantBin bool
+	}{
+		{"agtermctl\tMISSING\nlocal_bin_path\t0\n", "", false},
+		{"agtermctl\tother\nlocal_bin_path\t1\n", "other", true},
+		{"agtermctl\tproxy\n", "proxy", false},
+	}
+	for _, tc := range tests {
+		got, err := ParseProbe([]byte("home\t/h\n" + tc.body))
+		if err != nil {
+			t.Fatalf("ParseProbe(%q) error = %v", tc.body, err)
+		}
+		if got.Agtermctl != tc.want || got.LocalBinOnPath != tc.wantBin {
+			t.Fatalf("ParseProbe(%q) = %q/%v, want %q/%v", tc.body, got.Agtermctl, got.LocalBinOnPath, tc.want, tc.wantBin)
+		}
+	}
+}
+
 func TestParseProbeRejectsMalformedValues(t *testing.T) {
 	t.Helper()
 	tests := []string{
@@ -66,6 +90,7 @@ func TestParseProbeRejectsMalformedValues(t *testing.T) {
 		"nc_u\tmaybe\n",
 		"legacy_targets\t-1\n",
 		"home\t/x\nhome\t/y\n",
+		"agtermctl\tmaybe\n",
 	}
 	for _, body := range tests {
 		t.Run(strings.ReplaceAll(strings.TrimSpace(body), "\n", ";"), func(t *testing.T) {

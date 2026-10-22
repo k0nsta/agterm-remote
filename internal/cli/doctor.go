@@ -204,6 +204,19 @@ func renderRemote(out io.Writer, host, localVersion string, probe remote.ProbeRe
 		}
 	}
 	_, _ = fmt.Fprintf(out, "  bridge socket: %s\n", present(probe.Sock))
+	switch probe.Agtermctl {
+	case "proxy":
+		_, _ = fmt.Fprintln(out, "  agtermctl proxy: installed")
+	case "other":
+		_, _ = fmt.Fprintln(out, "  agtermctl proxy: not used (the host has its own agtermctl)")
+	default:
+		_, _ = fmt.Fprintf(out, "  agtermctl proxy: MISSING (run: agr install %s)\n", host)
+	}
+	if probe.LocalBinOnPath {
+		_, _ = fmt.Fprintln(out, "  ~/.local/bin on PATH: yes")
+	} else {
+		_, _ = fmt.Fprintln(out, "  ~/.local/bin on PATH: NO (a login shell will not find agr or agtermctl)")
+	}
 	if probe.MoshServer {
 		_, _ = fmt.Fprintln(out, "  mosh-server: yes")
 	} else {
