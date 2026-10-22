@@ -155,7 +155,7 @@ Decided by the user (not open):
 - **remote (sh)**: `tests/remote/{tmux,zmx}/proxy_test.sh` run the installed proxy against a
   fake python3 bridge server.
 - Every test-only helper takes `*testing.T` first and calls `t.Helper()`.
-- **live**: `tests/live/proxy_live.sh` (Task 9) runs the scriptable round trips against `homelab`
+- **live**: `tests/live/proxy_live.sh` (Task 8) runs the scriptable round trips against `homelab`
   and the local agterm; checks that need a click or an agterm restart are Post-Completion.
 
 ## Progress Tracking
@@ -194,11 +194,13 @@ Mac:   Listener (cmd == "ctl") → binding(host, session) = caller pane
 - **Streaming**: a new `agterm` method runs agtermctl with stdin, stdout and stderr pipes, built
   on `ExecRunner`. It is consumed through an interface in `internal/daemon/dependency.go`.
 - **Cancellation**: client EOF or shutdown kills the local agtermctl, then runs the leaf's cancel
-  hook (`overlay open --block` → `session overlay close --target <row> --pane-id <p>`).
+  hook (`overlay open --block` → `session overlay close --target <row> [--pane <side>]`; the
+  spike confirmed a killed `--block` leaves the overlay up and this closes it).
 - **Ownership** is per pane, and only while attached. A write is allowed only on a pane that:
   1. has a binding for this host, and
-  2. is still running `agr open` (its `foreground[0]` in `tree --json` is `agr`, or `ssh`/`mosh`
-     if the spike shows those). This check is what closes the detached-pane hole.
+  2. is still running `agr open` (Technical Details > Spike results > Attached). This check is
+     what closes the detached-pane hole: after a detach or a dead transport the binding stays
+     while the pane is a local Mac shell (spike).
 
   Row-level operations (`session close`, `rename`, `context`, `status`) need every pane of the
   row that exists to be bound to this host and attached.
@@ -251,19 +253,19 @@ Allowlist, driven by what the four skills use; anything else is added only when 
 | `tree` (`--json`) | read | |
 | `events` (`--json`, `--run`, `--after`) | read | streams the Mac's whole event feed (README Security) |
 | `session text` | read | row/pane must be bound to this host; `--pane-id` injected |
-| `session overlay result`, `session overlay text` | read | owned row |
-| `session type` (`--stdin` reads stdin) | write, pane | `--pane-id` injected; target pane owned and attached, or a local pane with a grant or consent (Grants) |
-| `session status`, `session context`, `session rename` | write, row | owned row |
+| `session overlay result` (`--page`, `--block`), `session overlay text` (`--all`, `--lines`) | read | owned row; `--pane <side>` injected |
+| `session type` (`--stdin` reads stdin; `--select` refused) | write, pane | `--pane-id` injected; target pane owned and attached, or a local pane with a grant or consent (Grants) |
+| `session status` (`--blink`, `--auto-reset`, `--sound`, `--color`, `--shape`, `--pane-id`), `session context` (`--clear`), `session rename` | write, row | owned row |
 | `session hud open/update/close` (message options only, no `--file`) | write, row | owned row |
-| `session overlay open --html @i [--js] [--block] [--size-percent] [--pane-id]` | write, pane | file uploaded; `--cwd` dropped; cancel hook = overlay close |
+| `session overlay open --html @i [--js] [--block] [--size-percent]` | write, pane | **never opened as `--html`**: served through the page shim as a URL page (Host pages); `--cwd`, `--follow`, `--persistent`, `--browse`, `--chromeless`, `--navigation` refused; `--pane <side>` injected; cancel hook = overlay close |
 | `session overlay open COMMAND…` | write, pane | COMMAND → `agr run` (see Rewrites) |
-| `session overlay open --url URL` | write, pane | `--persistent` and `--browse` refused; localhost hosts warned (a UX hint, not a security control) |
-| `session overlay close`, `session overlay submit`, `session overlay resize` | write, pane | owned |
-| `session new` (`--name`, `--cwd`, `--command`, `--workspace`, `--no-select`, `--wait`) | create | rewritten to `agr open` on the host; the new row is pre-bound |
+| `session overlay open --url URL` | write, pane | static only: `--js`, `--persistent` and `--browse` refused (a host's JavaScript runs only under the shim's CSP); localhost hosts warned (a UX hint, not a security control) |
+| `session overlay close`, `session overlay submit` (`--value`), `session overlay resize` (`--size-percent`, `--full`) | write, pane | owned; `--pane <side>` injected (resize is session-wide) |
+| `session new` (`--name`, `--cwd`, `--command`, `--workspace`, `--no-select`, `--wait`; `--after`, `--before`, `--workspace-name`, `--create-workspace` refused) | create | rewritten to `agr open` on the host; the new row is pre-bound |
 | `session close` (repeated `--target`) | write, row | every target owned |
-| `session restore CMD` | write, pane | rewritten to `agr open … --command CMD` |
+| `session restore CMD` (`--pane-id`; `--none`, `--clear` allowed) | write, pane | rewritten to `agr open … --command CMD` |
 | `notify` | write | message only; targets the caller's row |
-| `session split visibility on/off` | write, row | only on an owned row; the spike confirms ⌘D's `pane.split` hook makes the new pane remote (`agr on-split`) and not a local shell, otherwise refused |
+| `session split visibility on/off` (`--axis`) | write, row | only on an owned, attached row. The spike confirmed showing the split runs the `pane.split` hook and the new pane becomes remote (`agr open <host> <name>-2 --cwd … --parent <name>`). If the hook fails it stays a local shell, which is never owned, so nothing can be typed into it |
 
 Refused, with the reason named: `pick`, `ask`, `dashboard`, `quick`, `workspace`, `window`,
 `sidebar`, `font`, `keymap`, `hooks`, `config`, `theme`, `browser`, `restore`, `terminfo`,
@@ -295,7 +297,7 @@ Refused, with the reason named: `pick`, `ask`, `dashboard`, `quick`, `workspace`
   - A non-blocking `--html` open keeps it, so reloads still work; a sweep removes directories
     older than 24 h, and daemon start clears the rest.
 - **`<agr>`** is the stable absolute path from a new resolver, `agrpath.Stable()`: when
-  `os.Executable()` is inside a Homebrew Cellar, it is the `<brew prefix>/bin/agr` symlink if
+  `os.Executable()` is inside a Homebrew Caskroom or Cellar, it is the `<brew prefix>/bin/agr` symlink if
   that resolves to the same binary, else `os.Executable()`. Today `cmd/agr/wire.go` passes
   `os.Executable()` to setup and the pane hooks; they switch to the resolver too, so a
   `brew upgrade` no longer leaves hooks pointing at a removed Cellar path.
@@ -348,7 +350,7 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
     `splitForeground` / `splitForegroundShell` (only when `hasSplit`); a scratch or any surface
     without these fields is **unknown**
   - allowed only when the basename of `foreground[0]` is in the agent list (default `claude`,
-    `codex`; Task 1 confirms the argv Claude Code shows). A shell, an unknown foreground, or any
+    `codex`; the spike saw `["claude", …]` and `["codex"]`). A shell, an unknown foreground, or any
     other program (`python3`, `vim`, `less` run commands) is refused
   - read from one `tree --json` immediately before `session type`; the small window between that
     read and the typing is documented
@@ -382,10 +384,12 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
   the message lists the row's pane ids.
 - **Checks before the dialog**: the program rule and the sanitiser. A call that can't proceed
   never asks the user.
-- **Dialog**: `ask open --no-block --pane-id <target pane> --target <row>` (no `--follow`), so
+- **Dialog**: `ask open --no-block --pane-id <target pane> --target <row>` (no `--follow`, no
+  `--hotkey`), so
   it sits on the pane the text would go to:
   - title: `Anything on <host> wants to type into “<target row name>”`
-  - message: `From session <name> on <host>:` then the first 300 characters of the text between
+  - message (one line; Spike results > ask): `From session <name> on <host>:` then the first
+    300 characters of the text, newlines as `⏎`, between
     `⟦ ⟧` delimiters (Cf characters shown escaped), plus `… (<n> characters)` when cut; the
     text can't pass for dialog wording
   - buttons: `once=Allow once`, `pair=Allow <host> here until it closes`, `deny=Deny`
@@ -399,12 +403,104 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
     under the store lock), then the call runs
   - a re-check failure after the answer: refused with `the pane is no longer running an agent`
   - `deny`, a cancel or no answer in 120 s: refused with `the user declined` / `no answer`
+- **Dialog busy**: agterm allows one pending dialog per row. If the target row already has one
+  (`ask already pending`), the call is refused with `the user has a dialog open on that row`.
 - **Anti-spam, per host**:
   - one open consent dialog per host; a second consent call while it is open is refused with
     `a request to the user is already open`
   - after a deny, a timeout or a client cancel, consent calls from that host to the same target
     row are refused without a dialog for 60 s
 - **Concurrency**: a call waiting on the dialog counts toward the 16-call cap.
+
+### Spike results (2026-10-22, agterm 0.36.0, tmux 3.5a on homelab)
+
+- **Environment**
+  - tmux: `new-session -e K=V` reaches the session's shell. `set-environment -t <s> K V` on
+    re-attach reaches new windows and panes only; a running shell keeps the old value. Nothing
+    leaks into the global environment.
+  - A command in place of the shell works: `new-session -d -s <n> -e … '<CMD>; exec "$SHELL" -l'`
+    runs CMD, then leaves a login shell.
+  - zmx: homelab has no zmx, and the macOS zmx agterm bundles is an agterm fork that sets
+    `AGTERM_*` itself, so it can't stand in. Rule: on create, `env K=V … zmx attach <n> <CMD>`;
+    on re-attach no refresh. **Unverified on a Linux zmx host** (Post-Completion).
+- **Attached**: a pane is attached when its own fields (left: `foreground`; right:
+  `splitForeground`) are present, `basename(argv[0]) == "agr"`, `argv[1] == "open"`,
+  `argv[2]` is the binding's host and, when `argv[3]` is present and not an option, it is the
+  binding's name. Seen: `["/opt/homebrew/bin/agr","open","homelab","agrspike-sh"]`, and for a
+  split pane `[…,"open","homelab","agrspike-sh-2","--cwd","/home/kosta","--parent","agrspike-sh"]`.
+  - after a tmux detach or a killed transport: `foreground` absent, `foregroundShell: "zsh"`,
+    and the binding **stays**
+  - a `--command` row whose `agr open` exits closes, and its binding is removed
+  - the transport is `mosh-client` here. A network drop keeps `agr` in the foreground while
+    mosh reconnects, and that counts as attached
+  - a row without a split has only a `left` surface
+- **Overlays**
+  - `session overlay open/close/submit/result/text` take `--pane left|right` (or
+    primary/split), **not** `--pane-id`. The daemon maps the bound pane id to its side from
+    `surfaces[]` at call time, and leaves out `--pane` on a row without a split.
+  - a killed `--block` leaves the overlay up; `overlay close --pane <side>` closes it
+  - submit: exit 0, `{"outcome":"submitted","pageID":…,"value":…}`; dismissed: exit 2,
+    `{"outcome":"dismissed","pageID":…}`
+  - page bridge: every `--html` page gets agterm's bridge (`data-agterm` buttons; with `--js`,
+    `agterm.request`), which can run any socket command; `--url` pages get none. Hence Host
+    pages below
+- **ask**
+  - `open --no-block` prints `{"id":…}`. `ask result <id>`: `{"result":"pending"}` exit 1,
+    `{"result":"cancelled"}` exit 2, answered exit 0 `{"result":"answered","id":…}`
+  - **one pending dialog per row** (`error: ask already pending`); other rows are independent. A
+    consent dialog open on a row therefore makes `agr end`'s confirm on that row fail until it
+    closes (120 s at most)
+  - title and message **must not contain control characters**, newlines included: the preview
+    is one line, with a newline shown as `⏎` and a tab as `⇥`
+  - no `--hotkey` is set and the default is `deny`, so Return denies. Whether any other key can
+    pick a button was not testable without a person (Post-Completion)
+- **Agents**: Claude Code shows `["claude", …]`, Codex shows `["codex"]`.
+- **Stable path**: brew installs agr as a **cask** (`/opt/homebrew/Caskroom/agr/<v>/agr`,
+  symlinked from `/opt/homebrew/bin/agr`), not under Cellar. `agrpath.Stable` handles Caskroom
+  and Cellar. The running daemon is `~/.local/bin/agr` (an older manual install).
+- **Option names** per leaf were read from `agtermctl <leaf> --help` and are in the allowlist
+  table.
+
+### Host pages (URL shim)
+
+Decided: a page from a host is never opened as an agterm `--html` page, because that page's
+bridge would get around the whole allowlist. Reviewed with Codex.
+
+- **Serving**: the daemon runs one loopback HTTP server (`127.0.0.1`, a random port) for pages.
+  Each page gets a random 128-bit token and is served at `/<token>/` only while it is open.
+- **Opening**: `session overlay open --url http://127.0.0.1:<port>/<token>/ --js --target <row>
+  [--pane <side>]`. URL pages get no agterm bridge, so `data-agterm` buttons are inert. The
+  page id from the reply is bound to the token.
+- **Shim**: the served HTML gets one injected script, first in `<head>`, defining
+  `window.agterm.request(cmd, opts)`. Only `session.overlay.submit` (`args.value`, a string) and
+  `session.overlay.close` are accepted; they POST to `/<token>/submit` or `/<token>/close`. Any
+  other command rejects its promise with `not available to pages from a host`. `window.close()`
+  counts as a close.
+- **CSP** (a response header, which a page can't remove; a `<meta>` tag can only add to it):
+  `default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+  img-src 'self' data:; font-src 'self' data:; connect-src 'self'; form-action 'self';
+  frame-src 'none'; base-uri 'none'`. Page JavaScript can therefore reach only its own server, so
+  no requests, form posts or images to other localhost services or the network. agterm already
+  pins a URL page to its origin and asks before following a link elsewhere.
+- **Binding and state**: each token holds `{page id, row, pane side, state}`. Exactly one
+  transition from `open` to `submitted` or `dismissed` is allowed, under a lock. A POST for a
+  token that is not `open`, or whose page id is no longer the one in that slot
+  (`htmlOverlays` in `tree --json`), gets 409 and changes nothing. The outcome returned to the
+  host is built from that one transition. The page id is the one agterm reported, and the value
+  is the submitted string.
+- **`--block`**: the daemon waits for the transition, or for the page to leave `htmlOverlays`
+  (dismissed: ⌘W, panel button, reload into another page), polled every 250 ms. It returns
+  agtermctl's shapes and exit codes: 0 `{"outcome":"submitted","pageID","value"}`, 2
+  `{"outcome":"dismissed","pageID"}`. After a submit, the daemon closes the overlay itself.
+  A non-blocking open returns agterm's reply and keeps the token until the page closes.
+- **Host `session overlay submit/close`** on a slot holding a shim page drive the same
+  transition, so they never act on a different page.
+- **Limits**: a POST body is at most 64 KiB (refused, not buffered); read and write deadlines of
+  5 s; at most 16 concurrent handlers; at most 8 open pages per host; a GET serves only the one
+  page (no directory, no other files). Tokens are dropped and the page's temp directory removed
+  when its page closes; daemon start clears leftovers.
+- **Compatibility**: `decide.py` works unchanged (it only calls submit and close). A URL page
+  shows the browser canvas, but the theme CSS variables still apply.
 
 ### Status events (`session_id` path)
 
@@ -422,11 +518,11 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
   `AGTERM_PANE`, `AGTERM_PANE_ID`, `AGTERM_WORKSPACE_ID`, `AGTERM_WINDOW_ID` (from `agr open`'s
   own environment at open time) and `AGTERM_SOCKET=agr-proxy`. Values are checked as UUIDs or
   tokens.
-  - tmux: `new-session -e` on create, `set-environment` on re-attach (spike)
+  - tmux: `new-session -e` on create, `set-environment -t` on re-attach (Spike results)
   - a re-attach refreshes the environment for **future** processes only. A running process keeps
     its old ids, and the self-id mapping routes them to the current binding. A process started
     before this release has no `AGTERM_*` at all and needs a restart (README)
-  - zmx: per the spike
+  - zmx: per Spike results
 - **Remote-version gating**: `--env` and `--command` are sent only when `HostInfo.AgrVersion`
   is at least **1.3.0**, or is `dev` (a local build, so the run's tests and the live checks
   pass).
@@ -504,54 +600,22 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
 
 ## Implementation Steps
 
-### Task 1: Spike — environment, attachment signal, and agtermctl behaviour
-
-Use throwaway rows only, local and on `homelab` (`ssh homelab`, the default agterm socket, no
-socket override); record results here.
-
-**Files:**
-- Modify: this plan (findings)
-
-- [ ] tmux:
-  - `new-session -e` and `set-environment` on re-attach: does a new shell or window see the
-    values? Does a running shell keep the old ones?
-  - running a command in place of the shell
-  - the same for zmx
-- [ ] the attachment signal: `foreground` / `splitForeground` in `tree --json` while
-      `agr open` is attached, after a tmux detach, and after ssh drops. Is `foreground[0]` always
-      `agr`? If not, record what to check instead.
-- [ ] `session split visibility on` on an agr row: does ⌘D's `pane.split` hook make the new pane
-      remote (`agr on-split`) in every case? Decides its allowlist row.
-- [ ] overlays:
-  - killing a `--block` call: does the overlay stay up, and does `overlay close --pane-id` close
-    it?
-  - exit code and stdout for ⌘W and for a submit
-  - what the `--js` page bridge exposes beyond submit
-- [ ] `ask` (agtermctl 0.36.0 has `open --no-block`, `result <id>`, `cancel <id>`,
-      `--pane-id`, `--hotkey`):
-  - the `ask result` JSON states (pending, answered, cancelled)
-  - whether any key other than Return can pick a button with no `--hotkey` (the user may be
-    typing in that row when it opens); whether two dialogs can stack on one row
-  - how `--message` renders 300 characters, newlines and the `⟦ ⟧` delimiters
-- [ ] the agent list: the `foreground` argv agterm shows for Claude Code and Codex
-- [ ] `agtermctl help` for each allowed leaf: confirm option names and which leaves read stdin;
-      finalise the schemas
-- [ ] update Technical Details with the results
-
-### Task 2: `agr open --command`, environment export, `agr run`
+### Task 1: `agr open --command`, environment export, `agr run`
 
 **Files:**
 - Modify: `internal/cli/open.go`, `internal/cli/open_test.go`, `internal/remotescript/agr.sh`,
   `cmd/agr/run.go`, `cmd/agr/wire.go`, `internal/bindings/store.go`,
   `internal/bindings/store_test.go`, `internal/cli/dependency.go`,
   `internal/cli/mocks/dependency_mock.go` (generated), `internal/agterm/ctl.go` (a tree read
-  with panes, bindings and foregrounds), `tests/remote/tmux/*`, `tests/remote/zmx/*`
+  with panes, bindings and foregrounds), `internal/agterm/ctl_test.go`, `cmd/agr/wire_test.go`,
+  `tests/remote/tmux/*`, `tests/remote/zmx/*`
 - Create: `internal/agrpath/agrpath.go`, `internal/agrpath/agrpath_test.go`,
   `internal/cli/run.go`, `internal/cli/run_test.go`, `internal/proxy/quote.go`,
   `internal/proxy/quote_test.go`
 
 - [ ] `agr open … [--command CMD]`, and `attach --env/--command` behind the remote-version gate
-- [ ] the remote `attach` applies env and command per the spike, and validates the values
+- [ ] the remote `attach` applies env and command per Spike results > Environment, and validates
+      the values
 - [ ] `bindings.Binding.Grants` (`Grant{Row, PaneID, Kind}`, JSON `grants`, omitted when
       empty; old files still load); `upsert` carries `Grants` over when it replaces an entry with
       the same host and name; `AddGrant(host, name, grant)` and `DropGrant` find the entry under
@@ -572,14 +636,16 @@ socket override); record results here.
   - `AddGrant` on a binding that disappeared is an error, not a new entry
   - `agr run` argv
   - `agrpath.Stable`: a Cellar path with a matching brew symlink, a Cellar path with a symlink to
-    another binary, a non-brew path; setup and hooks get the stable path
+    another binary, a non-brew path
+  - `cmd/agr/wire_test.go`: `application.setup` and `application.paneHooks` get the stable path
+  - `internal/agterm/ctl_test.go`: the tree decoder reads panes, `foreground`,
+    `foregroundShell`, `splitForeground`, `splitForegroundShell` and `hasSplit`
   - the gate: 1.2.0 refused, 1.3.0 and `dev` pass
   - quoting with `'`, `"`, `;`, `$()`, a backtick and a newline
 - [ ] tests (remote): a new tmux session sees the env and runs CMD; re-attach refreshes the env
       and doesn't re-run CMD; the same for zmx
-- [ ] `make check` must pass before Task 3
 
-### Task 3: Wire codec and listener dispatch
+### Task 2: Wire codec and listener dispatch
 
 **Files:**
 - Create: `internal/proxy/wire.go`, `internal/proxy/wire_test.go`
@@ -606,9 +672,8 @@ socket override); record results here.
   - `session_id` refused; unknown session refused
   - client EOF cancels; `Serve` returns promptly while the sink blocks
   - `MarkAlive`
-- [ ] `make check` must pass before Task 4
 
-### Task 4: Parser, allowlist and ownership
+### Task 3: Parser, allowlist and ownership
 
 **Files:**
 - Create: `internal/proxy/argv.go`, `internal/proxy/argv_test.go`,
@@ -623,7 +688,7 @@ socket override); record results here.
   - full ids and self markers only
   - injected `--target` / `--pane-id`
   - per-pane binding to this host
-  - the attached check (Task 1 signal)
+  - the attached check (Spike results > Attached)
   - row-level leaves need every pane bound and attached
   - `--window` / `--socket` stripped
 - [ ] tests (table-driven):
@@ -652,18 +717,21 @@ socket override); record results here.
   - the unbound split pane of an owned row refused; a detached pane refused
   - `session close` with one unowned `--target` refused
   - `events --run` allowed
-- [ ] `make check` must pass before Task 5
 
-### Task 5: Rewrites, streaming execution, daemon wiring
+### Task 4: Rewrites, streaming execution, daemon wiring
 
 **Files:**
 - Create: `internal/proxy/rewrite.go`, `internal/proxy/rewrite_test.go`,
-  `internal/daemon/proxy.go`, `internal/daemon/proxy_test.go`
+  `internal/daemon/proxy.go`, `internal/daemon/proxy_test.go`, `internal/daemon/pageshim.go`,
+  `internal/daemon/pageshim_test.go`
 - Modify: `internal/agterm/exec.go`, `internal/agterm/ctl.go` (+ tests),
   `internal/daemon/daemon.go`, `internal/daemon/dependency.go`, `cmd/agr/wire.go`
 
 - [ ] `Rewrite`: files, `session new` with name collision check and pre-bind, overlay
       COMMAND with `cwd`, `restore`, URL warning, `<agr>` stable path
+- [ ] the page shim (`internal/daemon/pageshim.go`): loopback server, tokens bound to page ids,
+      injected script, CSP header, one-transition state, `--block` semantics, limits, cleanup
+      (Technical Details > Host pages)
 - [ ] the agterm streaming call (stdin, stdout, stderr; kill on ctx), exposed through a daemon
       interface
 - [ ] the daemon checks the agterm version once per host start (`Client.Version`); below
@@ -697,19 +765,27 @@ socket override); record results here.
   - streaming order of stdout and stderr; exit passthrough; `-1` becomes 1
   - cancel kills the process and runs the overlay-close hook on a live ctx
   - host shutdown while a call blocks; the 17th concurrent call refused
+  - page shim: an `--html` request opens `--url http://127.0.0.1:…/<token>/ --js`, never
+    `--html`; the served page has the CSP header and the shim first in `<head>`; submit → exit 0
+    and the outcome JSON; close, `window.close()` and the page leaving `htmlOverlays` → exit 2;
+    a second submit, a submit after close, a replayed token, a POST for a replaced page id → 409
+    and no change; a 65 KiB body refused unread; the 17th concurrent handler and the 9th page
+    refused; tokens and temp files gone after close
+  - `--url --js` from a host refused; `--url` without `--js` allowed
   - consent: each button; cancel; timeout (`ask cancel` called); a second call from the same
     host while a dialog is open, from another session name too; the 60 s refusal after a deny,
     a timeout and a client cancel; EOF during the dialog cancels it and stores nothing; a
     stored `pair` grant lets the next call through with no dialog
   - the re-check: program pane, then the dialog, then a shell pane → refused after `once`
   - the dialog title and message: cut at 300 characters, delimiters, Cf escaped
-- [ ] `make check` must pass before Task 6
 
-### Task 6: Remote proxy (`agr ctl`, `~/.local/bin/agtermctl`, doctor)
+### Task 5: Remote proxy (`agr ctl`, `~/.local/bin/agtermctl`, doctor)
 
 **Files:**
 - Modify: `internal/remotescript/agr.sh`, `internal/remote/install.go`,
-  `internal/remote/probe.go`, `internal/remote/testdata/probe.txt`, the doctor output code
+  `internal/remote/probe.go`, `internal/remote/testdata/probe.txt`, `internal/cli/doctor.go`,
+  `internal/remote/install_test.go`, `internal/remote/probe_test.go`,
+  `internal/cli/doctor_test.go`
 - Create: `tests/remote/tmux/proxy_test.sh`, `tests/remote/zmx/proxy_test.sh`
 
 - [ ] `agr ctl`:
@@ -720,6 +796,9 @@ socket override); record results here.
 - [ ] install writes the wrapper (0755), skips it when a non-agr `agtermctl` is found, and
       updates an earlier agr proxy (marker line); the doctor probe and report
 - [ ] `shellcheck -s sh` clean
+- [ ] Go tests: install skips the wrapper when a non-agr `agtermctl` is found, writes it when
+      none is, updates a marked one; the probe parses the proxy and PATH facts
+      (`testdata/probe.txt`); doctor prints both
 - [ ] remote tests against a fake python3 server on a short socket path, which the test kills
       itself:
   - header content (argv, `@i`, `self`, `cwd`)
@@ -728,9 +807,8 @@ socket override); record results here.
   - stdout and stderr frames; exit codes 0, 1, 2
   - no ack, ack then EOF, and no socket each give their message
   - outside a session → refused; zmx covers the session lookup
-- [ ] `make check` must pass before Task 7
 
-### Task 7: The `agr` skill
+### Task 6: The `agr` skill
 
 **Files:**
 - Create: `internal/skill/SKILL.md`, `internal/skill/skill.go`, `internal/skill/skill_test.go`,
@@ -755,35 +833,49 @@ socket override); record results here.
     still succeeds
   - `skill_install_test.sh`: missing → written; marked → replaced; unmarked → `kept`
   - `agr skill` output equals the embedded bytes
-- [ ] `make check` must pass before Task 8
 
-### Task 8: Scope `session_id` status events to bound rows
+### Task 7: Scope `session_id` status events to bound rows
 
 **Files:**
-- Modify: `internal/receiver/listener.go`, `internal/receiver/dependency.go` (the `Resolver`
-  gains `ForRow`), `internal/receiver/listener_test.go`,
+- Modify: `internal/receiver/listener.go`, `internal/receiver/dependency.go` (`ForRow` added to
+  the resolver interface), `internal/receiver/listener_test.go`,
   `internal/receiver/mocks/dependency_mock.go` (generated)
 
 - [ ] `route`: a `session_id` event is applied only when `ForRow(id)` has a binding for
       `l.host`; otherwise log `status for unbound row <id> from <host> dropped`
 - [ ] tests: a bound row is applied; an unbound row is dropped; a row bound to another host is
       dropped; `session` events unchanged
-- [ ] `make check` must pass before Task 9
 
-### Task 9: Live round-trip script
+### Task 8: Live round-trip script
 
 **Files:**
-- Create: `tests/live/proxy_live.sh`, `tests/live/README.md`
+- Create: `tests/live/proxy_live.sh`, `tests/live/restore_test.sh`, `tests/live/README.md`
 
 A script, not part of `make check` (it needs `homelab` and the running agterm), that runs every
-check below with throwaway rows it creates and always cleans up (a trap closes its rows and
-kills its sessions), and exits non-zero on the first failure, naming it. Before it starts, it
-runs `agr install homelab` with the freshly built `bin/agr` and starts a throwaway daemon for
-the test, or exits 2 with `homelab or agterm unreachable` when either can't be reached.
+check below with throwaway rows it creates (names start with `agrlive-`) and exits non-zero on
+the first failure, naming it. It exits 2 with `homelab or agterm unreachable` when either can't
+be reached, before changing anything.
+
+**Swap and restore** (decided: only one daemon can serve a host, because the bridge socket on
+the host is fixed at `~/.cache/agr/bridge.sock`):
+1. record the running daemon's executable (`agr.pid` → its argv[0], e.g. `~/.local/bin/agr`)
+   and stop it
+2. start `bin/agr daemon` in the background, and run `bin/agr install homelab`
+3. run the checks
+4. a trap on EXIT, INT and TERM, in this order: closes every `agrlive-` row, kills every
+   `agrlive-` session on homelab, stops the test daemon, runs `<recorded agr> install homelab`
+   (which restores the previous remote script), deletes `~/.claude/skills/agr/` on homelab
+   when the test created it, and starts `<recorded agr> daemon` again
+5. a SIGKILL skips the trap: `tests/live/README.md` says how to restore by hand (`agr install
+   homelab`, then start the daemon)
 
 - [ ] from a throwaway remote row on `homelab`, with unchanged tools:
-  - an overlay `--html --js --block` round trip, answered from the Mac with
-    `session overlay submit`; the outcome JSON reaches the host
+  - an overlay `--html --js --block` round trip through the shim, answered by the page's own
+    `agterm.request('session.overlay.submit', …)` (a test page that submits on load); the
+    outcome JSON reaches the host
+  - a test page with a `data-agterm="session.type"` button clicked by script, a call to
+    `agterm.request('session.type', …)`, and a `fetch` to another localhost port: none takes
+    effect (a marker pane receives nothing, the fetch is blocked by the CSP)
   - `session text` / `session type` on a sibling row of the same host
   - `session type` refused on a local row with no grant, on the local split pane of an owned
     row, and on a detached pane
@@ -797,10 +889,14 @@ the test, or exits 2 with `homelab or agterm unreachable` when either can't be r
       host-bound target row is refused with no dialog
 - [ ] the bridge: status events unchanged; refusal, old-daemon and bridge-down messages as
       documented; `agr down homelab` returns within `teardownTimeout` during a blocking call
-- [ ] `tests/live/README.md`: what it needs and how to run it
-- [ ] `make check` must pass before Task 10
+- [ ] the trap: a test of its own (`tests/live/restore_test.sh`, run with stand-in `agr`,
+      `agtermctl` and `ssh` on PATH) shows each restore step runs, in order, on EXIT and on INT
+- [ ] `tests/live/README.md`: what it needs, how to run it, and how to restore by hand
 
-### Task 10: [Final] Update documentation
+### Task 9: [Final] Update documentation
+
+**Files:**
+- Modify: `README.md`
 
 - [ ] README "Remote agterm control":
   - what works unchanged; the allowlist; full ids only; one-file pages
@@ -817,8 +913,9 @@ the test, or exits 2 with `homelab or agterm unreachable` when either can't be r
 - [ ] README "Failure modes": the proxy messages
 - [ ] README "Security":
   - the per-pane scoped policy and the attached check
-  - `--js` pages run in agterm on the Mac and can reach its network; the localhost warning is not
-    a control
+  - pages from a host are served through the shim: no agterm bridge, only submit and close, and
+    a CSP that keeps page JavaScript on its own server; `--url` pages from a host are static
+    (no `--js`); the localhost warning is not a control
   - `events` streams the Mac's whole feed
   - grants: orchestrator and consent; a grant covers **anything on that host**; local agent
     panes only (`claude`, `codex`); `session type` only; the sanitiser; the 60 s refusal; a
@@ -829,8 +926,6 @@ the test, or exits 2 with `homelab or agterm unreachable` when either can't be r
 
 ## Acceptance Criteria
 
-- Run: `make check`
-- Run: `go test -race -count=1 ./... && GOOS=linux GOARCH=amd64 go vet ./... && GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agr && make build && bin/agr --version && goreleaser check`
 - Run: `tests/live/proxy_live.sh`
 - Run: `bin/agr skill | grep -q 'agr-skill'`
 - Run: `grep -q 'Remote agterm control' README.md && grep -q 'agterm 0.36.0' README.md`
@@ -863,6 +958,10 @@ the test, or exits 2 with `homelab or agterm unreachable` when either can't be r
     --command`; on the host, "hand this to <local row>" calls `session type` and the dialog
     appears
   - Ctrl-C during a `--block` overlay closes it
+  - with a consent dialog open, typing letters in that row picks no button (only Return, which
+    denies)
+  - on a Linux host with zmx: a new session sees the exported `AGTERM_*`, and a re-attach keeps
+    the old values (Spike results > Environment)
 - Move this plan to `docs/plans/completed/` once the run has ended.
 - Restart the Mac `agr daemon` after upgrading. Release notes: `brew upgrade agr`, restart the
   daemon, `agr install <host>`, re-open rows to pick up the environment; a breaking note for
