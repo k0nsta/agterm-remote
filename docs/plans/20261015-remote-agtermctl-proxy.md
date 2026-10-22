@@ -128,6 +128,8 @@ Decided by the user (not open):
 - complete each task fully before moving to the next; small, focused changes
 - **CRITICAL: every task MUST include new/updated tests**, success and error paths
 - **CRITICAL: all tests must pass before starting next task** (`make check`)
+- **final gate**: `make verify` (Task 9) = `make check` plus a fresh race run, linux vet, the
+  darwin/amd64 release build, `bin/agr --version` and `goreleaser check`
 - **CRITICAL: update this plan file when scope changes during implementation**
 - **default deny**: a leaf or option that isn't in the allowlist is refused
 - status events keep working exactly as before. An old daemon, an old remote, a missing
@@ -767,7 +769,17 @@ Use throwaway rows only, local and on `homelab`; record results here.
       call `session type` and the dialog appears
 - [ ] status events unchanged; refusal, old-daemon, old-remote and bridge messages as
       documented; `agr down` returns within `teardownTimeout` during a blocking call
-- [ ] `make check` green
+- [ ] add a `verify` target to `Makefile` (and to `.PHONY`), the final gate before release:
+  ```make
+  verify: lint shellcheck check-remote
+  	go test -race -count=1 ./...
+  	GOOS=linux GOARCH=amd64 go vet ./...
+  	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agr
+  	$(MAKE) build
+  	bin/agr --version
+  	goreleaser check
+  ```
+- [ ] `make verify` green
 
 ### Task 10: [Final] Update documentation
 
