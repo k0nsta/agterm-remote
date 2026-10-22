@@ -685,10 +685,10 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   `internal/proxy/policy.go`, `internal/proxy/policy_test.go`,
   `internal/proxy/dependency.go`, `internal/proxy/mocks/dependency_mock.go` (generated)
 
-- [ ] parser for agtermctl's grammar (`--opt value`, `--opt=value`, repeats, options after
+- [x] parser for agtermctl's grammar (`--opt value`, `--opt=value`, repeats, options after
       positionals, `--`)
-- [ ] the allowlist table, with a schema per leaf
-- [ ] `Authorize(ctx, host, caller, header, argv)` → normalised call (targets, pane ids,
+- [x] the allowlist table, with a schema per leaf
+- [x] `Authorize(ctx, host, caller, header, argv)` → normalised call (targets, pane ids,
       files, commands), **needs consent** (Technical Details > Grants), or a refusal:
   - full ids and self markers only
   - injected `--target` / `--pane-id`
@@ -696,7 +696,7 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   - the attached check (Spike results > Attached)
   - row-level leaves need every pane bound and attached
   - `--window` / `--socket` stripped
-- [ ] tests (table-driven):
+- [x] tests (table-driven):
   - every allowed leaf
   - every refused leaf and option (`scratch`, `restart`, `paste`, `reveal`, `duplicate`,
     `split close`, `swap`, `overlay navigate`, `run-job`, `hud --file`, `background`,
