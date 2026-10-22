@@ -69,7 +69,7 @@ elif op == "attached":
     ok = len(fg) > 2 and os.path.basename(fg[0]) == "agr" and fg[1] == "open" and fg[2] == args[1]
     print("yes" if ok else "no")
 elif op == "ask":
-    print("yes" if any(k == "askPending" and v for k, v in walk(row(args[0]))) else "no")
+    print("yes" if any(k in ("ask", "askPending") and v for k, v in walk(row(args[0]))) else "no")
 elif op == "stamp":
     print(row(args[0]).get("statusChangedAt", 0))
 elif op == "panes":
@@ -192,14 +192,14 @@ pane_of() {
 # type_line ROW PANE TEXT types TEXT and Enter into a pane of a local row.
 type_line() {
 	if [ -n "$2" ]; then
-		printf '%s\n' "$3" | ctl session type --target "$1" --pane-id "$2" --stdin
+		printf '%s\n' "$3" | ctl session type --target "$1" --pane-id "$2" --stdin >/dev/null
 	else
-		printf '%s\n' "$3" | ctl session type --target "$1" --stdin
+		printf '%s\n' "$3" | ctl session type --target "$1" --stdin >/dev/null
 	fi
 }
 
 ctrl_c() {
-	printf '\003' | ctl session type --target "$1" --stdin
+	printf '\003' | ctl session type --target "$1" --stdin >/dev/null
 }
 
 # put_remote NAME CONTENT writes a file under the remote scratch directory.
@@ -594,7 +594,8 @@ check_bridge() {
 	assert_refused
 
 	step 'bridge: bridge-down message'
-	rr "$R1" "AGR_SOCK=$REMOTE_DIR/none.sock agtermctl version"
+	# ~/.config/agr/env sets AGR_SOCK, so run under a HOME without that file.
+	rr "$R1" "agr=\"\$HOME/.local/bin/agr\"; HOME=$REMOTE_DIR AGR_SOCK=$REMOTE_DIR/none.sock \"\$agr\" ctl version"
 	[ "$RR_RC" != 0 ] || fail 'expected a failure with no bridge socket'
 	assert_contains 'the bridge to the Mac is down' "$RR_OUT"
 
@@ -607,7 +608,8 @@ s.listen(1)
 time.sleep(30)' $REMOTE_DIR/old.sock &
 srv=\$!
 sleep 1
-AGR_SOCK=$REMOTE_DIR/old.sock agtermctl version
+agr="\$HOME/.local/bin/agr"
+HOME=$REMOTE_DIR AGR_SOCK=$REMOTE_DIR/old.sock "\$agr" ctl version
 rc=\$?
 kill \$srv
 (exit \$rc)
