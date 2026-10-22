@@ -260,7 +260,8 @@ Allowlist, driven by what the four skills use; anything else is added only when 
 | `session overlay open --html @i [--js] [--block] [--size-percent]` | write, pane | **never opened as `--html`**: served through the page shim as a URL page (Host pages); `--cwd`, `--follow`, `--persistent`, `--browse`, `--chromeless`, `--navigation` refused; `--pane <side>` injected; cancel hook = overlay close |
 | `session overlay open COMMAND…` | write, pane | COMMAND → `agr run` (see Rewrites) |
 | `session overlay open --url URL` | write, pane | static only: `--js`, `--persistent` and `--browse` refused (a host's JavaScript runs only under the shim's CSP); localhost hosts warned (a UX hint, not a security control) |
-| `session overlay close`, `session overlay submit` (`--value`), `session overlay resize` (`--size-percent`, `--full`) | write, pane | owned; `--pane <side>` injected (resize is session-wide) |
+| `session overlay close`, `session overlay submit` (`--value`) | write, pane | owned; `--pane <side>` injected |
+| `session overlay resize` (`--size-percent`, `--full`) | write, row | session-wide, so every existing pane of the row must be owned and attached |
 | `session new` (`--name`, `--cwd`, `--command`, `--workspace`, `--no-select`, `--wait`; `--after`, `--before`, `--workspace-name`, `--create-workspace` refused) | create | rewritten to `agr open` on the host; the new row is pre-bound |
 | `session close` (repeated `--target`) | write, row | every target owned |
 | `session restore CMD` (`--pane-id`; `--none`, `--clear` allowed) | write, pane | rewritten to `agr open … --command CMD` |
@@ -642,8 +643,12 @@ bridge would get around the whole allowlist. Reviewed with Codex.
     `foregroundShell`, `splitForeground`, `splitForegroundShell` and `hasSplit`
   - the gate: 1.2.0 refused, 1.3.0 and `dev` pass
   - quoting with `'`, `"`, `;`, `$()`, a backtick and a newline
-- [ ] tests (remote): a new tmux session sees the env and runs CMD; re-attach refreshes the env
-      and doesn't re-run CMD; the same for zmx
+- [ ] tests (remote):
+  - tmux: a new session sees the env and runs CMD; a re-attach sets the new values for new
+    windows and panes (`show-environment`), the running shell keeps the old ones, and CMD does
+    not run again
+  - zmx (fake `zmx` in `tests/remote/zmx`): a new session is created with the env and CMD; a
+    re-attach passes no env and doesn't re-run CMD (Spike results > Environment)
 
 ### Task 2: Wire codec and listener dispatch
 
@@ -716,6 +721,7 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   - prefix and `active` refused; stale self ids mapped
   - the unbound split pane of an owned row refused; a detached pane refused
   - `session close` with one unowned `--target` refused
+  - `session overlay resize` on a row with one owned pane and one local pane refused
   - `events --run` allowed
 
 ### Task 4: Rewrites, streaming execution, daemon wiring
@@ -837,10 +843,11 @@ bridge would get around the whole allowlist. Reviewed with Codex.
 ### Task 7: Scope `session_id` status events to bound rows
 
 **Files:**
-- Modify: `internal/receiver/listener.go`, `internal/receiver/dependency.go` (`ForRow` added to
-  the resolver interface), `internal/receiver/listener_test.go`,
+- Modify: `internal/receiver/listener.go`, `internal/receiver/dependency.go`,
+  `internal/receiver/listener_test.go`,
   `internal/receiver/mocks/dependency_mock.go` (generated)
 
+- [ ] the resolver interface in `internal/receiver/dependency.go` gains `ForRow(row)`
 - [ ] `route`: a `session_id` event is applied only when `ForRow(id)` has a binding for
       `l.host`; otherwise log `status for unbound row <id> from <host> dropped`
 - [ ] tests: a bound row is applied; an unbound row is dropped; a row bound to another host is
