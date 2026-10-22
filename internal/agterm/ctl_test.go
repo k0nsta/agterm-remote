@@ -485,3 +485,56 @@ func TestCtlReloadReturnsDiagnosticCount(t *testing.T) {
 		t.Fatal("Reload() error = nil, want failure")
 	}
 }
+
+func TestCtlTreeRowsDecodesPanesAndForegrounds(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	tree := `{"result":{"tree":{"workspaces":[{"sessions":[
+		{"id":"row-1","name":"agr","hasSplit":true,
+			"foreground":["claude","--resume","abc"],"foregroundShell":"zsh",
+			"splitForeground":["codex"],"splitForegroundShell":"bash",
+			"surfaces":[{"kind":"left","paneID":"L","visible":true},{"kind":"right","paneID":"R","visible":true}]},
+		{"id":"row-2","name":"plain","splitForegroundShell":"zsh","surfaces":[{"kind":"left","paneID":"P","visible":true}]},
+		{"name":"no id"}]}]}}}`
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return([]byte(tree), 0, nil)
+	got, err := ctl.TreeRows(context.Background())
+	if err != nil {
+		t.Fatalf("TreeRows() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("TreeRows() = %#v, want the two rows that have an id", got)
+	}
+	first := got[0]
+	if first.ID != "row-1" || first.Name != "agr" || !first.HasSplit {
+		t.Fatalf("first row = %#v", first)
+	}
+	if strings.Join(first.Foreground, " ") != "claude --resume abc" || first.ForegroundShell != "zsh" {
+		t.Fatalf("left foreground = %#v, %q", first.Foreground, first.ForegroundShell)
+	}
+	if strings.Join(first.SplitForeground, " ") != "codex" || first.SplitForegroundShell != "bash" {
+		t.Fatalf("split foreground = %#v, %q", first.SplitForeground, first.SplitForegroundShell)
+	}
+	wantPanes := []agterm.Surface{{Kind: "left", PaneID: "L", Visible: true}, {Kind: "right", PaneID: "R", Visible: true}}
+	if len(first.Surfaces) != 2 || first.Surfaces[0] != wantPanes[0] || first.Surfaces[1] != wantPanes[1] {
+		t.Fatalf("panes = %#v, want %#v", first.Surfaces, wantPanes)
+	}
+	second := got[1]
+	if second.HasSplit || second.Foreground != nil || second.SplitForeground != nil || second.SplitForegroundShell != "zsh" {
+		t.Fatalf("a row without those fields = %#v", second)
+	}
+}
+
+func TestCtlTreeRowsReportsCommandFailure(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return([]byte("boom"), 1, errors.New("exit 1"))
+	if _, err := ctl.TreeRows(context.Background()); err == nil || !strings.Contains(err.Error(), "tree") {
+		t.Fatalf("TreeRows() error = %v", err)
+	}
+}

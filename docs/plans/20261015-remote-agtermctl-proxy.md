@@ -614,21 +614,21 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   `internal/cli/run.go`, `internal/cli/run_test.go`, `internal/proxy/quote.go`,
   `internal/proxy/quote_test.go`
 
-- [ ] `agr open … [--command CMD]`, and `attach --env/--command` behind the remote-version gate
-- [ ] the remote `attach` applies env and command per Spike results > Environment, and validates
+- [x] `agr open … [--command CMD]`, and `attach --env/--command` behind the remote-version gate
+- [x] the remote `attach` applies env and command per Spike results > Environment, and validates
       the values
-- [ ] `bindings.Binding.Grants` (`Grant{Row, PaneID, Kind}`, JSON `grants`, omitted when
+- [x] `bindings.Binding.Grants` (`Grant{Row, PaneID, Kind}`, JSON `grants`, omitted when
       empty; old files still load); `upsert` carries `Grants` over when it replaces an entry with
       the same host and name; `AddGrant(host, name, grant)` and `DropGrant` find the entry under
       the store lock
-- [ ] `agr open … --orchestrator <row>:<pane>`: validated against `tree --json` (live, not
+- [x] `agr open … --orchestrator <row>:<pane>`: validated against `tree --json` (live, not
       host-bound) and stored as an `orchestrator` grant
-- [ ] `agr run <host> [--cwd D] -- argv…`
-- [ ] `internal/agrpath`: `Stable()` per Technical Details > Rewrites; `cmd/agr/wire.go` passes
+- [x] `agr run <host> [--cwd D] -- argv…`
+- [x] `internal/agrpath`: `Stable()` per Technical Details > Rewrites; `cmd/agr/wire.go` passes
       it to setup and the pane hooks instead of `os.Executable()`
-- [ ] the version gate: at least 1.3.0, or `dev`
-- [ ] the Mac-side shell quoting helper (`internal/proxy/quote.go`)
-- [ ] tests (Go):
+- [x] the version gate: at least 1.3.0, or `dev`
+- [x] the Mac-side shell quoting helper (`internal/proxy/quote.go`)
+- [x] tests (Go):
   - argv for `--command`, env pairs, invalid values
   - the old-remote gate: no env, `--command` refused
   - `--orchestrator`: valid, malformed, host-bound pane refused, unknown pane refused
@@ -643,7 +643,7 @@ bridge would get around the whole allowlist. Reviewed with Codex.
     `foregroundShell`, `splitForeground`, `splitForegroundShell` and `hasSplit`
   - the gate: 1.2.0 refused, 1.3.0 and `dev` pass
   - quoting with `'`, `"`, `;`, `$()`, a backtick and a newline
-- [ ] tests (remote):
+- [x] tests (remote):
   - tmux: a new session sees the env and runs CMD; a re-attach sets the new values for new
     windows and panes (`show-environment`), the running shell keeps the old ones, and CMD does
     not run again

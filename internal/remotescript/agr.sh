@@ -168,13 +168,28 @@ tmux_clipboard_override() {
 tmux_attach() {
 	n=$1
 	if ! tmux has-session -t "=$n" 2>/dev/null; then
+		set -- new-session -d -s "$n"
 		if [ -n "$attach_cwd" ]; then
 			# -c is format-expanded: a literal # must be doubled, or a path
 			# like /d/a#{x} lands in $HOME (and #() would run a command).
-			tmux new-session -d -s "$n" -c "$(printf '%s' "$attach_cwd" | sed 's/#/##/g')"
-		else
-			tmux new-session -d -s "$n"
+			set -- "$@" -c "$(printf '%s' "$attach_cwd" | sed 's/#/##/g')"
 		fi
+		while IFS= read -r pair; do
+			[ -z "$pair" ] || set -- "$@" -e "$pair"
+		done <<EOF
+$attach_env
+EOF
+		# CMD runs once, in the new session only, and leaves a login shell.
+		[ -z "$attach_command" ] || set -- "$@" "$attach_command; exec \"\${SHELL:-/bin/sh}\" -l"
+		tmux "$@"
+	else
+		# A re-attach reaches new windows and panes only; the running shell
+		# keeps the values it started with.
+		while IFS= read -r pair; do
+			[ -z "$pair" ] || tmux set-environment -t "=$n" "${pair%%=*}" "${pair#*=}" 2>/dev/null || :
+		done <<EOF
+$attach_env
+EOF
 	fi
 	tmux set-option -t "=$n:" @agr 1
 	[ -z "$attach_parent" ] || tmux set-option -t "=$n:" @agr_parent "$attach_parent"
@@ -452,18 +467,35 @@ zmx_set_labels() {
 
 zmx_attach() {
 	n=$1
+	# Env and CMD apply to a new session only: zmx has no way to refresh a
+	# running one's environment, and CMD must not run twice.
+	fresh=1
+	if zmx_line "$n" >/dev/null; then
+		fresh=0
+	fi
 	zmx_set_labels "$n" || true
 	# A new zmx session starts its shell in the caller's directory; an
 	# existing one ignores it, which is the re-attach behaviour wanted.
 	[ -z "$attach_cwd" ] || cd "$attach_cwd" 2>/dev/null || :
 	if [ "${AGR_ZMX_LABELS:-0}" = 1 ]; then
-		if [ -n "$attach_parent" ]; then
-			exec zmx attach --labels "agr=1" --labels "agr_parent=$attach_parent" "$n"
-		fi
-		exec zmx attach --labels "agr=1" "$n"
+		set -- --labels "agr=1"
+		[ -z "$attach_parent" ] || set -- "$@" --labels "agr_parent=$attach_parent"
+	else
+		set --
+		zmx_label_retry "$n" &
 	fi
-	zmx_label_retry "$n" &
-	exec zmx attach "$n"
+	set -- zmx attach "$@" "$n"
+	if [ "$fresh" = 1 ] && [ -n "$attach_command" ]; then
+		set -- "$@" sh -c "$attach_command; exec \"\${SHELL:-/bin/sh}\" -l"
+	fi
+	if [ "$fresh" = 1 ]; then
+		while IFS= read -r pair; do
+			[ -z "$pair" ] || set -- env "$pair" "$@"
+		done <<EOF
+$attach_env
+EOF
+	fi
+	exec "$@"
 }
 
 zmx_line() {
@@ -597,10 +629,32 @@ paste_put() {
 
 attach_cwd=
 attach_parent=
+attach_env=
+attach_command=
 
 # reap's exit status for a session that does not exist, so the Mac can tell
 # "already gone" from a refusal without parsing stderr.
 AGR_NO_SESSION=3
+
+# valid_env accepts one AGTERM_* assignment whose value is an id or a token:
+# attach hands it to tmux and env, so nothing else may reach them.
+valid_env() {
+	case "${1:-}" in
+		*=*) ;;
+		*) return 1 ;;
+	esac
+	case "${1%%=*}" in
+		AGTERM_?*) ;;
+		*) return 1 ;;
+	esac
+	case "${1%%=*}" in
+		*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_]*) return 1 ;;
+	esac
+	case "${1#*=}" in
+		''|*[!A-Za-z0-9_.-]*) return 1 ;;
+	esac
+	return 0
+}
 
 # attach's options follow the session name. An unusable directory is dropped
 # rather than refused: the attach matters more than where a new session starts.
@@ -618,6 +672,19 @@ parse_attach_options() {
 				[ "$#" -ge 2 ] || usage 2
 				valid_token "$2" || { printf '%s\n' 'agr: invalid parent name' >&2; exit 2; }
 				attach_parent=$2
+				shift 2
+				;;
+			--env)
+				[ "$#" -ge 2 ] || usage 2
+				valid_env "$2" || { printf '%s\n' 'agr: invalid --env' >&2; exit 2; }
+				attach_env="$attach_env$2
+"
+				shift 2
+				;;
+			--command)
+				[ "$#" -ge 2 ] || usage 2
+				[ -n "$2" ] || { printf '%s\n' 'agr: empty --command' >&2; exit 2; }
+				attach_command=$2
 				shift 2
 				;;
 			*) usage 2 ;;

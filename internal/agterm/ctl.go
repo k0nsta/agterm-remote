@@ -236,12 +236,27 @@ func (c *Ctl) typeText(ctx context.Context, row, paneID string, text []byte) err
 	return nil
 }
 
-type treeSession struct {
-	ID       string    `json:"id"`
-	Surfaces []Surface `json:"surfaces"`
+// TreeRow is one live row of tree --json with its panes and what each pane is
+// running. The foreground fields are argv (the left pane's and the split's),
+// with the login shell's name beside them; a pane agterm cannot read leaves
+// them empty.
+type TreeRow struct {
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	Surfaces             []Surface `json:"surfaces"`
+	HasSplit             bool      `json:"hasSplit"`
+	Foreground           []string  `json:"foreground"`
+	ForegroundShell      string    `json:"foregroundShell"`
+	SplitForeground      []string  `json:"splitForeground"`
+	SplitForegroundShell string    `json:"splitForegroundShell"`
 }
 
-func (c *Ctl) treeSessions(ctx context.Context) ([]treeSession, error) {
+// TreeRows returns every live row with its panes and foregrounds.
+func (c *Ctl) TreeRows(ctx context.Context) ([]TreeRow, error) {
+	return c.treeSessions(ctx)
+}
+
+func (c *Ctl) treeSessions(ctx context.Context) ([]TreeRow, error) {
 	out, exit, err := c.out.Output(ctx, nil, c.path, "tree", "--json", "--socket", c.sock)
 	if err != nil || exit != 0 {
 		if err == nil {
@@ -254,7 +269,7 @@ func (c *Ctl) treeSessions(ctx context.Context) ([]treeSession, error) {
 		Result *struct {
 			Tree *struct {
 				Workspaces []struct {
-					Sessions []treeSession `json:"sessions"`
+					Sessions []TreeRow `json:"sessions"`
 				} `json:"workspaces"`
 			} `json:"tree"`
 		} `json:"result"`
@@ -266,7 +281,7 @@ func (c *Ctl) treeSessions(ctx context.Context) ([]treeSession, error) {
 		return nil, errors.New("decode agterm tree: missing result.tree")
 	}
 
-	sessions := make([]treeSession, 0)
+	sessions := make([]TreeRow, 0)
 	for _, workspace := range response.Result.Tree.Workspaces {
 		for _, session := range workspace.Sessions {
 			if session.ID != "" {

@@ -18,8 +18,11 @@ const usage = "usage: agr <command> [args...]"
 const help = `usage: agr <command> [args...]
 
 Commands:
-  open <host> [name] [--cwd <dir>] [--parent <name>]
-                          Attach to a remote session; without name, use the picker
+  open <host> [name] [--cwd <dir>] [--parent <name>] [--command <cmd>] [--orchestrator <row>:<pane>]
+                          Attach to a remote session; without name, use the picker.
+                          --command runs only in a new session
+  run <host> [--cwd <dir>] -- <argv>…
+                          Run a program on the host in one ssh; its exit status is passed through
   ls <host>                List agr-owned remote sessions
   kill <host> <name>…      Kill one or more agr-owned remote sessions
   up <host>                Start the host's status bridge
@@ -47,6 +50,7 @@ type commandHandler func(context.Context, *application, []string, io.Writer, io.
 
 var commandHandlers = map[string]commandHandler{
 	"open":    runOpen,
+	"run":     runRun,
 	"ls":      runList,
 	"kill":    runKill,
 	"up":      runUp,
@@ -95,7 +99,7 @@ func runOnScratch(ctx context.Context, app *application, args []string, _, errw 
 
 func runShell(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
 	positional, opts, ok := parseOpenArgs(args)
-	if !ok || len(positional) != 1 || opts.Parent != "" {
+	if !ok || len(positional) != 1 || opts.Parent != "" || opts.Command != "" || opts.Orchestrator != "" {
 		_, _ = fmt.Fprintln(errw, "usage: agr shell <host> [--cwd <dir>]")
 		return 2
 	}
@@ -219,13 +223,36 @@ func hookStdin() io.Reader {
 func runOpen(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
 	positional, opts, ok := parseOpenArgs(args)
 	if !ok || len(positional) < 1 || len(positional) > 2 {
-		_, _ = fmt.Fprintln(errw, "usage: agr open <host> [name] [--cwd <dir>] [--parent <name>]")
+		_, _ = fmt.Fprintln(errw, "usage: agr open <host> [name] [--cwd <dir>] [--parent <name>] [--command <cmd>] [--orchestrator <row>:<pane>]")
 		return 2
 	}
 	return cli.RunOpen(ctx, positional[0], optionalArg(positional, 1), opts, cli.OpenDependencies{
-		Dirs: app.dirs, Remote: app.openRemote, Picker: app.picker, Rows: app.rows,
+		Dirs: app.dirs, Remote: app.openRemote, Picker: app.picker, Rows: app.rows, Panes: app.paneTree,
 		Store: app.store, Bridge: app.bridge, Labeler: app.labeler,
 		HostInfo: app.hostInfo, TTY: app.tty, Out: out, ErrOut: errw, MoshPath: app.moshPath,
+	}, errw)
+}
+
+// runRun takes the host, an optional --cwd, and the program after "--". The
+// separator is required: without it a program's own flags would be read as
+// agr's.
+func runRun(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
+	const usage = "usage: agr run <host> [--cwd <dir>] -- <argv>…"
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		_, _ = fmt.Fprintln(errw, usage)
+		return 2
+	}
+	host, rest := args[0], args[1:]
+	cwd := ""
+	if len(rest) >= 2 && rest[0] == "--cwd" {
+		cwd, rest = rest[1], rest[2:]
+	}
+	if len(rest) < 2 || rest[0] != "--" {
+		_, _ = fmt.Fprintln(errw, usage)
+		return 2
+	}
+	return cli.RunRun(ctx, host, cwd, rest[1:], cli.RunDependencies{
+		TTY: app.tty, HostInfo: app.hostInfo, MoshPath: app.moshPath, Out: out,
 	}, errw)
 }
 
@@ -306,7 +333,7 @@ func runDoctor(ctx context.Context, app *application, args []string, out, errw i
 	return cli.RunDoctor(ctx, args[0], deps, out, errw)
 }
 
-// parseOpenArgs splits open's positionals from its two valued flags, which
+// parseOpenArgs splits open's positionals from its valued flags, which
 // may appear anywhere after the verb. A flag without a value, or repeated,
 // is a usage error.
 func parseOpenArgs(args []string) ([]string, cli.OpenOptions, bool) {
@@ -315,15 +342,20 @@ func parseOpenArgs(args []string) ([]string, cli.OpenOptions, bool) {
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--cwd", "--parent":
+		case "--cwd", "--parent", "--command", "--orchestrator":
 			if i+1 >= len(args) || seen[args[i]] {
 				return nil, cli.OpenOptions{}, false
 			}
 			seen[args[i]] = true
-			if args[i] == "--cwd" {
+			switch args[i] {
+			case "--cwd":
 				opts.Cwd = args[i+1]
-			} else {
+			case "--parent":
 				opts.Parent = args[i+1]
+			case "--command":
+				opts.Command = args[i+1]
+			default:
+				opts.Orchestrator = args[i+1]
 			}
 			i++
 		default:

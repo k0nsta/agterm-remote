@@ -25,7 +25,26 @@ type Binding struct {
 	Name    string    `json:"name"`
 	Mux     string    `json:"mux"`
 	BoundAt time.Time `json:"bound_at"`
+	// Grants are the local panes this binding's host may type into. They
+	// follow a re-bind of the same host and name (see upsert).
+	Grants []Grant `json:"grants,omitempty"`
 }
+
+// Grant kinds.
+const (
+	GrantOrchestrator = "orchestrator"
+	GrantConsent      = "consent"
+)
+
+// Grant lets a host type into one local pane it does not own.
+type Grant struct {
+	Row    string `json:"row"`
+	PaneID string `json:"pane_id"`
+	Kind   string `json:"kind"`
+}
+
+// ErrNoBinding means a grant was addressed to a binding that no longer exists.
+var ErrNoBinding = errors.New("no binding for host and name")
 
 // Store is the persistent binding database at dirs.Bindings().
 type Store struct {
@@ -85,6 +104,57 @@ func (s *Store) Bind(binding Binding) error {
 			return err
 		}
 		return s.writeUnlocked(upsert(current, binding))
+	})
+}
+
+// AddGrant adds grant to the binding of host and name, found under the store
+// lock. It is an error, not a new entry, when that binding is gone. Adding a
+// grant the binding already has changes nothing.
+func (s *Store) AddGrant(host, name string, grant Grant) error {
+	return s.editGrants(host, name, func(grants []Grant) []Grant {
+		for _, have := range grants {
+			if have == grant {
+				return grants
+			}
+		}
+		return append(grants, grant)
+	})
+}
+
+// DropGrant removes grant from the binding of host and name. A grant the
+// binding does not hold is not an error; a missing binding is.
+func (s *Store) DropGrant(host, name string, grant Grant) error {
+	return s.editGrants(host, name, func(grants []Grant) []Grant {
+		kept := make([]Grant, 0, len(grants))
+		for _, have := range grants {
+			if have != grant {
+				kept = append(kept, have)
+			}
+		}
+		return kept
+	})
+}
+
+func (s *Store) editGrants(host, name string, edit func([]Grant) []Grant) error {
+	if s == nil {
+		return errors.New("nil binding store")
+	}
+	return s.withLock(func() error {
+		current, err := s.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		for i := range current {
+			if current[i].Host != host || current[i].Name != name {
+				continue
+			}
+			current[i].Grants = edit(append([]Grant(nil), current[i].Grants...))
+			if len(current[i].Grants) == 0 {
+				current[i].Grants = nil
+			}
+			return s.writeUnlocked(current)
+		}
+		return fmt.Errorf("%w: %s %s", ErrNoBinding, host, name)
 	})
 }
 
@@ -173,6 +243,8 @@ func (s *Store) ForHost(host string) []Binding {
 //     whatever is opened next in that slot;
 //   - the same host and session name, which is bound to one pane at a time.
 //
+// A replaced entry with the same host and name hands its Grants to next.
+//
 // When either side has no PaneID (agterm before pane tokens) the whole row is
 // replaced, as it was before per-pane bindings.
 //
@@ -183,6 +255,11 @@ func upsert(current []Binding, next Binding) []Binding {
 	filtered := make([]Binding, 0, len(current)+1)
 	for _, binding := range current {
 		if supersedes(next, binding) {
+			// The same host and name is the same session attached again: it
+			// keeps what its host was granted, unless the caller set grants.
+			if binding.Host == next.Host && binding.Name == next.Name && next.Grants == nil {
+				next.Grants = binding.Grants
+			}
 			continue
 		}
 		filtered = append(filtered, binding)

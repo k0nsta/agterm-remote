@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/k0nsta/agterm-remote/internal/agrpath"
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/bridge"
@@ -32,6 +33,7 @@ type application struct {
 	daemon      daemonRunner
 	picker      cli.Picker
 	rows        cli.Rows
+	paneTree    cli.PaneTree
 	labeler     cli.Labeler
 	installer   cli.Installer
 	openRemote  cli.OpenerRemote
@@ -43,6 +45,10 @@ type application struct {
 	moshPath    func() string
 	doctor      cli.DoctorDependencies
 }
+
+// stableAgr is where hooks, keymap commands and setup learn the path to run
+// agr by. It is a variable so a test can pin it.
+var stableAgr = agrpath.Stable
 
 type applicationBridge interface {
 	cli.Bridge
@@ -67,12 +73,8 @@ func (a *application) paneHooks() cli.PaneHookDependencies {
 	if ctl == nil {
 		ctl = agterm.NewCtl("", "", nil, nil, nil)
 	}
-	self, err := os.Executable()
-	if err != nil || self == "" {
-		self = "agr"
-	}
 	return cli.PaneHookDependencies{
-		Panes: ctl, Store: a.store, Remote: a.cwd, Handled: handled.New(a.dirs.Handled()), Agr: self,
+		Panes: ctl, Store: a.store, Remote: a.cwd, Handled: handled.New(a.dirs.Handled()), Agr: stableAgr(),
 	}
 }
 
@@ -103,9 +105,8 @@ func (a *application) paste() cli.PasteDependencies {
 // default config directory, and leaves the reload to agterm's next start. The
 // key for End remote session is asked only on a terminal; Paste never prompts.
 func (a *application) setup(out io.Writer, endKey, pasteKey string) cli.SetupDependencies {
-	self, _ := os.Executable()
 	home, _ := os.UserHomeDir()
-	deps := cli.SetupDependencies{Agr: self, Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey}
+	deps := cli.SetupDependencies{Agr: stableAgr(), Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey}
 	if a.control != nil && agterm.CtlPath() != "" {
 		deps.Config = a.control
 	}
@@ -160,6 +161,7 @@ func newApplication() *application {
 	if ctlPath != "" {
 		app.picker = control
 		app.rows = control
+		app.paneTree = control
 		app.labeler = control
 	}
 	app.daemon = daemon.New(daemon.Config{
@@ -183,6 +185,7 @@ var (
 	_ daemon.StatusSink                       = (*agterm.Client)(nil)
 	_ cli.Picker                              = (*agterm.Ctl)(nil)
 	_ cli.Rows                                = (*agterm.Ctl)(nil)
+	_ cli.PaneTree                            = (*agterm.Ctl)(nil)
 	_ cli.Labeler                             = (*agterm.Ctl)(nil)
 	_ cli.Panes                               = (*agterm.Ctl)(nil)
 	_ cli.RemoteCwd                           = (*remote.Runner)(nil)

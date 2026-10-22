@@ -132,20 +132,20 @@ case "${1:-}" in
 		fi
 		shift
 		labels=
-		while [ "$#" -gt 1 ]; do
-			case "$1" in
-				--labels)
-					[ "$#" -gt 2 ] || exit 2
-					if [ -n "$labels" ]; then labels="$labels
+		while [ "${1:-}" = --labels ]; do
+			[ "$#" -gt 2 ] || exit 2
+			if [ -n "$labels" ]; then labels="$labels
 $2"; else labels=$2; fi
-					shift 2
-					;;
-				*) exit 2 ;;
-			esac
+			shift 2
 		done
+		[ "$#" -ge 1 ] || exit 2
 		name=$1
+		shift
+		# Anything after the name is the command a new session runs.
 		create_session "$name"
 		printf 'attach-cwd %s %s\n' "$name" "$(pwd)" >> "$calls"
+		printf 'attach-env %s id=%s enabled=%s\n' "$name" "${AGTERM_SESSION_ID-<unset>}" "${AGTERM_ENABLED-<unset>}" >> "$calls"
+		[ "$#" -eq 0 ] || printf 'attach-cmd %s %s\n' "$name" "$*" >> "$calls"
 		if [ -n "$labels" ]; then
 			while IFS= read -r label; do
 				[ -n "$label" ] || continue

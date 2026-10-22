@@ -24,6 +24,11 @@ type Rows interface {
 	Tree(ctx context.Context) ([]string, error)
 }
 
+// PaneTree reads the live rows with their panes and foregrounds.
+type PaneTree interface {
+	TreeRows(ctx context.Context) ([]agterm.TreeRow, error)
+}
+
 // Labeler updates the optional display metadata of an agterm row.
 type Labeler interface {
 	Rename(ctx context.Context, row, name string) error

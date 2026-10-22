@@ -100,6 +100,45 @@ func (mr *MockRowsMockRecorder) Tree(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Tree", reflect.TypeOf((*MockRows)(nil).Tree), ctx)
 }
 
+// MockPaneTree is a mock of PaneTree interface.
+type MockPaneTree struct {
+	ctrl     *gomock.Controller
+	recorder *MockPaneTreeMockRecorder
+	isgomock struct{}
+}
+
+// MockPaneTreeMockRecorder is the mock recorder for MockPaneTree.
+type MockPaneTreeMockRecorder struct {
+	mock *MockPaneTree
+}
+
+// NewMockPaneTree creates a new mock instance.
+func NewMockPaneTree(ctrl *gomock.Controller) *MockPaneTree {
+	mock := &MockPaneTree{ctrl: ctrl}
+	mock.recorder = &MockPaneTreeMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPaneTree) EXPECT() *MockPaneTreeMockRecorder {
+	return m.recorder
+}
+
+// TreeRows mocks base method.
+func (m *MockPaneTree) TreeRows(ctx context.Context) ([]agterm.TreeRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TreeRows", ctx)
+	ret0, _ := ret[0].([]agterm.TreeRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TreeRows indicates an expected call of TreeRows.
+func (mr *MockPaneTreeMockRecorder) TreeRows(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TreeRows", reflect.TypeOf((*MockPaneTree)(nil).TreeRows), ctx)
+}
+
 // MockLabeler is a mock of Labeler interface.
 type MockLabeler struct {
 	ctrl     *gomock.Controller
