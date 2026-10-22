@@ -13,6 +13,11 @@ const (
 	hooksWriteScript = `p=$(readlink -f ~/.claude/settings.json 2>/dev/null || echo ~/.claude/settings.json); d=$(dirname "$p"); mkdir -p "$d"; if [ -e "$p" ]; then cp -p "$p" "$p.bak-agr"; fi; cat > "$p.tmp" && mv -f "$p.tmp" "$p"`
 )
 
+// skillWriteScript prints `written`, or `kept` when ~/.claude/skills/agr/SKILL.md
+// exists without the agr-skill marker: the stdin is drained so ssh does not see
+// a broken pipe. The marker text is skill.Marker.
+const skillWriteScript = `d="$HOME/.claude/skills/agr"; t="$d/SKILL.md"; if [ -e "$t" ] && ! grep -q '^<!-- agr-skill ' "$t" 2>/dev/null; then cat >/dev/null; echo kept; exit 0; fi; mkdir -p "$d" && cat > "$t.tmp" && mv -f "$t.tmp" "$t" && echo written`
+
 const agrHookPath = "$HOME/.local/bin/agr"
 
 // MergeHooks adds or repairs the four Claude Code hooks while preserving

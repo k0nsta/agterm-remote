@@ -11,6 +11,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/paths"
 	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remotescript"
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 func TestInstallDefaultChoicesAndWriteOrder(t *testing.T) {
@@ -28,18 +29,19 @@ func TestInstallDefaultChoicesAndWriteOrder(t *testing.T) {
 		nil,
 		[]byte(`{"existing":true}`),
 		nil,
+		[]byte("written\n"),
 	}}
 	runner := NewRunnerWithVersion(ssh, dirs, "1.0.0")
 	result, err := runner.InstallResult(context.Background(), "user@example.com", "")
 	if err != nil {
 		t.Fatalf("InstallResult() error = %v", err)
 	}
-	if want := (InstallResult{Host: "user@example.com", Version: "1.0.0", Mux: "zmx", Relay: "nc", Proxy: "agtermctl proxy: updated"}); !reflect.DeepEqual(result, want) {
+	if want := (InstallResult{Host: "user@example.com", Version: "1.0.0", Mux: "zmx", Relay: "nc", Proxy: "agtermctl proxy: updated", Skill: "agr skill: written to ~/.claude/skills/agr/SKILL.md"}); !reflect.DeepEqual(result, want) {
 		t.Fatalf("InstallResult() = %#v, want %#v", result, want)
 	}
 	calls := ssh.Calls(t)
-	if len(calls) != 7 {
-		t.Fatalf("SSH calls = %d, want probe, dirs, env, script, proxy, hooks read/write", len(calls))
+	if len(calls) != 8 {
+		t.Fatalf("SSH calls = %d, want probe, dirs, env, script, proxy, hooks read/write, skill", len(calls))
 	}
 	if got, want := calls[0].argv, []string{"sh"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("probe argv = %#v, want %#v", got, want)
@@ -99,13 +101,59 @@ func TestInstallMuxOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read probe fixture: %v", err)
 	}
-	ssh := &runnerSSH{result: [][]byte{probe, nil, nil, nil, nil, []byte(`{}`), nil}}
+	ssh := &runnerSSH{result: [][]byte{probe, nil, nil, nil, nil, []byte(`{}`), nil, nil}}
 	result, err := NewRunnerWithVersion(ssh, testDirsForInstall(t), "1.0.0").InstallResult(context.Background(), "host", "tmux")
 	if err != nil {
 		t.Fatalf("InstallResult() error = %v", err)
 	}
-	if result.Mux != "tmux" || len(ssh.Calls(t)) != 7 {
+	if result.Mux != "tmux" || len(ssh.Calls(t)) != 8 {
 		t.Fatalf("InstallResult() = %#v, calls = %d, want tmux and complete install", result, len(ssh.Calls(t)))
+	}
+}
+
+func TestInstallSkillWrite(t *testing.T) {
+	t.Helper()
+	probe, err := os.ReadFile("testdata/probe.txt")
+	if err != nil {
+		t.Fatalf("read probe fixture: %v", err)
+	}
+	tests := []struct {
+		name     string
+		out      string
+		err      error
+		wantNote string
+	}{
+		{"written", "written\n", nil, "agr skill: written"},
+		{"kept", "kept\n", nil, "agr skill: kept"},
+		{"write failure is a report line", "", errors.New("connection reset"), "agr skill: not written: connection reset"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Helper()
+			ssh := &runnerSSH{
+				result: [][]byte{probe, nil, nil, nil, nil, []byte(`{}`), nil, []byte(tc.out)},
+				errors: []error{nil, nil, nil, nil, nil, nil, nil, tc.err},
+			}
+			result, err := NewRunnerWithVersion(ssh, testDirsForInstall(t), "1.0.0").InstallResult(context.Background(), "host", "")
+			if err != nil {
+				t.Fatalf("InstallResult() error = %v, want the skill failure to be a report line", err)
+			}
+			if !strings.Contains(result.Skill, tc.wantNote) {
+				t.Fatalf("InstallResult().Skill = %q, want it to contain %q", result.Skill, tc.wantNote)
+			}
+			calls := ssh.Calls(t)
+			last := calls[len(calls)-1]
+			if !reflect.DeepEqual(last.argv, []string{"sh", "-c", skillWriteScript}) || !reflect.DeepEqual(last.stdin, skill.Bytes("1.0.0")) {
+				t.Fatalf("skill write = argv %#v, want skillWriteScript fed the stamped skill", last.argv)
+			}
+		})
+	}
+}
+
+func TestSkillWriteScriptUsesTheSkillMarker(t *testing.T) {
+	t.Helper()
+	if !strings.Contains(skillWriteScript, "grep -q '^"+skill.Marker+"'") {
+		t.Fatalf("skillWriteScript = %q, want a check for %q", skillWriteScript, skill.Marker)
 	}
 }
 
@@ -223,10 +271,10 @@ func TestInstallPushesMissingTerminfo(t *testing.T) {
 		wantNote  string
 		wantTic   bool
 	}{
-		{"missing with tic: pushed", "terminfo\t0\ntic\t1\n", &terminfoFake{entry: []byte("xterm-ghostty|entry,\n")}, 8, "terminfo xterm-ghostty: installed", true},
-		{"present: nothing pushed", "terminfo\t1\ntic\t1\n", &terminfoFake{entry: []byte("unused")}, 7, "terminfo xterm-ghostty: present", false},
-		{"missing without tic: reported", "terminfo\t0\ntic\t0\n", &terminfoFake{entry: []byte("unused")}, 7, "tic is not installed", false},
-		{"local infocmp fails: reported", "terminfo\t0\ntic\t1\n", &terminfoFake{err: errors.New("no entry")}, 7, "could not read the local entry", false},
+		{"missing with tic: pushed", "terminfo\t0\ntic\t1\n", &terminfoFake{entry: []byte("xterm-ghostty|entry,\n")}, 9, "terminfo xterm-ghostty: installed", true},
+		{"present: nothing pushed", "terminfo\t1\ntic\t1\n", &terminfoFake{entry: []byte("unused")}, 8, "terminfo xterm-ghostty: present", false},
+		{"missing without tic: reported", "terminfo\t0\ntic\t0\n", &terminfoFake{entry: []byte("unused")}, 8, "tic is not installed", false},
+		{"local infocmp fails: reported", "terminfo\t0\ntic\t1\n", &terminfoFake{err: errors.New("no entry")}, 8, "could not read the local entry", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -290,10 +338,10 @@ func TestInstallProxyWrapper(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Helper()
 			results := [][]byte{[]byte(probeWith(t, tc.agtermctl, tc.localBin)), nil, nil, nil}
-			wantCalls := 6
+			wantCalls := 7
 			if tc.wantWrite {
 				results = append(results, nil)
-				wantCalls = 7
+				wantCalls = 8
 			}
 			results = append(results, []byte(`{}`), nil)
 			ssh := &runnerSSH{result: results}

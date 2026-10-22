@@ -151,7 +151,11 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 			if err != nil || !strings.Contains(string(keymap), `"End remote session" ctrl+a>x`) {
 				t.Fatalf("keymap.conf = %q, %v; want the End command on the given key", keymap, err)
 			}
+			if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "agr", "SKILL.md")); err != nil {
+				t.Fatalf("agr setup did not install the skill: %v", err)
+			}
 		}},
+		{name: "skill", argv: []string{"skill"}, want: 0, check: func(t *testing.T) {}},
 		{name: "shell", argv: []string{"shell", "host", "--cwd", "/srv"}, want: 0, check: func(t *testing.T) {
 			// The fake is shared across subtests; check what shell sent, not a
 			// count that depends on which subtests ran before it.
@@ -178,7 +182,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		})
 	}
 
-	if got, want := len(commandHandlers), 15; got != want {
+	if got, want := len(commandHandlers), 16; got != want {
 		t.Fatalf("registered command count = %d, want %d", got, want)
 	}
 }

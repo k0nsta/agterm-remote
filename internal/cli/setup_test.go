@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 const testAgr = "'/opt/homebrew/bin/agr'"
@@ -498,4 +500,64 @@ func readFile(t *testing.T, name string) string {
 		t.Fatalf("read %s: %v", name, err)
 	}
 	return string(content)
+}
+
+func TestSetupInstallsTheSkill(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, ".claude", "skills", "agr")
+	deps := SetupDependencies{Agr: "/opt/homebrew/bin/agr", Home: dir, EndKey: "ctrl+a>x", SkillDir: skillDir, Version: "9.9.9"}
+
+	var out bytes.Buffer
+	deps.Out = &out
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	if got := readFile(t, filepath.Join(skillDir, "SKILL.md")); got != string(skill.Bytes("9.9.9")) {
+		t.Fatalf("SKILL.md = %q, want the stamped skill", got)
+	}
+	if !strings.Contains(out.String(), "installed "+filepath.Join(skillDir, "SKILL.md")) {
+		t.Fatalf("output = %q, want the installed line", out.String())
+	}
+
+	out.Reset()
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("second Setup() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "unchanged "+filepath.Join(skillDir, "SKILL.md")) {
+		t.Fatalf("second run output = %q", out.String())
+	}
+
+	own := "my own agr skill\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(own), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("third Setup() error = %v", err)
+	}
+	if got := readFile(t, filepath.Join(skillDir, "SKILL.md")); got != own {
+		t.Fatalf("an unmarked SKILL.md was replaced: %q", got)
+	}
+	if !strings.Contains(out.String(), "kept") || !strings.Contains(out.String(), "not replaced") {
+		t.Fatalf("output = %q, want a notice that the file was kept", out.String())
+	}
+}
+
+func TestSetupSkillFailureIsAReportLine(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	deps := SetupDependencies{Agr: "/opt/homebrew/bin/agr", Home: dir, EndKey: "ctrl+a>x", Out: &out,
+		SkillDir: filepath.Join(blocker, "skills", "agr"), Version: "1"}
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v, want the skill failure to be a report line", err)
+	}
+	if !strings.Contains(out.String(), "agr skill: not written") {
+		t.Fatalf("output = %q", out.String())
+	}
 }

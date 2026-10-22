@@ -824,15 +824,15 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   beside `hooksWriteScript`), `cmd/agr/run.go`, `cmd/agr/wire.go`
 - Create: `tests/remote/tmux/skill_install_test.sh`
 
-- [ ] write `SKILL.md` per Technical Details > The `agr` skill: frontmatter `name: agr` and a
+- [x] write `SKILL.md` per Technical Details > The `agr` skill: frontmatter `name: agr` and a
       `description` that lists the triggers; marker line; spawn, teardown, remote-row and
       handoff sections; no host names
-- [ ] `internal/skill`: the embedded bytes, the version stamped into the marker, and
+- [x] `internal/skill`: the embedded bytes, the version stamped into the marker, and
       `Install(dir)`, which writes only when the file is missing or carries the marker
-- [ ] `agr setup` installs it on the Mac; `agr install <host>` installs it on the host with
+- [x] `agr setup` installs it on the Mac; `agr install <host>` installs it on the host with
       `skillWriteScript` after `mergeHooks`, best-effort (a report line, never an install error)
-- [ ] `agr skill` prints it
-- [ ] tests:
+- [x] `agr skill` prints it
+- [x] tests:
   - the marker and version present; the frontmatter parses; no `homelab` or other host literal
   - install: missing file written; marked file replaced; unmarked file left alone with a notice
   - setup and remote install call it; a remote write failure is a report line and install

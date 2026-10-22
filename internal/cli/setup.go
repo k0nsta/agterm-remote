@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/k0nsta/agterm-remote/internal/remote"
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 // SetupDependencies are the collaborators of Setup.
@@ -34,6 +35,10 @@ type SetupDependencies struct {
 	// AskKey asks for that chord when no command runs agr end yet; nil (not a
 	// terminal) adds the command without a key.
 	AskKey func() (string, error)
+	// SkillDir is where the agr skill goes (~/.claude/skills/agr); empty skips
+	// it. Version is stamped into the skill's marker.
+	SkillDir string
+	Version  string
 }
 
 const (
@@ -108,6 +113,7 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 		}
 		_, _ = fmt.Fprintf(out, "%-9s %s\n", state, file.path)
 	}
+	installSkill(deps, out)
 	if key == "" && !keymapHasKey(keymapPath) {
 		_, _ = fmt.Fprintln(out, "End remote session has no key: run it from agterm's command palette, or bind one with `agr setup --end-key 'ctrl+a>x'`")
 	}
@@ -133,6 +139,23 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 	}
 	_, _ = fmt.Fprintln(out, "agterm reloaded: ⌘D and ⌘J follow a remote row; End remote session runs agr end; Paste to remote runs agr paste")
 	return nil
+}
+
+// installSkill writes the agr skill and says what happened. It never fails
+// setup: the hooks and keymap are already in place.
+func installSkill(deps SetupDependencies, out io.Writer) {
+	if deps.SkillDir == "" {
+		return
+	}
+	state, err := skill.Install(deps.SkillDir, deps.Version)
+	switch {
+	case err != nil:
+		_, _ = fmt.Fprintf(out, "agr skill: not written: %v\n", err)
+	case state == skill.Kept:
+		_, _ = fmt.Fprintf(out, "%-9s %s (no agr-skill marker: not replaced; `agr skill` prints agr's)\n", state, filepath.Join(deps.SkillDir, skill.FileName))
+	default:
+		_, _ = fmt.Fprintf(out, "%-9s %s\n", state, filepath.Join(deps.SkillDir, skill.FileName))
+	}
 }
 
 // RunSetup adapts Setup to agr's integer-exit CLI convention.

@@ -41,6 +41,9 @@ func RunInstall(ctx context.Context, args []string, installer Installer, out, er
 	if result.Proxy != "" {
 		_, _ = fmt.Fprintln(out, result.Proxy)
 	}
+	if result.Skill != "" {
+		_, _ = fmt.Fprintln(out, result.Skill)
+	}
 	if result.Terminfo != "" {
 		_, _ = fmt.Fprintln(out, result.Terminfo)
 	}

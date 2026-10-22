@@ -35,6 +35,7 @@ Commands:
                           Open a plain remote login shell (no session)
   end [row]                Kill a row's remote sessions and close the row
   paste [row] [pane-id]   Send the clipboard or latest screenshot to a remote row
+  skill                   Print the agr skill for Claude (agr setup and agr install write it)
   setup [--end-key <chord>] [--paste-key <chord>]
                           Make agterm's ⌘D and ⌘J follow a remote row; add End and Paste commands
 
@@ -62,6 +63,7 @@ var commandHandlers = map[string]commandHandler{
 	"end":     runEnd,
 	"paste":   runPaste,
 	"setup":   runSetup,
+	"skill":   runSkill,
 	// Hook entry points, run by agterm's hooks.conf rather than by hand, so
 	// they stay out of --help.
 	"on-split":   runOnSplit,
@@ -146,6 +148,14 @@ func runPaste(ctx context.Context, app *application, args []string, _, errw io.W
 		return 2
 	}
 	return cli.RunPaste(ctx, row, optionalArg(args, 1), app.paste(), errw)
+}
+
+func runSkill(_ context.Context, _ *application, args []string, out, errw io.Writer) int {
+	if len(args) != 0 {
+		_, _ = fmt.Fprintln(errw, "usage: agr skill")
+		return 2
+	}
+	return cli.RunSkill(version, out, errw)
 }
 
 func runSetup(ctx context.Context, app *application, args []string, out, errw io.Writer) int {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agrpath"
@@ -108,7 +109,10 @@ func (a *application) paste() cli.PasteDependencies {
 // key for End remote session is asked only on a terminal; Paste never prompts.
 func (a *application) setup(out io.Writer, endKey, pasteKey string) cli.SetupDependencies {
 	home, _ := os.UserHomeDir()
-	deps := cli.SetupDependencies{Agr: stableAgr(), Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey}
+	deps := cli.SetupDependencies{Agr: stableAgr(), Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey, Version: version}
+	if home != "" {
+		deps.SkillDir = filepath.Join(home, ".claude", "skills", "agr")
+	}
 	if a.control != nil && agterm.CtlPath() != "" {
 		deps.Config = a.control
 	}

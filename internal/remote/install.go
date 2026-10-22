@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/remotescript"
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 const (
@@ -38,6 +39,9 @@ type InstallResult struct {
 	// Proxy is one phrase about the agtermctl proxy wrapper: installed,
 	// updated, or why it was skipped.
 	Proxy string
+	// Skill is one phrase about the agr skill on the host: written, kept, or
+	// why it could not be written.
+	Skill string
 }
 
 // Install probes the host, installs the versioned remote script, writes the
@@ -113,6 +117,7 @@ func (r *Runner) InstallResult(ctx context.Context, host, muxOverride string) (I
 	}
 
 	result := InstallResult{Host: host, Version: r.version, Mux: mux, Relay: relay, Proxy: proxy}
+	result.Skill = r.ensureSkill(ctx, host)
 	result.Terminfo = r.ensureTerminfo(ctx, host, probe)
 	return result, nil
 }
@@ -135,6 +140,20 @@ func (r *Runner) ensureProxy(ctx context.Context, host string, probe ProbeResult
 		note += " (~/.local/bin is not on a login shell PATH there)"
 	}
 	return note, nil
+}
+
+// ensureSkill writes the agr skill to the host, leaving a SKILL.md without the
+// agr marker alone. Best effort, like ensureTerminfo: a failure is a report
+// line, never an install error.
+func (r *Runner) ensureSkill(ctx context.Context, host string) string {
+	out, err := r.sshClient().Run(ctx, host, skill.Bytes(r.version), "sh", "-c", skillWriteScript)
+	if err != nil {
+		return fmt.Sprintf("agr skill: not written: %v", err)
+	}
+	if strings.TrimSpace(string(out)) == skill.Kept {
+		return "agr skill: kept, ~/.claude/skills/agr/SKILL.md is not agr's"
+	}
+	return "agr skill: written to ~/.claude/skills/agr/SKILL.md"
 }
 
 // ensureTerminfo pushes the local terminal's terminfo entry to host when the

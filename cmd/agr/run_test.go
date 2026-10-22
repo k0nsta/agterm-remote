@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -177,5 +179,20 @@ func TestRunPasteRequiresARowWhenNoArgumentOrEnvironment(t *testing.T) {
 	}
 	if !strings.Contains(errout.String(), "no agterm row in the environment") {
 		t.Fatalf("run(paste) stderr = %q, want missing-row usage", errout.String())
+	}
+}
+
+func TestRunSkillPrintsAndRejectsArguments(t *testing.T) {
+	t.Helper()
+	var out, errw strings.Builder
+	if got := runWithApplication([]string{"skill"}, &out, &errw, &application{}); got != 0 {
+		t.Fatalf("run(skill) exit = %d, stderr = %q", got, errw.String())
+	}
+	if out.String() != string(skill.Bytes(version)) {
+		t.Fatal("agr skill output differs from the embedded skill")
+	}
+	out.Reset()
+	if got := runWithApplication([]string{"skill", "x"}, &out, &errw, &application{}); got != 2 {
+		t.Fatalf("run(skill x) exit = %d, want 2", got)
 	}
 }
