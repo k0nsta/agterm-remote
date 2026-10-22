@@ -557,7 +557,7 @@ func (d *Daemon) startHost(ctx context.Context, host string) error {
 	if marker, ok := supervisor.(aliveMarker); ok {
 		liveness = marker
 	}
-	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness)
+	listener := receiver.NewListener(host, hostKey, d.dirs, d, d.store, liveness, nil)
 	hostCtx, cancel := context.WithCancel(ctx)
 	stateSource, hasStateSource := supervisor.(interface{ Changes() <-chan bridge.State })
 	runtime := &hostRuntime{

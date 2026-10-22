@@ -1,10 +1,15 @@
 package receiver
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +17,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
+	"github.com/k0nsta/agterm-remote/internal/proxy"
 )
 
 type statusCall struct {
@@ -65,7 +71,7 @@ func TestListenerRoutesTwoAgrEventsAndUsesBindingPane(t *testing.T) {
 		found:   true,
 	}
 	liveness := &recordingLiveness{calls: make(chan struct{}, 2)}
-	listener := NewListener("host-a", "host-a", dirs, sink, resolver, liveness)
+	listener := NewListener("host-a", "host-a", dirs, sink, resolver, liveness, nil)
 	stop := startListener(t, listener, dirs.Recv("host-a"))
 	defer stop()
 
@@ -105,7 +111,7 @@ func TestListenerRoutesCookbookEventWithoutBindingLookup(t *testing.T) {
 	sink := &recordingSink{calls: make(chan statusCall, 1)}
 	resolver := &recordingResolver{}
 	liveness := &recordingLiveness{calls: make(chan struct{}, 1)}
-	listener := NewListener("host-a", "host-a", dirs, sink, resolver, liveness)
+	listener := NewListener("host-a", "host-a", dirs, sink, resolver, liveness, nil)
 	stop := startListener(t, listener, dirs.Recv("host-a"))
 	defer stop()
 
@@ -132,7 +138,7 @@ func TestListenerMalformedAndUnknownEventsDoNotBreakConnection(t *testing.T) {
 	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 2)}
 	resolver := &recordingResolver{binding: bindings.Binding{Row: "row-1"}, found: true}
-	listener := NewListener("host-a", "host-a", dirs, sink, resolver, nil)
+	listener := NewListener("host-a", "host-a", dirs, sink, resolver, nil, nil)
 	stop := startListener(t, listener, dirs.Recv("host-a"))
 	defer stop()
 
@@ -152,7 +158,7 @@ func TestListenerUnknownSessionIsLoggedAndNotPushed(t *testing.T) {
 	t.Helper()
 	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 1)}
-	listener := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{}, nil)
+	listener := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{}, nil, nil)
 	stop := startListener(t, listener, dirs.Recv("host-a"))
 	defer stop()
 
@@ -169,7 +175,7 @@ func TestListenerSkipsOversizedLineAndReadsNextEvent(t *testing.T) {
 	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 1)}
 	resolver := &recordingResolver{binding: bindings.Binding{Row: "row-1"}, found: true}
-	listener := NewListener("host-a", "host-a", dirs, sink, resolver, nil)
+	listener := NewListener("host-a", "host-a", dirs, sink, resolver, nil, nil)
 	stop := startListener(t, listener, dirs.Recv("host-a"))
 	defer stop()
 
@@ -270,7 +276,7 @@ func TestServeLateExitDoesNotUnlinkSuccessorSocket(t *testing.T) {
 	dirs := pathstest.Dirs(t)
 	path := dirs.Recv("host-a")
 	sink := &blockingSink{entered: make(chan struct{}, 1), release: make(chan struct{})}
-	first := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{}, nil)
+	first := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{}, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
@@ -304,7 +310,7 @@ func TestServeLateExitDoesNotUnlinkSuccessorSocket(t *testing.T) {
 
 	// A successor binds the same path while the first Serve is still alive
 	// (its handler is still wedged in the sink).
-	second := NewListener("host-a", "host-a", dirs, &recordingSink{calls: make(chan statusCall, 1)}, &recordingResolver{}, nil)
+	second := NewListener("host-a", "host-a", dirs, &recordingSink{calls: make(chan statusCall, 1)}, &recordingResolver{}, nil, nil)
 	if err := second.Bind(); err != nil {
 		t.Fatalf("successor Bind() error = %v", err)
 	}
@@ -329,4 +335,265 @@ func TestServeLateExitDoesNotUnlinkSuccessorSocket(t *testing.T) {
 		t.Fatalf("successor socket not reachable after the predecessor's late exit: %v", err)
 	}
 	_ = conn.Close()
+}
+
+type ctlCall struct {
+	req proxy.Request
+}
+
+// funcCtl adapts a function to CtlSink and records every request.
+type funcCtl struct {
+	calls chan ctlCall
+	run   func(ctx context.Context, req proxy.Request, frames proxy.FrameWriter) int
+}
+
+func (c *funcCtl) Ctl(ctx context.Context, req proxy.Request, frames proxy.FrameWriter) int {
+	c.calls <- ctlCall{req: req}
+	return c.run(ctx, req, frames)
+}
+
+func newFuncCtl(run func(ctx context.Context, req proxy.Request, frames proxy.FrameWriter) int) *funcCtl {
+	return &funcCtl{calls: make(chan ctlCall, 4), run: run}
+}
+
+func ctlHeader(session string, files []int, stdin int) string {
+	parts := make([]string, len(files))
+	for i, size := range files {
+		parts[i] = strconv.Itoa(size)
+	}
+	return `{"cmd":"ctl","v":1,"session":"` + session + `","self":{"row":"r","pane_id":"p"},"cwd":"/w","argv":["tree"],"files":[` +
+		strings.Join(parts, ",") + `],"stdin":` + strconv.Itoa(stdin) + "}\n"
+}
+
+func dialCtl(t *testing.T, path string) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("dial receiver socket: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn, bufio.NewReader(conn)
+}
+
+func readLine(t *testing.T, reader *bufio.Reader, conn net.Conn) string {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read reply line: %v (got %q)", err, line)
+	}
+	return line
+}
+
+// readAll returns everything up to the server closing the connection.
+func readAll(t *testing.T, reader *bufio.Reader, conn net.Conn) string {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read reply: %v (got %q)", err, data)
+	}
+	return string(data)
+}
+
+func ctlListener(t *testing.T, sink CtlSink, liveness Liveness, found bool) (*Listener, string, func()) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	resolver := &recordingResolver{binding: bindings.Binding{Row: "row-1", Pane: "left", PaneID: "pane-1", Host: "host-a", Name: "api"}, found: found}
+	listener := NewListener("host-a", "host-a", dirs, &recordingSink{calls: make(chan statusCall, 4)}, resolver, liveness, sink)
+	path := dirs.Recv("host-a")
+	return listener, path, startListener(t, listener, path)
+}
+
+func TestListenerCtlAfterStatusLinesOnOneConnection(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	status := &recordingSink{calls: make(chan statusCall, 2)}
+	resolver := &recordingResolver{binding: bindings.Binding{Row: "row-1", Pane: "left", PaneID: "pane-1"}, found: true}
+	ctl := newFuncCtl(func(_ context.Context, _ proxy.Request, frames proxy.FrameWriter) int {
+		_, _ = frames.Stdout().Write([]byte("hi"))
+		return 7
+	})
+	listener := NewListener("host-a", "host-a", dirs, status, resolver, nil, ctl)
+	stop := startListener(t, listener, dirs.Recv("host-a"))
+	defer stop()
+
+	conn, reader := dialCtl(t, dirs.Recv("host-a"))
+	_, err := io.WriteString(conn, `{"cmd":"session-status","session":"api","state":"active"}`+"\n"+ctlHeader("api", nil, 0))
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := receiveCall(t, status.calls); got.args.Status != "active" {
+		t.Fatalf("status = %#v", got)
+	}
+	if got := readLine(t, reader, conn); got != "ack 1\n" {
+		t.Fatalf("first reply = %q, want ack 1", got)
+	}
+	if got := readAll(t, reader, conn); got != "o 2\nhix 7\n" {
+		t.Fatalf("frames = %q", got)
+	}
+	call := <-ctl.calls
+	if call.req.Host != "host-a" || call.req.Caller.Row != "row-1" || call.req.Caller.PaneID != "pane-1" ||
+		call.req.Session != "api" || call.req.CWD != "/w" || call.req.Self.PaneID != "p" || len(call.req.Argv) != 1 {
+		t.Fatalf("request = %#v", call.req)
+	}
+}
+
+func TestListenerCtlAcksBeforeBodyAndReadsLargeBody(t *testing.T) {
+	t.Helper()
+	ctl := newFuncCtl(func(context.Context, proxy.Request, proxy.FrameWriter) int { return 0 })
+	_, path, stop := ctlListener(t, ctl, nil, true)
+	defer stop()
+
+	conn, reader := dialCtl(t, path)
+	file := bytes.Repeat([]byte("f"), 10000)
+	stdin := bytes.Repeat([]byte("s"), 5000)
+	if _, err := io.WriteString(conn, ctlHeader("api", []int{len(file)}, len(stdin))); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	// The ack arrives with no body sent yet.
+	if got := readLine(t, reader, conn); got != "ack 1\n" {
+		t.Fatalf("reply = %q, want ack 1", got)
+	}
+	select {
+	case <-ctl.calls:
+		t.Fatal("sink called before the body arrived")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, err := conn.Write(append(file, stdin...)); err != nil {
+		t.Fatalf("write body: %v", err)
+	}
+	call := <-ctl.calls
+	if len(call.req.Files) != 1 || !bytes.Equal(call.req.Files[0], file) || !bytes.Equal(call.req.Stdin, stdin) {
+		t.Fatalf("body = %d files, stdin %d bytes", len(call.req.Files), len(call.req.Stdin))
+	}
+	if got := readAll(t, reader, conn); got != "x 0\n" {
+		t.Fatalf("frames = %q", got)
+	}
+}
+
+func TestListenerCtlRefusals(t *testing.T) {
+	t.Helper()
+	tests := []struct {
+		name   string
+		header string
+		found  bool
+		nilCtl bool
+		want   string
+	}{
+		{name: "session_id", header: `{"cmd":"ctl","v":1,"session":"api","session_id":"row"}` + "\n", found: true, want: "session_id"},
+		{name: "unknown session", header: ctlHeader("api", nil, 0), found: false, want: "no binding for session api"},
+		{name: "too many files", header: ctlHeader("api", []int{1, 1, 1, 1, 1, 1, 1, 1, 1}, 0), found: true, want: "too many files"},
+		{name: "stdin limit", header: ctlHeader("api", nil, 2<<20), found: true, want: "stdin"},
+		{name: "files limit", header: ctlHeader("api", []int{6 << 20, 6 << 20}, 0), found: true, want: "exceed"},
+		{name: "nil sink", header: ctlHeader("api", nil, 0), found: true, nilCtl: true, want: "not available"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Helper()
+			ctl := newFuncCtl(func(context.Context, proxy.Request, proxy.FrameWriter) int { return 0 })
+			var sink CtlSink = ctl
+			if test.nilCtl {
+				sink = nil
+			}
+			_, path, stop := ctlListener(t, sink, nil, test.found)
+			defer stop()
+
+			conn, reader := dialCtl(t, path)
+			if _, err := io.WriteString(conn, test.header); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			got := readAll(t, reader, conn)
+			if strings.HasPrefix(got, "ack") || !strings.Contains(got, test.want) || !strings.HasSuffix(got, "x 1\n") {
+				t.Fatalf("reply = %q, want a refusal containing %q and no ack", got, test.want)
+			}
+			if len(ctl.calls) != 0 {
+				t.Fatal("sink called for a refused call")
+			}
+		})
+	}
+}
+
+func TestListenerCtlShortBodyHitsDeadline(t *testing.T) {
+	t.Helper()
+	ctl := newFuncCtl(func(context.Context, proxy.Request, proxy.FrameWriter) int { return 0 })
+	listener, path, stop := ctlListener(t, ctl, nil, true)
+	listener.bodyTimeout = 150 * time.Millisecond
+	defer stop()
+
+	conn, reader := dialCtl(t, path)
+	if _, err := io.WriteString(conn, ctlHeader("api", nil, 10)+"short"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := readAll(t, reader, conn)
+	if !strings.HasPrefix(got, "ack 1\n") || !strings.Contains(got, "read stdin") || !strings.HasSuffix(got, "x 1\n") {
+		t.Fatalf("reply = %q, want ack, a stdin read error and x 1", got)
+	}
+	if len(ctl.calls) != 0 {
+		t.Fatal("sink called for a short body")
+	}
+}
+
+func TestListenerCtlClientEOFCancelsRequest(t *testing.T) {
+	t.Helper()
+	canceled := make(chan struct{})
+	ctl := newFuncCtl(func(ctx context.Context, _ proxy.Request, _ proxy.FrameWriter) int {
+		<-ctx.Done()
+		close(canceled)
+		return 1
+	})
+	_, path, stop := ctlListener(t, ctl, nil, true)
+	defer stop()
+
+	conn, reader := dialCtl(t, path)
+	if _, err := io.WriteString(conn, ctlHeader("api", nil, 0)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	readLine(t, reader, conn)
+	<-ctl.calls
+	_ = conn.Close()
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request context was not canceled by client EOF")
+	}
+}
+
+func TestListenerServeReturnsWhileSinkBlocks(t *testing.T) {
+	t.Helper()
+	ctl := newFuncCtl(func(ctx context.Context, _ proxy.Request, _ proxy.FrameWriter) int {
+		<-ctx.Done()
+		return 1
+	})
+	_, path, stop := ctlListener(t, ctl, nil, true)
+
+	conn, reader := dialCtl(t, path)
+	if _, err := io.WriteString(conn, ctlHeader("api", nil, 0)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	readLine(t, reader, conn)
+	<-ctl.calls
+	stop() // fails the test if Serve does not return within 2 s
+}
+
+func TestListenerCtlMarksAlive(t *testing.T) {
+	t.Helper()
+	liveness := &recordingLiveness{calls: make(chan struct{}, 2)}
+	ctl := newFuncCtl(func(context.Context, proxy.Request, proxy.FrameWriter) int { return 0 })
+	listener, path, stop := ctlListener(t, ctl, liveness, true)
+	defer stop()
+
+	conn, reader := dialCtl(t, path)
+	if _, err := io.WriteString(conn, ctlHeader("api", nil, 0)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	readAll(t, reader, conn)
+	select {
+	case <-liveness.calls:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MarkAlive was not called for a ctl call")
+	}
+	if listener.LastEvent().IsZero() {
+		t.Fatal("LastEvent() is zero after a ctl call")
+	}
 }

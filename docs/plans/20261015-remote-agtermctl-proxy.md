@@ -658,18 +658,18 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   `internal/receiver/listener_test.go`, `internal/receiver/mocks/dependency_mock.go` (generated),
   `internal/daemon/daemon.go` (the `NewListener` call only)
 
-- [ ] `proxy.Header` (decoded; `session_id` refused; limits) is separate from `proxy.Request`
+- [x] `proxy.Header` (decoded; `session_id` refused; limits) is separate from `proxy.Request`
       (filled by the listener after resolution: caller binding, files, stdin). Add a frame writer
       that is safe for concurrent stdout and stderr.
-- [ ] `CtlSink` interface (`Ctl(ctx, proxy.Request, proxy.FrameWriter) int`) in `dependency.go`.
+- [x] `CtlSink` interface (`Ctl(ctx, proxy.Request, proxy.FrameWriter) int`) in `dependency.go`.
       `NewListener` takes it; with a nil sink a call gets a refusal.
-- [ ] `serveConn`:
+- [x] `serveConn`:
   - a `cmd: ctl` line switches to proxy mode
   - resolve the binding (a miss is refused), then `ack 1`
   - read the body under the deadline
   - an EOF watcher cancels the request ctx (derived from the Serve ctx)
   - call the sink, write `x`, close
-- [ ] tests:
+- [x] tests:
   - status lines, then a ctl header, on one connection
   - ack before body
   - a body larger than 4096 bytes after the ack

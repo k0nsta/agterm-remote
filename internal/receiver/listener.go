@@ -3,6 +3,7 @@ package receiver
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,10 +15,14 @@ import (
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/proxy"
 	"github.com/k0nsta/agterm-remote/internal/unixsock"
 )
 
 const maxEventLine = 64 << 10
+
+// defaultCtlBodyTimeout bounds reading a ctl call's body after the ack.
+const defaultCtlBodyTimeout = 60 * time.Second
 
 // Listener receives events for one remote host. Each host has its own socket
 // because the forwarded socket itself supplies the host identity.
@@ -33,22 +38,27 @@ type Listener struct {
 	sink     StatusSink
 	resolver Resolver
 	liveness Liveness
+	ctl      CtlSink
 
-	lastEvent atomic.Int64
-	mu        sync.Mutex
-	ln        net.Listener
-	conns     map[net.Conn]struct{}
+	bodyTimeout time.Duration
+	lastEvent   atomic.Int64
+	mu          sync.Mutex
+	ln          net.Listener
+	conns       map[net.Conn]struct{}
 }
 
 // NewListener constructs a listener for host at dirs.Recv(hostKey).
-func NewListener(host, hostKey string, dirs paths.Dirs, sink StatusSink, resolver Resolver, liveness Liveness) *Listener {
+func NewListener(host, hostKey string, dirs paths.Dirs, sink StatusSink, resolver Resolver, liveness Liveness, ctl CtlSink) *Listener {
 	return &Listener{
 		host:     host,
 		path:     dirs.Recv(hostKey),
 		sink:     sink,
 		resolver: resolver,
 		liveness: liveness,
-		conns:    make(map[net.Conn]struct{}),
+		ctl:      ctl,
+
+		bodyTimeout: defaultCtlBodyTimeout,
+		conns:       make(map[net.Conn]struct{}),
 	}
 }
 
@@ -163,6 +173,11 @@ func (l *Listener) serveConn(ctx context.Context, conn net.Conn) {
 			continue
 		}
 
+		if isCtl(line) {
+			l.serveCtl(ctx, conn, reader, line)
+			return
+		}
+
 		event, decodeErr := Decode(l.host, line)
 		if decodeErr != nil {
 			log.Printf("warning: receiver event from %s: %v", l.host, decodeErr)
@@ -174,6 +189,86 @@ func (l *Listener) serveConn(ctx context.Context, conn net.Conn) {
 		}
 		l.route(ctx, event)
 	}
+}
+
+// isCtl reports whether line is a proxy call header. Status lines never are,
+// so they keep their own decode path.
+func isCtl(line []byte) bool {
+	var head struct {
+		Cmd string `json:"cmd"`
+	}
+	return json.Unmarshal(line, &head) == nil && head.Cmd == "ctl"
+}
+
+// serveCtl handles one proxy call, the last thing on its connection: validate
+// the header, resolve the caller, ack, read the body, run the sink, answer
+// with the exit frame. Refusals before the ack carry no ack, so a client can
+// tell them from an accepted call.
+func (l *Listener) serveCtl(ctx context.Context, conn net.Conn, reader *bufio.Reader, line []byte) {
+	frames := proxy.NewFrames(conn)
+	refuse := func(reason string) {
+		if err := frames.Refuse(reason); err != nil && ctx.Err() == nil {
+			log.Printf("warning: receiver ctl refusal to %s: %v", l.host, err)
+		}
+	}
+
+	header, err := proxy.DecodeHeader(line)
+	if err != nil {
+		refuse(err.Error())
+		return
+	}
+	l.lastEvent.Store(time.Now().UnixNano())
+	if l.liveness != nil {
+		l.liveness.MarkAlive()
+	}
+	if l.ctl == nil {
+		refuse("agtermctl proxy is not available")
+		return
+	}
+	if l.resolver == nil {
+		refuse("no binding for session " + header.Session)
+		return
+	}
+	binding, ok := l.resolver.ByHostName(l.host, header.Session)
+	if !ok {
+		refuse("no binding for session " + header.Session)
+		return
+	}
+	req := header.Request(l.host, binding)
+
+	if _, err := io.WriteString(conn, "ack 1\n"); err != nil {
+		return
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(l.bodyTimeout)); err != nil {
+		return
+	}
+	req.Files, req.Stdin, err = proxy.ReadBody(reader, header)
+	if err != nil {
+		refuse(err.Error())
+		return
+	}
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		return
+	}
+
+	// After the body the client sends nothing, so any read result means it is
+	// gone (or broke the protocol): cancel the call.
+	reqCtx, cancel := context.WithCancel(ctx)
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		var one [1]byte
+		_, _ = reader.Read(one[:])
+		cancel()
+	}()
+	code := l.ctl.Ctl(reqCtx, req, frames)
+	cancel()
+	if err := frames.Exit(code); err != nil && ctx.Err() == nil && reqCtx.Err() == nil {
+		log.Printf("warning: receiver ctl exit to %s: %v", l.host, err)
+	}
+	// Closing unblocks the watcher; removeConn closing again is harmless.
+	_ = conn.Close()
+	<-watcherDone
 }
 
 func (l *Listener) route(ctx context.Context, event Event) {
