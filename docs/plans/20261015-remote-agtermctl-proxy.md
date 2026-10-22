@@ -99,6 +99,10 @@ Decided by the user (not open):
   `Host`, `Name`. A split row can have one pane bound to a host and a local shell in the other.
 - **Remote install**: `internal/remote/install.go:15` (`remoteScriptWrite`). Doctor facts come
   from `internal/remote/probe.go` and `testdata/probe.txt`.
+- **agterm versions**: agr supports agterm from 0.25.0 (`internal/agterm/client.go:22`,
+  `Client.Version`, `VersionLess`). The proxy needs 0.36.0: on an older agterm the daemon
+  refuses every `ctl` call with `agtermctl (via agr): needs agterm 0.36.0 (found <v>)`, and
+  everything else in agr keeps working.
 - **agtermctl 0.36.0 facts the design relies on**:
   - every leaf takes `--window` and `--socket`, and options parse as `--opt value` or
     `--opt=value`
@@ -128,8 +132,6 @@ Decided by the user (not open):
 - complete each task fully before moving to the next; small, focused changes
 - **CRITICAL: every task MUST include new/updated tests**, success and error paths
 - **CRITICAL: all tests must pass before starting next task** (`make check`)
-- **final gate**: `make verify` (Task 9) = `make check` plus a fresh race run, linux vet, the
-  darwin/amd64 release build, `bin/agr --version` and `goreleaser check`
 - **CRITICAL: update this plan file when scope changes during implementation**
 - **default deny**: a leaf or option that isn't in the allowlist is refused
 - status events keep working exactly as before. An old daemon, an old remote, a missing
@@ -153,7 +155,8 @@ Decided by the user (not open):
 - **remote (sh)**: `tests/remote/{tmux,zmx}/proxy_test.sh` run the installed proxy against a
   fake python3 bridge server.
 - Every test-only helper takes `*testing.T` first and calls `t.Helper()`.
-- Real agterm round trips are a Post-Completion manual check on `homelab`.
+- **live**: `tests/live/proxy_live.sh` (Task 9) runs the scriptable round trips against `homelab`
+  and the local agterm; checks that need a click or an agterm restart are Post-Completion.
 
 ## Progress Tracking
 
@@ -291,8 +294,11 @@ Refused, with the reason named: `pick`, `ask`, `dashboard`, `quick`, `workspace`
   - A blocking call removes its directory when agtermctl returns.
   - A non-blocking `--html` open keeps it, so reloads still work; a sweep removes directories
     older than 24 h, and daemon start clears the rest.
-- **`<agr>`** is the stable absolute path `agr setup` already writes (the brew symlink, e.g.
-  `/opt/homebrew/bin/agr`, never a Cellar path).
+- **`<agr>`** is the stable absolute path from a new resolver, `agrpath.Stable()`: when
+  `os.Executable()` is inside a Homebrew Cellar, it is the `<brew prefix>/bin/agr` symlink if
+  that resolves to the same binary, else `os.Executable()`. Today `cmd/agr/wire.go` passes
+  `os.Executable()` to setup and the pane hooks; they switch to the resolver too, so a
+  `brew upgrade` no longer leaves hooks pointing at a removed Cellar path.
 - **Quoting has two layers**, both specified and tested:
   1. the shell line agterm runs **on the Mac** (`--command` / overlay COMMAND); every embedded
      value is single-quoted with a Go helper (`'` → `'\''`)
@@ -308,9 +314,11 @@ Refused, with the reason named: `pick`, `ask`, `dashboard`, `quick`, `workspace`
     against `Remote.Sessions(host)` so it never reattaches to an existing session (which would
     skip `C`).
   - After agtermctl prints the new row id, the daemon **pre-binds** it: `{Row: id, PaneID:
-    <primary pane id from tree>, Pane: left, Host: host, Name: gen}`. A following `restore` or
-    `type` from the host is then authorised immediately. `agr open` re-binds the same pane when
-    it starts.
+    <primary pane id from tree>, Pane: left, Host: host, Name: gen}`. `agr open` re-binds the
+    same pane when it starts.
+  - The attached check still applies: until `agr open` is the new pane's foreground, a `type`
+    or `restore` into it is refused with `the new row is not attached yet; retry`, and the
+    caller retries.
 - **`session overlay open COMMAND…`** becomes `session overlay open "<agr> run <host> --cwd
   <cwd> -- COMMAND…"`. `<cwd>` is the header's `cwd` (the host's `$PWD`), not agterm's Mac
   default.
@@ -415,9 +423,13 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
   own environment at open time) and `AGTERM_SOCKET=agr-proxy`. Values are checked as UUIDs or
   tokens.
   - tmux: `new-session -e` on create, `set-environment` on re-attach (spike)
+  - a re-attach refreshes the environment for **future** processes only. A running process keeps
+    its old ids, and the self-id mapping routes them to the current binding. A process started
+    before this release has no `AGTERM_*` at all and needs a restart (README)
   - zmx: per the spike
 - **Remote-version gating**: `--env` and `--command` are sent only when `HostInfo.AgrVersion`
-  is at least this release.
+  is at least **1.3.0**, or is `dev` (a local build, so the run's tests and the live checks
+  pass).
   - Older host: no env, and `--command` is refused with `run agr install <host>`.
   - Tests cover both cases.
 - **`agr run <host> [--cwd D] -- argv…`** (new Mac verb, `internal/cli/run.go`): a one-shot
@@ -494,7 +506,8 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
 
 ### Task 1: Spike — environment, attachment signal, and agtermctl behaviour
 
-Use throwaway rows only, local and on `homelab`; record results here.
+Use throwaway rows only, local and on `homelab` (`ssh homelab`, the default agterm socket, no
+socket override); record results here.
 
 **Files:**
 - Modify: this plan (findings)
@@ -533,7 +546,8 @@ Use throwaway rows only, local and on `homelab`; record results here.
   `internal/bindings/store_test.go`, `internal/cli/dependency.go`,
   `internal/cli/mocks/dependency_mock.go` (generated), `internal/agterm/ctl.go` (a tree read
   with panes, bindings and foregrounds), `tests/remote/tmux/*`, `tests/remote/zmx/*`
-- Create: `internal/cli/run.go`, `internal/cli/run_test.go`, `internal/proxy/quote.go`,
+- Create: `internal/agrpath/agrpath.go`, `internal/agrpath/agrpath_test.go`,
+  `internal/cli/run.go`, `internal/cli/run_test.go`, `internal/proxy/quote.go`,
   `internal/proxy/quote_test.go`
 
 - [ ] `agr open … [--command CMD]`, and `attach --env/--command` behind the remote-version gate
@@ -545,6 +559,9 @@ Use throwaway rows only, local and on `homelab`; record results here.
 - [ ] `agr open … --orchestrator <row>:<pane>`: validated against `tree --json` (live, not
       host-bound) and stored as an `orchestrator` grant
 - [ ] `agr run <host> [--cwd D] -- argv…`
+- [ ] `internal/agrpath`: `Stable()` per Technical Details > Rewrites; `cmd/agr/wire.go` passes
+      it to setup and the pane hooks instead of `os.Executable()`
+- [ ] the version gate: at least 1.3.0, or `dev`
 - [ ] the Mac-side shell quoting helper (`internal/proxy/quote.go`)
 - [ ] tests (Go):
   - argv for `--command`, env pairs, invalid values
@@ -554,6 +571,9 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - a re-bind of the same host and name keeps the grants; a different name doesn't
   - `AddGrant` on a binding that disappeared is an error, not a new entry
   - `agr run` argv
+  - `agrpath.Stable`: a Cellar path with a matching brew symlink, a Cellar path with a symlink to
+    another binary, a non-brew path; setup and hooks get the stable path
+  - the gate: 1.2.0 refused, 1.3.0 and `dev` pass
   - quoting with `'`, `"`, `;`, `$()`, a backtick and a newline
 - [ ] tests (remote): a new tmux session sees the env and runs CMD; re-attach refreshes the env
       and doesn't re-run CMD; the same for zmx
@@ -646,6 +666,8 @@ Use throwaway rows only, local and on `homelab`; record results here.
       COMMAND with `cwd`, `restore`, URL warning, `<agr>` stable path
 - [ ] the agterm streaming call (stdin, stdout, stderr; kill on ctx), exposed through a daemon
       interface
+- [ ] the daemon checks the agterm version once per host start (`Client.Version`); below
+      0.36.0 the sink refuses every call with the version message
 - [ ] the daemon implements `CtlSink`:
   - Authorize → Rewrite → run
   - cancel hook on a detached 2 s ctx
@@ -667,7 +689,10 @@ Use throwaway rows only, local and on `homelab`; record results here.
 - [ ] wire it in `cmd/agr/wire.go` with compile-time interface assertions
 - [ ] tests:
   - each rewrite's exact argv and Mac shell string
-  - pre-bind after `session new`, then a following `restore` authorised
+  - pre-bind after `session new`: a `restore` before `agr open` is the foreground is refused
+    with the retry message, and authorised once it is
+  - agterm older than 0.36.0: every `ctl` call refused with the version message; status events
+    unaffected
   - temp files: content, 0600; removed for blocking calls and kept for non-blocking ones
   - streaming order of stdout and stderr; exit passthrough; `-1` becomes 1
   - cancel kills the process and runs the overlay-close hook on a live ctx
@@ -745,41 +770,35 @@ Use throwaway rows only, local and on `homelab`; record results here.
       dropped; `session` events unchanged
 - [ ] `make check` must pass before Task 9
 
-### Task 9: Verify acceptance criteria
+### Task 9: Live round-trip script
+
+**Files:**
+- Create: `tests/live/proxy_live.sh`, `tests/live/README.md`
+
+A script, not part of `make check` (it needs `homelab` and the running agterm), that runs every
+check below with throwaway rows it creates and always cleans up (a trap closes its rows and
+kills its sessions), and exits non-zero on the first failure, naming it. Before it starts, it
+runs `agr install homelab` with the freshly built `bin/agr` and starts a throwaway daemon for
+the test, or exits 2 with `homelab or agterm unreachable` when either can't be reached.
 
 - [ ] from a throwaway remote row on `homelab`, with unchanged tools:
-  - a `decide.py` panel round trip; `show-image.sh`
+  - an overlay `--html --js --block` round trip, answered from the Mac with
+    `session overlay submit`; the outcome JSON reaches the host
   - `session text` / `session type` on a sibling row of the same host
-  - `session type` refused on a local row, on the local split pane of an owned row, and on a
-    detached pane
-  - `session new --command 'claude …'` gives a bound homelab row running it
-  - `session restore` on that row reattaches after an agterm restart
-  - a worker opened with `--orchestrator` types into the local orchestrator pane while Claude
-    runs there, and is refused once it is at a shell prompt
-  - handoff: `session type` into a local Claude row opens the dialog on that row; **Allow
-    once** types it, the next call asks again; **Allow for this pair** types it and the next
-    call goes straight through; **Deny** refuses and a retry within 60 s gets no dialog
-  - Ctrl-C on the host during the dialog closes it and stores nothing; no answer for 120 s
-    closes it
-  - a target row in a hidden workspace: where the dialog appears
-  - a host-bound target row is refused with no dialog
-  - a second request from another session on the same host while a dialog is open is refused
-- [ ] the skill: on the Mac, "spawn a worker on homelab for X" makes Claude wrap the spawn in
-      `agr open … --command`; on the host, "hand this to <local row>" makes the remote Claude
-      call `session type` and the dialog appears
-- [ ] status events unchanged; refusal, old-daemon, old-remote and bridge messages as
-      documented; `agr down` returns within `teardownTimeout` during a blocking call
-- [ ] add a `verify` target to `Makefile` (and to `.PHONY`), the final gate before release:
-  ```make
-  verify: lint shellcheck check-remote
-  	go test -race -count=1 ./...
-  	GOOS=linux GOARCH=amd64 go vet ./...
-  	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agr
-  	$(MAKE) build
-  	bin/agr --version
-  	goreleaser check
-  ```
-- [ ] `make verify` green
+  - `session type` refused on a local row with no grant, on the local split pane of an owned
+    row, and on a detached pane
+  - `session new --command '<marker program>'` gives a bound homelab row running it; a `type`
+    into it before it is attached gets the retry message
+  - a worker opened with `--orchestrator` types into a local throwaway pane running a stand-in
+    program named `claude`, and is refused once that pane is at a shell prompt
+- [ ] the consent path, without a click: a `session type` into a local `claude` pane opens a
+      dialog (`askPending` in `tree --json`); the host's Ctrl-C closes it and stores nothing; a
+      second request from another session on the same host while it is open is refused; a
+      host-bound target row is refused with no dialog
+- [ ] the bridge: status events unchanged; refusal, old-daemon and bridge-down messages as
+      documented; `agr down homelab` returns within `teardownTimeout` during a blocking call
+- [ ] `tests/live/README.md`: what it needs and how to run it
+- [ ] `make check` must pass before Task 10
 
 ### Task 10: [Final] Update documentation
 
@@ -791,8 +810,10 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - handoff with consent, from the user's side (the dialog and its three buttons)
   - the `agr` skill: where it is installed, `agr skill`, and how a user's own skills compose
     with it (wrap the spawned program in `agr open <host> <name> --command`)
-- [ ] README "Requirements": python3 on the host; Mac daemon and remote both at least this
-      release
+- [ ] README "Requirements": python3 on the host; Mac daemon and remote both at least 1.3.0;
+      agterm 0.36.0 for the proxy (older agterm keeps everything else)
+- [ ] README "Upgrading": re-open rows to get the environment; agents started before the upgrade
+      need a restart to see agterm
 - [ ] README "Failure modes": the proxy messages
 - [ ] README "Security":
   - the per-pane scoped policy and the attached check
@@ -805,7 +826,14 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - status `session_id` events are scoped to bound rows; cookbook senders on rows not opened with
     `agr open` are dropped
   - the proxy is skipped on hosts that have a real agtermctl
-- [ ] move this plan to `docs/plans/completed/`
+
+## Acceptance Criteria
+
+- Run: `make check`
+- Run: `go test -race -count=1 ./... && GOOS=linux GOARCH=amd64 go vet ./... && GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agr && make build && bin/agr --version && goreleaser check`
+- Run: `tests/live/proxy_live.sh`
+- Run: `bin/agr skill | grep -q 'agr-skill'`
+- Run: `grep -q 'Remote agterm control' README.md && grep -q 'agterm 0.36.0' README.md`
 
 ## Post-Completion
 
@@ -825,8 +853,17 @@ Use throwaway rows only, local and on `homelab`; record results here.
   - `teardown-agent --host <host>`: `agr end <row>` (the user confirms), then the remote
     worktree and branch removed over ssh
   - trigger phrases in both skills' descriptions: "on <host>", "from <host>"
-- Manual check on `homelab`: the Task 9 round trips with the real agterm; Ctrl-C during a
-  `--block` overlay closes it.
+- **Checks that need a click or a restart** (the live script can't do them):
+  - consent: **Allow once** types it and the next call asks again; **Allow homelab here** types
+    it and the next call goes straight through; **Deny** refuses and a retry within 60 s gets no
+    dialog; no answer for 120 s closes it; a dialog on a row in a hidden workspace
+  - `session restore` on a host-created row reattaches after an agterm restart
+  - a `decide.py` panel and `show-image.sh` from a remote Claude
+  - the skill: on the Mac, "spawn a worker on homelab for X" wraps the spawn in `agr open …
+    --command`; on the host, "hand this to <local row>" calls `session type` and the dialog
+    appears
+  - Ctrl-C during a `--block` overlay closes it
+- Move this plan to `docs/plans/completed/` once the run has ended.
 - Restart the Mac `agr daemon` after upgrading. Release notes: `brew upgrade agr`, restart the
   daemon, `agr install <host>`, re-open rows to pick up the environment; a breaking note for
   cookbook-format `session_id` status senders.
