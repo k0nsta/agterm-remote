@@ -180,7 +180,8 @@ tmux_attach() {
 $attach_env
 EOF
 		# CMD runs once, in the new session only, and leaves a login shell.
-		[ -z "$attach_command" ] || set -- "$@" "$attach_command; exec \"\${SHELL:-/bin/sh}\" -l"
+		[ -z "$attach_command" ] || set -- "$@" "$attach_command
+exec \"\${SHELL:-/bin/sh}\" -l"
 		tmux "$@"
 	else
 		# A re-attach reaches new windows and panes only; the running shell
@@ -486,7 +487,8 @@ zmx_attach() {
 	fi
 	set -- zmx attach "$@" "$n"
 	if [ "$fresh" = 1 ] && [ -n "$attach_command" ]; then
-		set -- "$@" sh -c "$attach_command; exec \"\${SHELL:-/bin/sh}\" -l"
+		set -- "$@" sh -c "$attach_command
+exec \"\${SHELL:-/bin/sh}\" -l"
 	fi
 	if [ "$fresh" = 1 ]; then
 		while IFS= read -r pair; do

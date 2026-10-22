@@ -146,6 +146,14 @@ $2"; else labels=$2; fi
 		printf 'attach-cwd %s %s\n' "$name" "$(pwd)" >> "$calls"
 		printf 'attach-env %s id=%s enabled=%s\n' "$name" "${AGTERM_SESSION_ID-<unset>}" "${AGTERM_ENABLED-<unset>}" >> "$calls"
 		[ "$#" -eq 0 ] || printf 'attach-cmd %s %s\n' "$name" "$*" >> "$calls"
+		# A wrapper script that does not parse would never start CMD or the shell.
+		if [ "${1-}" = sh ] && [ "${2-}" = -c ]; then
+			if sh -n -c "$3" 2>/dev/null; then
+				printf 'attach-syntax %s ok\n' "$name" >> "$calls"
+			else
+				printf 'attach-syntax %s bad\n' "$name" >> "$calls"
+			fi
+		fi
 		if [ -n "$labels" ]; then
 			while IFS= read -r label; do
 				[ -n "$label" ] || continue

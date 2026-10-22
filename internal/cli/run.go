@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -15,11 +14,9 @@ import (
 
 // RunDependencies are the collaborators of Run.
 type RunDependencies struct {
-	TTY      remote.TTY
-	HostInfo HostInfoReader
-	MoshPath func() string
-	Out      io.Writer
-	Reset    func(io.Writer)
+	TTY   remote.TTY
+	Out   io.Writer
+	Reset func(io.Writer)
 }
 
 // runScript is run by the remote's sh with the directory as $1 and the program
@@ -44,19 +41,8 @@ func Run(ctx context.Context, host, dir string, argv []string, deps RunDependenc
 	if deps.TTY == nil {
 		return errors.New("interactive SSH runner is unavailable")
 	}
-	mosh := false
-	if deps.HostInfo != nil {
-		info, err := deps.HostInfo(host)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("read host info: %w", err)
-		}
-		mosh = err == nil && info.Mosh && localMoshPath(OpenDependencies{MoshPath: deps.MoshPath}) != ""
-	}
 	remoteArgv := append([]string{"sh", "-c", runScript, "sh", dir}, argv...)
 	command := []string{"ssh", "-t", host, "--", remote.QuoteRemoteCommand(remoteArgv...)}
-	if mosh {
-		command = append([]string{"mosh", host, "--"}, remoteArgv...)
-	}
 	if out := deps.Out; out != nil && isTerminalWriter(out) {
 		reset := deps.Reset
 		if reset == nil {

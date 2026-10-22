@@ -19,7 +19,8 @@ run_agr attach fresh --env AGTERM_SESSION_ID=row-1 --env AGTERM_ENABLED=1 --comm
 calls=$(cat "$ZMX_FAKE_CALLS")
 assert_contains 'attach-env fresh id=row-1 enabled=1' "$calls" 'a new session is created with the env'
 # shellcheck disable=SC2016
-assert_contains 'attach-cmd fresh sh -c make dev; exec "${SHELL:-/bin/sh}" -l' "$calls" 'a new session runs CMD, then a login shell'
+assert_contains 'attach-cmd fresh sh -c make dev
+exec "${SHELL:-/bin/sh}" -l' "$calls" 'a new session runs CMD, then a login shell'
 
 : > "$ZMX_FAKE_CALLS"
 run_agr attach fresh --env AGTERM_SESSION_ID=row-2 --command 'make dev' </dev/null
@@ -42,4 +43,9 @@ export AGR_ZMX_LABELS=0
 run_agr attach plain --env AGTERM_ENABLED=1 --command 'true' </dev/null
 calls=$(cat "$ZMX_FAKE_CALLS")
 assert_contains 'attach-env plain id=<unset> enabled=1' "$calls" 'the unlabelled form carries the env'
-assert_contains 'attach-cmd plain sh -c true;' "$calls" 'the unlabelled form carries CMD'
+assert_contains 'attach-cmd plain sh -c true' "$calls" 'the unlabelled form carries CMD'
+
+# A CMD that already ends in a semicolon must still make a valid wrapper.
+: > "$ZMX_FAKE_CALLS"
+run_agr attach semi --command 'true;' </dev/null
+assert_contains 'attach-syntax semi ok' "$(cat "$ZMX_FAKE_CALLS")" 'a CMD ending in ; still parses'

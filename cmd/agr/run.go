@@ -252,7 +252,7 @@ func runRun(ctx context.Context, app *application, args []string, out, errw io.W
 		return 2
 	}
 	return cli.RunRun(ctx, host, cwd, rest[1:], cli.RunDependencies{
-		TTY: app.tty, HostInfo: app.hostInfo, MoshPath: app.moshPath, Out: out,
+		TTY: app.tty, Out: out,
 	}, errw)
 }
 

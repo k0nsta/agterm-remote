@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
 func runDeps(tty *openTTYFake) RunDependencies {
@@ -41,16 +40,14 @@ func TestRunWithoutCwdPassesAnEmptyDirectory(t *testing.T) {
 	}
 }
 
-func TestRunUsesMoshWhenBothSidesSupportIt(t *testing.T) {
+func TestRunStaysOnSSHEvenWhenMoshIsAvailable(t *testing.T) {
 	t.Helper()
 	tty := &openTTYFake{}
 	deps := runDeps(tty)
-	deps.HostInfo = func(string) (remote.HostInfo, error) { return remote.HostInfo{Mosh: true}, nil }
-	deps.MoshPath = func() string { return "/usr/local/bin/mosh" }
 	if err := Run(context.Background(), "host", "/srv", []string{"make", "dev"}, deps); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	want := []string{"mosh", "host", "--", "sh", "-c", runScript, "sh", "/srv", "make", "dev"}
+	want := []string{"ssh", "-t", "host", "--", `'sh' '-c' '` + runScript + `' 'sh' '/srv' 'make' 'dev'`}
 	if !reflect.DeepEqual(tty.argv, want) {
 		t.Fatalf("argv = %q, want %q", tty.argv, want)
 	}

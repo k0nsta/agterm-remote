@@ -29,23 +29,47 @@ assert_eq 1 "$(grep -c '^ran$' "$marker")" 'a new session runs CMD'
 assert_contains 'id=row-1' "$(cat "$marker")" 'CMD sees the env'
 assert_eq 1 "$(tmux list-panes -t '=envy' | wc -l | tr -d ' ')" 'CMD leaves a shell pane, not a dead one'
 
+orig_pane=$(tmux list-panes -t '=envy' -F '#{pane_id}' | head -n 1)
+
 # The shell started by CMD keeps its old value after a re-attach, while new
 # windows and panes get the new one.
 run_agr attach envy --env AGTERM_SESSION_ID=row-2 --command "echo ran >> '$marker'" </dev/null >/dev/null 2>&1 || :
 assert_eq AGTERM_SESSION_ID=row-2 "$(pane_env envy AGTERM_SESSION_ID)" 'a re-attach sets the new value'
 assert_eq AGTERM_ENABLED=1 "$(pane_env envy AGTERM_ENABLED)" 'a re-attach leaves pairs it was not given'
 
+wait_for() {
+	i=0
+	while [ "$i" -lt 50 ] && ! grep -q "$1" "$marker"; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+}
+
 tmux new-window -t '=envy' -d "echo \"new=\$AGTERM_SESSION_ID\" >> '$marker'; sleep 5"
-i=0
-while [ "$i" -lt 50 ] && ! grep -q '^new=' "$marker"; do
-	sleep 0.1
-	i=$((i + 1))
-done
+wait_for '^new='
 assert_contains 'new=row-2' "$(cat "$marker")" 'a window created after the re-attach sees the new value'
-assert_not_contains 'id=row-2' "$(cat "$marker")" 'the process already running keeps the old value'
+
+tmux split-window -t "$orig_pane" -d "echo \"split=\$AGTERM_SESSION_ID\" >> '$marker'; sleep 5"
+wait_for '^split='
+assert_contains 'split=row-2' "$(cat "$marker")" 'a pane split after the re-attach sees the new value'
+
+# Ask the shell that was already running before the re-attach what it holds.
+tmux send-keys -t "$orig_pane" "echo \"shell=\$AGTERM_SESSION_ID\" >> '$marker'" Enter
+wait_for '^shell='
+assert_contains 'shell=row-1' "$(cat "$marker")" 'the running shell keeps the old value'
 
 sleep 0.3
 assert_eq 1 "$(grep -c '^ran$' "$marker")" 'a re-attach does not run CMD again'
+
+# A CMD that already ends in a semicolon still leaves a working shell.
+run_agr attach semi --command 'echo semi >> '"'$marker'"';' </dev/null >/dev/null 2>&1 || :
+i=0
+while [ "$i" -lt 50 ] && ! grep -q '^semi$' "$marker"; do
+	sleep 0.1
+	i=$((i + 1))
+done
+assert_contains 'semi' "$(cat "$marker")" 'a CMD ending in ; runs'
+assert_eq 1 "$(tmux list-panes -t '=semi' 2>/dev/null | wc -l | tr -d ' ')" 'a CMD ending in ; leaves a shell pane'
 
 # Values are validated before tmux sees them.
 # shellcheck disable=SC2016
