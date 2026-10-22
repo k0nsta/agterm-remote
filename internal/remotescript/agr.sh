@@ -803,7 +803,6 @@ def main():
             sock.sendall(stdin)
         except OSError:
             pass
-        buf = b""
     else:
         # A refusal before the ack arrives as frames; read them as they are.
         buf = line + b"\n" + buf

@@ -81,6 +81,13 @@ assert_eq 1 "$CTL_RC" 'a refusal exits 1'
 assert_contains 'agtermctl (via agr): not allowed here' "$(cat "$CTL_DIR/err")" 'refusal text'
 assert_eq '' "$(cat "$CTL_DIR/body")" 'a refused call sends no body'
 
+# Frames that arrive in the same send as the ack are not lost.
+printf 'o 2\nokx 0\n' > "$CTL_DIR/reply"
+printf 'combined' > "$CTL_DIR/mode"
+ctl_call tree
+assert_eq 0 "$CTL_RC" 'ack and reply in one send exits 0'
+assert_eq ok "$(cat "$CTL_DIR/out")" 'frames after the ack are kept'
+
 # The ack, then the connection ends without an exit frame.
 printf 'ackeof' > "$CTL_DIR/mode"
 ctl_call tree

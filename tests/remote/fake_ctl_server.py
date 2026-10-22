@@ -10,7 +10,7 @@ DIR/mode and the reply bytes from DIR/reply, and leaves in DIR:
   body    the bytes received after the header
   conns   the number of connections so far
 Modes: normal (ack, body, reply), noack (silent), ackeof (ack, body, close),
-refuse (reply without an ack), hang (ack, then wait for the client to go).
+refuse (reply without an ack), combined (ack and reply in one send), hang (ack, then wait for the client to go).
 """
 import json
 import os
@@ -88,6 +88,9 @@ def serve(conn, count):
         write_bytes("body", buf + drain(conn, 0.5))
         return
 
+    if mode == "combined":
+        conn.sendall(b"ack 1\n" + reply)
+        return
     buf += drain(conn, 0.3)
     write_bytes("early", str(len(buf)).encode())
     conn.sendall(b"ack 1\n")
