@@ -441,6 +441,8 @@ check_sibling() {
 	rr "$R1" "agtermctl session text --target $R2"
 	[ "$RR_RC" = 0 ] || fail "text: exit $RR_RC: $RR_OUT"
 	assert_contains 'agrlive-sib' "$RR_OUT"
+	# the typed text sits at R2's prompt: clear it for later requests from R2
+	ctrl_c "$R2"
 }
 
 check_type_refusals() {
@@ -523,11 +525,13 @@ check_orchestrator() {
 check_consent() {
 	step 'consent dialog: opens, the host Ctrl-C closes it, nothing is stored'
 	cl1=$(claude_row "${PREFIX}cl1")
+	grants_before=$(grep -o consent "$CACHE_DIR/bindings.json" 2>/dev/null | wc -l)
 	rr_start "$R1" '' "printf %s agrlive-consent | agtermctl session type --target $cl1 --stdin"
 	wait_for 'the consent dialog' 20 ask_is "$cl1" yes
 	ctrl_c "$R1"
 	wait_for 'the dialog to close' 20 ask_is "$cl1" no
-	if grep -q consent "$CACHE_DIR/bindings.json" 2>/dev/null; then
+	grants_after=$(grep -o consent "$CACHE_DIR/bindings.json" 2>/dev/null | wc -l)
+	if [ "$grants_after" -gt "$grants_before" ]; then
 		fail 'a cancelled dialog stored a consent grant'
 	fi
 	if screen_has "$cl1" agrlive-consent; then
@@ -585,7 +589,7 @@ sleep 1
 AGR_SOCK=$REMOTE_DIR/old.sock agtermctl version
 rc=\$?
 kill \$srv
-exit \$rc
+(exit \$rc)
 EOF
 	)
 	rr "$R1" "$script" 30
