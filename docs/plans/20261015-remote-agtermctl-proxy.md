@@ -847,10 +847,10 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   `internal/receiver/listener_test.go`,
   `internal/receiver/mocks/dependency_mock.go` (generated)
 
-- [ ] the resolver interface in `internal/receiver/dependency.go` gains `ForRow(row)`
-- [ ] `route`: a `session_id` event is applied only when `ForRow(id)` has a binding for
+- [x] the resolver interface in `internal/receiver/dependency.go` gains `ForRow(row)`
+- [x] `route`: a `session_id` event is applied only when `ForRow(id)` has a binding for
       `l.host`; otherwise log `status for unbound row <id> from <host> dropped`
-- [ ] tests: a bound row is applied; an unbound row is dropped; a row bound to another host is
+- [x] tests: a bound row is applied; an unbound row is dropped; a row bound to another host is
       dropped; `session` events unchanged
 
 ### Task 8: Live round-trip script

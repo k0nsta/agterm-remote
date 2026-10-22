@@ -287,6 +287,9 @@ func (l *Listener) route(ctx context.Context, event Event) {
 		target = binding.Row
 		args.Pane = binding.Pane
 		args.PaneID = binding.PaneID
+	} else if !l.rowBound(target) {
+		log.Printf("status for unbound row %s from %s dropped", target, l.host)
+		return
 	}
 	if l.sink == nil {
 		log.Printf("warning: no status sink for receiver event target %q", target)
@@ -295,6 +298,20 @@ func (l *Listener) route(ctx context.Context, event Event) {
 	if err := l.sink.Status(ctx, target, args); err != nil {
 		log.Printf("warning: status push for receiver event target %q: %v", target, err)
 	}
+}
+
+// rowBound reports whether row has a binding for this listener's host, so a
+// host cannot push status onto a row it does not own.
+func (l *Listener) rowBound(row string) bool {
+	if l.resolver == nil {
+		return false
+	}
+	for _, binding := range l.resolver.ForRow(row) {
+		if binding.Host == l.host {
+			return true
+		}
+	}
+	return false
 }
 
 func statusArgs(event Event) agterm.StatusArgs {

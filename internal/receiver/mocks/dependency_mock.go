@@ -96,6 +96,20 @@ func (mr *MockResolverMockRecorder) ByHostName(host, name any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ByHostName", reflect.TypeOf((*MockResolver)(nil).ByHostName), host, name)
 }
 
+// ForRow mocks base method.
+func (m *MockResolver) ForRow(row string) []bindings.Binding {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ForRow", row)
+	ret0, _ := ret[0].([]bindings.Binding)
+	return ret0
+}
+
+// ForRow indicates an expected call of ForRow.
+func (mr *MockResolverMockRecorder) ForRow(row any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForRow", reflect.TypeOf((*MockResolver)(nil).ForRow), row)
+}
+
 // MockLiveness is a mock of Liveness interface.
 type MockLiveness struct {
 	ctrl     *gomock.Controller

@@ -40,6 +40,11 @@ type recordingResolver struct {
 	called  int
 	binding bindings.Binding
 	found   bool
+	rows    []bindings.Binding
+}
+
+func (r *recordingResolver) ForRow(_ string) []bindings.Binding {
+	return r.rows
 }
 
 func (r *recordingResolver) ByHostName(_ string, _ string) (bindings.Binding, bool) {
@@ -110,7 +115,7 @@ func TestListenerRoutesCookbookEventWithoutBindingLookup(t *testing.T) {
 	t.Helper()
 	dirs := pathstest.Dirs(t)
 	sink := &recordingSink{calls: make(chan statusCall, 1)}
-	resolver := &recordingResolver{}
+	resolver := &recordingResolver{rows: []bindings.Binding{{Row: "row-42", Host: "host-a"}}}
 	liveness := &recordingLiveness{calls: make(chan struct{}, 1)}
 	listener := NewListener("host-a", "host-a", dirs, sink, resolver, liveness, nil)
 	stop := startListener(t, listener, dirs.Recv("host-a"))
@@ -131,6 +136,33 @@ func TestListenerRoutesCookbookEventWithoutBindingLookup(t *testing.T) {
 	case <-liveness.calls:
 	case <-time.After(2 * time.Second):
 		t.Fatal("MarkAlive was not called for cookbook event")
+	}
+}
+
+func TestListenerDropsSessionIDEventsForUnboundRows(t *testing.T) {
+	t.Helper()
+	cases := map[string][]bindings.Binding{
+		"unbound":    nil,
+		"other host": {{Row: "row-42", Host: "host-b"}},
+	}
+	for name, rows := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Helper()
+			dirs := pathstest.Dirs(t)
+			sink := &recordingSink{calls: make(chan statusCall, 2)}
+			resolver := &recordingResolver{rows: rows, binding: bindings.Binding{Row: "row-1"}, found: true}
+			listener := NewListener("host-a", "host-a", dirs, sink, resolver, nil, nil)
+			stop := startListener(t, listener, dirs.Recv("host-a"))
+			defer stop()
+
+			// The session event is the barrier: it arrives after the dropped one.
+			writeConnection(t, dirs.Recv("host-a"),
+				`{"cmd":"session-status","state":"blocked","session_id":"row-42"}`+"\n"+
+					`{"cmd":"session-status","session":"api","state":"active"}`+"\n")
+			if call := receiveCall(t, sink.calls); call.target != "row-1" || call.args.Status != "active" {
+				t.Fatalf("first delivered call = %#v, want only the session event", call)
+			}
+		})
 	}
 }
 
@@ -277,7 +309,7 @@ func TestServeLateExitDoesNotUnlinkSuccessorSocket(t *testing.T) {
 	dirs := pathstest.Dirs(t)
 	path := dirs.Recv("host-a")
 	sink := &blockingSink{entered: make(chan struct{}, 1), release: make(chan struct{})}
-	first := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{}, nil, nil)
+	first := NewListener("host-a", "host-a", dirs, sink, &recordingResolver{rows: []bindings.Binding{{Row: "row-1", Host: "host-a"}}}, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)

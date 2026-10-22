@@ -18,6 +18,7 @@ type StatusSink interface {
 // Resolver finds a binding for a remote host and multiplexer session.
 type Resolver interface {
 	ByHostName(host, name string) (bindings.Binding, bool)
+	ForRow(row string) []bindings.Binding
 }
 
 // Liveness is notified when a syntactically valid event arrives from a host.
