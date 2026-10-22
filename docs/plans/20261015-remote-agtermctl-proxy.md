@@ -876,7 +876,7 @@ the host is fixed at `~/.cache/agr/bridge.sock`):
 5. a SIGKILL skips the trap: `tests/live/README.md` says how to restore by hand (`agr install
    homelab`, then start the daemon)
 
-- [ ] from a throwaway remote row on `homelab`, with unchanged tools:
+- [x] from a throwaway remote row on `homelab`, with unchanged tools:
   - an overlay `--html --js --block` round trip through the shim, answered by the page's own
     `agterm.request('session.overlay.submit', …)` (a test page that submits on load); the
     outcome JSON reaches the host
@@ -890,15 +890,15 @@ the host is fixed at `~/.cache/agr/bridge.sock`):
     into it before it is attached gets the retry message
   - a worker opened with `--orchestrator` types into a local throwaway pane running a stand-in
     program named `claude`, and is refused once that pane is at a shell prompt
-- [ ] the consent path, without a click: a `session type` into a local `claude` pane opens a
+- [x] the consent path, without a click: a `session type` into a local `claude` pane opens a
       dialog (`askPending` in `tree --json`); the host's Ctrl-C closes it and stores nothing; a
       second request from another session on the same host while it is open is refused; a
       host-bound target row is refused with no dialog
-- [ ] the bridge: status events unchanged; refusal, old-daemon and bridge-down messages as
+- [x] the bridge: status events unchanged; refusal, old-daemon and bridge-down messages as
       documented; `agr down homelab` returns within `teardownTimeout` during a blocking call
-- [ ] the trap: a test of its own (`tests/live/restore_test.sh`, run with stand-in `agr`,
+- [x] the trap: a test of its own (`tests/live/restore_test.sh`, run with stand-in `agr`,
       `agtermctl` and `ssh` on PATH) shows each restore step runs, in order, on EXIT and on INT
-- [ ] `tests/live/README.md`: what it needs, how to run it, and how to restore by hand
+- [x] `tests/live/README.md`: what it needs, how to run it, and how to restore by hand
 
 ### Task 9: [Final] Update documentation
 
