@@ -143,9 +143,13 @@ type pageShim struct {
 	mu      sync.Mutex
 	pages   map[string]*page
 	perHost map[string]int
-	ln      net.Listener
-	srv     *http.Server
-	addr    string
+	// released remembers the most recent maxSpentTokens released tokens, so a
+	// replayed POST gets 409 rather than 404.
+	released  map[string]bool
+	spentList []string
+	ln        net.Listener
+	srv       *http.Server
+	addr      string
 }
 
 func newPageShim(live pageLive) *pageShim {
@@ -153,6 +157,7 @@ func newPageShim(live pageLive) *pageShim {
 		live: live, bindWait: pageBindWait,
 		handlers: make(chan struct{}, maxPageHandlers),
 		pages:    make(map[string]*page), perHost: make(map[string]int),
+		released: make(map[string]bool),
 	}
 }
 
@@ -220,6 +225,7 @@ func (s *pageShim) release(p *page) {
 	s.mu.Lock()
 	if _, ok := s.pages[p.token]; ok {
 		delete(s.pages, p.token)
+		s.remember(p.token)
 		if s.perHost[p.host]--; s.perHost[p.host] <= 0 {
 			delete(s.perHost, p.host)
 		}
@@ -259,6 +265,29 @@ func (s *pageShim) lookup(token string) *page {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.pages[token]
+}
+
+// maxSpentTokens bounds the memory of released tokens.
+const maxSpentTokens = 1024
+
+// remember records a released token; s.mu must be held.
+func (s *pageShim) remember(token string) {
+	if s.released == nil {
+		s.released = make(map[string]bool)
+	}
+	s.released[token] = true
+	s.spentList = append(s.spentList, token)
+	if len(s.spentList) > maxSpentTokens {
+		delete(s.released, s.spentList[0])
+		s.spentList = s.spentList[1:]
+	}
+}
+
+// spent reports whether token belonged to a page that was released.
+func (s *pageShim) spent(token string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.released[token]
 }
 
 func (s *pageShim) address() string {
@@ -321,6 +350,11 @@ func (s *pageShim) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p := s.lookup(token)
 	if p == nil {
+		// A replayed POST on a released token changes nothing and is a conflict.
+		if r.Method == http.MethodPost && (action == "submit" || action == "close") && s.spent(token) {
+			http.Error(w, "already finished", http.StatusConflict)
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}

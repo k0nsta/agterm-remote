@@ -314,6 +314,9 @@ func (h *hostCtl) run(ctx context.Context, req proxy.Request, call proxy.Call, f
 	for _, warning := range prepared.Warnings {
 		_, _ = fmt.Fprintf(frames.Stderr(), "agtermctl (via agr): %s\n", warning)
 	}
+	if prepared.NewRow != nil && prepared.NewRow.Release != nil {
+		defer prepared.NewRow.Release()
+	}
 	if prepared.Page != nil {
 		return h.runPage(ctx, prepared, frames)
 	}

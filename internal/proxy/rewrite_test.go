@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"go.uber.org/mock/gomock"
@@ -62,7 +63,7 @@ func TestRewriteSessionNewBecomesAgrOpen(t *testing.T) {
 	if !reflect.DeepEqual(prepared.Args, want) {
 		t.Fatalf("Args = %q, want %q", prepared.Args, want)
 	}
-	if prepared.NewRow == nil || *prepared.NewRow != (NewRow{Host: testHost, Name: "w9"}) {
+	if prepared.NewRow == nil || prepared.NewRow.Host != testHost || prepared.NewRow.Name != "w9" {
 		t.Fatalf("NewRow = %+v, want homelab/w9", prepared.NewRow)
 	}
 }
@@ -350,5 +351,50 @@ func TestRewriteBindsErrorIsRefused(t *testing.T) {
 	decision := f.authorize(t, "session", "restore", "claude")
 	if _, err := rewriter.Rewrite(context.Background(), f.request(t, ""), decision.Call); err == nil {
 		t.Fatal("Rewrite() error = nil, want the binding read failure")
+	}
+}
+
+func TestRewriteSessionNewConcurrentCallsGetDistinctNames(t *testing.T) {
+	t.Helper()
+	f := newFixture(t)
+	rewriter := f.rewriter(t)
+	decision := f.authorize(t, "session", "new", "--name", "build")
+	wantAllow(t, decision)
+	const calls = 8
+	names := make(chan string, calls)
+	var wg sync.WaitGroup
+	for i := 0; i < calls; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prepared, err := rewriter.Rewrite(context.Background(), f.request(t, ""), decision.Call)
+			if err != nil {
+				t.Errorf("Rewrite error = %v", err)
+				return
+			}
+			names <- prepared.NewRow.Name
+		}()
+	}
+	wg.Wait()
+	close(names)
+	seen := make(map[string]bool)
+	for name := range names {
+		if seen[name] {
+			t.Fatalf("name %q selected twice", name)
+		}
+		seen[name] = true
+	}
+	// Releasing a reservation frees its name again.
+	prepared, err := rewriter.Rewrite(context.Background(), f.request(t, ""), decision.Call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.NewRow.Release()
+	again, err := rewriter.Rewrite(context.Background(), f.request(t, ""), decision.Call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.NewRow.Name != prepared.NewRow.Name {
+		t.Fatalf("released name %q not reused, got %q", prepared.NewRow.Name, again.NewRow.Name)
 	}
 }

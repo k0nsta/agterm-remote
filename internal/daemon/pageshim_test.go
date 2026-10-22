@@ -214,15 +214,15 @@ func TestPageShimReplacedPageIsRefused(t *testing.T) {
 	}
 }
 
-func TestPageShimReplayedTokenAfterReleaseIsGone(t *testing.T) {
+func TestPageShimReplayedTokenAfterReleaseIsConflict(t *testing.T) {
 	t.Helper()
 	shim := newTestShim(t, newLiveSet(t, "P1").live)
 	p, url := openTestPage(t, shim, "<p>x</p>")
 	dir := p.dir
 	post(t, url+"submit", `{"value":"x"}`)
 	shim.release(p)
-	if response := post(t, url+"submit", `{"value":"again"}`); response.StatusCode != http.StatusNotFound {
-		t.Fatalf("replayed token: status = %d, want 404", response.StatusCode)
+	if response := post(t, url+"submit", `{"value":"again"}`); response.StatusCode != http.StatusConflict {
+		t.Fatalf("replayed token: status = %d, want 409", response.StatusCode)
 	}
 	if response, _ := get(t, url); response.StatusCode != http.StatusNotFound {
 		t.Fatalf("GET after release: status = %d, want 404", response.StatusCode)

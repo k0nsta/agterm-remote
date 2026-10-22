@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/k0nsta/agterm-remote/internal/token"
 )
@@ -23,6 +24,9 @@ type Rewriter struct {
 	Root     string
 	Sessions SessionLister
 	Binds    BindingLoader
+
+	mu       sync.Mutex
+	reserved map[string]bool
 }
 
 // NewRow tells the daemon that a successful `session new` made a row to bind
@@ -30,6 +34,9 @@ type Rewriter struct {
 type NewRow struct {
 	Host string
 	Name string
+	// Release gives the name's reservation back; the daemon calls it once the
+	// row is bound (or the call failed). Safe to call more than once.
+	Release func()
 }
 
 // Page is an HTML page the daemon serves through the page shim instead of
@@ -67,8 +74,13 @@ type Prepared struct {
 // Rewrite prepares call for execution. On error nothing is left on disk.
 func (r *Rewriter) Rewrite(ctx context.Context, req Request, call Call) (Prepared, error) {
 	prepared, err := r.rewrite(ctx, req, call)
-	if err != nil && prepared.Dir != "" {
-		_ = os.RemoveAll(prepared.Dir)
+	if err != nil {
+		if prepared.Dir != "" {
+			_ = os.RemoveAll(prepared.Dir)
+		}
+		if prepared.NewRow != nil && prepared.NewRow.Release != nil {
+			prepared.NewRow.Release()
+		}
 	}
 	return prepared, err
 }
@@ -263,7 +275,7 @@ func (r *Rewriter) rewriteNew(ctx context.Context, prepared Prepared, req Reques
 	opts := withoutOpts(call.Opts, "cwd", "command")
 	opts = append(opts, Opt{Name: "command", Value: Join(words...), Role: "command"})
 	prepared.Args = call.render(opts, call.Pos)
-	prepared.NewRow = &NewRow{Host: req.Host, Name: generated}
+	prepared.NewRow = &NewRow{Host: req.Host, Name: generated, Release: r.releaser(req.Host, generated)}
 	return prepared, nil
 }
 
@@ -272,6 +284,32 @@ func (r *Rewriter) rewriteNew(ctx context.Context, prepared Prepared, req Reques
 // caller's own session name plus -<n>. A name that exists on the host (or is
 // bound to it) is never reused: attaching to it would skip the command.
 func (r *Rewriter) generateName(ctx context.Context, req Request, wanted string) (string, error) {
+	// Selection and reservation are one step, so two concurrent calls never
+	// pick the same free name before either is bound.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	name, err := r.pickName(ctx, req, wanted)
+	if err != nil {
+		return "", err
+	}
+	if r.reserved == nil {
+		r.reserved = make(map[string]bool)
+	}
+	r.reserved[reservationKey(req.Host, name)] = true
+	return name, nil
+}
+
+func reservationKey(host, name string) string { return host + "\x00" + name }
+
+func (r *Rewriter) releaser(host, name string) func() {
+	return func() {
+		r.mu.Lock()
+		delete(r.reserved, reservationKey(host, name))
+		r.mu.Unlock()
+	}
+}
+
+func (r *Rewriter) pickName(ctx context.Context, req Request, wanted string) (string, error) {
 	taken := make(map[string]bool)
 	sessions, err := r.Sessions.Sessions(ctx, req.Host)
 	if err != nil {
@@ -287,6 +325,11 @@ func (r *Rewriter) generateName(ctx context.Context, req Request, wanted string)
 	for _, b := range all {
 		if b.Host == req.Host {
 			taken[b.Name] = true
+		}
+	}
+	for key := range r.reserved {
+		if host, name, ok := strings.Cut(key, "\x00"); ok && host == req.Host {
+			taken[name] = true
 		}
 	}
 	base := req.Session
