@@ -290,7 +290,7 @@ pid_gone() {
 }
 
 daemon_ready() {
-	[ -r "$PID_FILE" ] && [ "$(tr -d '[:space:]' <"$PID_FILE")" = "$TEST_DAEMON_PID" ]
+	[ -r "$PID_FILE" ] && [ "$(tr -d '[:space:]' <"$PID_FILE" 2>/dev/null)" = "$TEST_DAEMON_PID" ]
 }
 
 # swap_in stops the running daemon, starts bin/agr's, and installs bin/agr's
