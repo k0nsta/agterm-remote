@@ -477,6 +477,10 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
       <id> [--pane-id <p>] --stdin`. Only a local pane running `claude`/`codex`; plain text, no
       control characters, at most 64 KiB. The user gets a dialog; on refusal, say so and fall
       back to the clipboard.
+  - **Messages between sessions on the same host** (tmux): use tmux directly, not the proxy.
+    `tmux send-keys -t <name> -l "text"`, then `tmux send-keys -t <name> Enter`; read with
+    `tmux capture-pane -p -t <name>`. It works for detached sessions and never touches the
+    Mac. Under zmx, use the proxy's `session type` (both rows must be attached).
   - **Messages from the Mac to a remote row**: plain `agtermctl session type` works today.
 
 ## What Goes Where
