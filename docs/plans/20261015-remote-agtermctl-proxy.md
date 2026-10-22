@@ -905,7 +905,7 @@ the host is fixed at `~/.cache/agr/bridge.sock`):
 **Files:**
 - Modify: `README.md`
 
-- [ ] README "Remote agterm control":
+- [x] README "Remote agterm control":
   - what works unchanged; the allowlist; full ids only; one-file pages
   - the `foreground` limitation
   - how to request a new leaf
@@ -913,12 +913,12 @@ the host is fixed at `~/.cache/agr/bridge.sock`):
   - handoff with consent, from the user's side (the dialog and its three buttons)
   - the `agr` skill: where it is installed, `agr skill`, and how a user's own skills compose
     with it (wrap the spawned program in `agr open <host> <name> --command`)
-- [ ] README "Requirements": python3 on the host; Mac daemon and remote both at least 1.3.0;
+- [x] README "Requirements": python3 on the host; Mac daemon and remote both at least 1.3.0;
       agterm 0.36.0 for the proxy (older agterm keeps everything else)
-- [ ] README "Upgrading": re-open rows to get the environment; agents started before the upgrade
+- [x] README "Upgrading": re-open rows to get the environment; agents started before the upgrade
       need a restart to see agterm
-- [ ] README "Failure modes": the proxy messages
-- [ ] README "Security":
+- [x] README "Failure modes": the proxy messages
+- [x] README "Security":
   - the per-pane scoped policy and the attached check
   - pages from a host are served through the shim: no agterm bridge, only submit and close, and
     a CSP that keeps page JavaScript on its own server; `--url` pages from a host are static
