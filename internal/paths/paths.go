@@ -66,3 +66,8 @@ func (d Dirs) BridgeLog(hostKey string) string {
 func (d Dirs) HostInfo(hostKey string) string {
 	return filepath.Join(d.Cache, "hosts", hostKey+".json")
 }
+
+// HostLeftUp records when one host's bridge last stopped being up.
+func (d Dirs) HostLeftUp(hostKey string) string {
+	return filepath.Join(d.Cache, "hosts", hostKey+".left-up")
+}

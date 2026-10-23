@@ -270,11 +270,18 @@ func (d *Daemon) Close() error {
 	}
 	hosts := make([]*hostRuntime, 0, len(d.hosts))
 	bound := make([]bool, 0, len(d.hosts))
+	var wereUp []string
 	for _, host := range d.hosts {
 		hosts = append(hosts, host)
 		bound = append(bound, host.bound)
+		if host.state == string(bridge.StateUp) {
+			wereUp = append(wereUp, host.hostKey)
+		}
 	}
 	d.mu.Unlock()
+	for _, hostKey := range wereUp {
+		d.markLeftUp(hostKey)
+	}
 
 	for i, host := range hosts {
 		if host.cancel != nil {
@@ -735,7 +742,11 @@ func (d *Daemon) stopHost(host string) {
 		// with a live tunnel and no reachable receiver.
 		runtime.stopping = true
 	}
+	wasUp := ok && runtime.state == string(bridge.StateUp)
 	d.mu.Unlock()
+	if wasUp {
+		d.markLeftUp(runtime.hostKey)
+	}
 	if !ok {
 		// Nothing to tear down. Do not unlink the path either: a start for
 		// this host may be binding it right now, and a stale path is
