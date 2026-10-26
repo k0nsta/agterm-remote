@@ -70,12 +70,17 @@ func (h *hostCtl) consent(ctx context.Context, req proxy.Request, c *proxy.Conse
 		h.mu.Unlock()
 	}()
 
-	id, err := h.svc.ctl.AskOpen(ctx, h.dialogFor(req, c))
+	dialog := h.dialogFor(req, c)
+	id, err := h.svc.ctl.AskOpen(ctx, dialog)
 	switch {
 	case errors.Is(err, agterm.ErrAskPending):
 		return "the user has a dialog open on that row"
 	case err != nil:
 		return "cannot ask the user: " + err.Error()
+	}
+	// The dialog sits on its own row, which the user is often not looking at.
+	if err := h.svc.ctl.Notify(ctx, c.Row, dialog.Title, dialog.Message); err != nil {
+		h.svc.logf("warning: notify consent dialog for %s: %v", h.host, err)
 	}
 
 	switch h.await(ctx, id) {

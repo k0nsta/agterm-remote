@@ -305,6 +305,25 @@ func TestConsentDialogContent(t *testing.T) {
 	if len(request.Buttons) != 3 || request.Buttons[0] != want[0] || request.Buttons[1] != want[1] || request.Buttons[2] != want[2] {
 		t.Fatalf("Buttons = %+v, want %+v", request.Buttons, want)
 	}
+	// The dialog's row is often not the one in view, so a notification points at it.
+	env.ctl.mu.Lock()
+	notices := append([][3]string(nil), env.ctl.notices...)
+	env.ctl.mu.Unlock()
+	if wantNotice := [3]string{rowAgent, request.Title, request.Message}; len(notices) != 1 || notices[0] != wantNotice {
+		t.Fatalf("notices = %q, want one %q", notices, wantNotice)
+	}
+}
+
+func TestConsentNoNoticeWithoutADialog(t *testing.T) {
+	t.Helper()
+	env := newProxyEnv(t)
+	env.ctl.askErr = agterm.ErrAskPending
+	env.callCtx(t, context.Background(), typeInto(t, env, "w1", rowAgent, paneAgent, "hello"))
+	env.ctl.mu.Lock()
+	defer env.ctl.mu.Unlock()
+	if len(env.ctl.notices) != 0 {
+		t.Fatalf("notices = %q, want none when the dialog did not open", env.ctl.notices)
+	}
 }
 
 func TestConsentDialogCutsAt300CharactersAndEscapesInvisibles(t *testing.T) {

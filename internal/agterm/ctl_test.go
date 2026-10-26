@@ -668,3 +668,14 @@ func TestCtlTreeRowsDecodesHTMLOverlays(t *testing.T) {
 		t.Fatalf("overlays = %+v / %+v, want %+v and none", rows[0].HTMLOverlays, rows[1].HTMLOverlays, want)
 	}
 }
+
+func TestCtlNotifyUsesExactArgv(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	runner := mocks.NewMockRunner(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, runner, nil, nil)
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "notify", "body text", "--title", "a title", "--target", "row-1", "--socket", testCtlSock).Return(nil)
+	if err := ctl.Notify(context.Background(), "row-1", "a title", "body text"); err != nil {
+		t.Fatalf("Notify() error = %v", err)
+	}
+}

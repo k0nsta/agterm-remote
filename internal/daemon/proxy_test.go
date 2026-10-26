@@ -60,6 +60,8 @@ type fakeCtl struct {
 	// onResult runs on each AskResult call before it answers.
 	onResult   func(call int)
 	askCancels []string
+	// notices records Notify calls as row, title, body.
+	notices [][3]string
 }
 
 type execRecord struct {
@@ -122,6 +124,13 @@ func (c *fakeCtl) AskCancel(_ context.Context, id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.askCancels = append(c.askCancels, id)
+	return nil
+}
+
+func (c *fakeCtl) Notify(_ context.Context, row, title, body string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.notices = append(c.notices, [3]string{row, title, body})
 	return nil
 }
 

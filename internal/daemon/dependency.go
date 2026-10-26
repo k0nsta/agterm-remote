@@ -77,6 +77,7 @@ type CtlBackend interface {
 	AskOpen(ctx context.Context, request agterm.AskRequest) (string, error)
 	AskResult(ctx context.Context, id string) (agterm.AskAnswer, error)
 	AskCancel(ctx context.Context, id string) error
+	Notify(ctx context.Context, row, title, body string) error
 }
 
 // Authorizer decides whether a host's agtermctl call may run, and re-checks

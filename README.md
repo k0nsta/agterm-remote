@@ -249,9 +249,10 @@ agr run <host> [--cwd <dir>] -- make test                   # one-shot ssh -t, e
 ### Handing off to a local agent
 
 A remote session may `session type` into a local pane that runs `claude` or
-`codex`. The first time, agterm shows a dialog on that pane:
-**Allow once**, **Allow `<host>` here until it closes**, or **Deny**.
-Return denies. Nothing is typed until you allow it.
+`codex`. The first time, agterm shows a dialog on that pane, plus a desktop
+notification for its row: **Allow once**, **Allow `<host>` here until it
+closes**, or **Deny**. Return denies, and so does no answer within 2 minutes.
+Nothing is typed until you allow it.
 
 ### The `agr` skill
 

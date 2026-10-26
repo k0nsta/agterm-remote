@@ -530,6 +530,20 @@ func (mr *MockCtlBackendMockRecorder) Exec(ctx, stdin, stdout, stderr any, args 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exec", reflect.TypeOf((*MockCtlBackend)(nil).Exec), varargs...)
 }
 
+// Notify mocks base method.
+func (m *MockCtlBackend) Notify(ctx context.Context, row, title, body string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Notify", ctx, row, title, body)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Notify indicates an expected call of Notify.
+func (mr *MockCtlBackendMockRecorder) Notify(ctx, row, title, body any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Notify", reflect.TypeOf((*MockCtlBackend)(nil).Notify), ctx, row, title, body)
+}
+
 // TreeRows mocks base method.
 func (m *MockCtlBackend) TreeRows(ctx context.Context) ([]agterm.TreeRow, error) {
 	m.ctrl.T.Helper()

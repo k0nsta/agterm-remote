@@ -455,6 +455,11 @@ func (c *Ctl) AskCancel(ctx context.Context, id string) error {
 	return c.run.Run(ctx, c.path, "ask", "cancel", id, "--socket", c.sock)
 }
 
+// Notify posts a desktop notification for row.
+func (c *Ctl) Notify(ctx context.Context, row, title, body string) error {
+	return c.run.Run(ctx, c.path, "notify", body, "--title", title, "--target", row, "--socket", c.sock)
+}
+
 // CloseRow closes an agterm row.
 func (c *Ctl) CloseRow(ctx context.Context, row string) error {
 	return c.run.Run(ctx, c.path, "session", "close", "--target", row, "--socket", c.sock)
