@@ -418,7 +418,8 @@ func (c Call) render(opts []Opt, pos []string) []string {
 }
 
 // Consent is what the daemon asks the user when a host wants to type into a
-// local agent pane it holds no grant for.
+// local agent pane it holds no grant for. With a grant it describes the pane
+// and text the grant allowed, so the daemon can tell the user it arrived.
 type Consent struct {
 	Row     string
 	RowName string
@@ -1116,14 +1117,15 @@ func (a *authz) typeLocal(row agterm.TreeRow, surface agterm.Surface) Decision {
 	if err := SanitizeTyped(text); err != nil {
 		return refuse("%s: %v", name, err)
 	}
+	target := &Consent{
+		Row: row.ID, RowName: row.Name, PaneID: surface.PaneID,
+		Text: string(text), Preview: Preview(string(text)),
+	}
 	for _, grant := range a.caller.Grants {
 		if strings.EqualFold(grant.Row, row.ID) && strings.EqualFold(grant.PaneID, surface.PaneID) {
 			a.call.Granted = true
-			return Decision{Verdict: Allow, Call: a.call}
+			return Decision{Verdict: Allow, Call: a.call, Consent: target}
 		}
 	}
-	return Decision{Verdict: NeedsConsent, Call: a.call, Consent: &Consent{
-		Row: row.ID, RowName: row.Name, PaneID: surface.PaneID,
-		Text: string(text), Preview: Preview(string(text)),
-	}}
+	return Decision{Verdict: NeedsConsent, Call: a.call, Consent: target}
 }

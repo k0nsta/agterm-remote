@@ -252,7 +252,8 @@ A remote session may `session type` into a local pane that runs `claude` or
 `codex`. The first time, agterm shows a dialog on that pane, plus a desktop
 notification for its row: **Allow once**, **Allow `<host>` here until it
 closes**, or **Deny**. Return denies, and so does no answer within 2 minutes.
-Nothing is typed until you allow it.
+Nothing is typed until you allow it. Text typed later under the grant posts a
+notification too, which leaves agterm's unseen badge on the row.
 
 ### The `agr` skill
 

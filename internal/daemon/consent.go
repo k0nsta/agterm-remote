@@ -194,6 +194,20 @@ func (h *hostCtl) dialogFor(req proxy.Request, c *proxy.Consent) agterm.AskReque
 	}
 }
 
+// noticeTyped tells the user a host typed into a row under a grant. The
+// notification also leaves agterm's unseen badge on the row.
+func (h *hostCtl) noticeTyped(ctx context.Context, req proxy.Request, c *proxy.Consent) {
+	shown, total, cut := proxy.PreviewParts(c.Text)
+	title := fmt.Sprintf("%s on %s typed into “%s”", visible(req.Session), visible(h.host), visible(c.RowName))
+	body := "⟦" + visible(shown) + "⟧"
+	if cut {
+		body += fmt.Sprintf("… (%d characters)", total)
+	}
+	if err := h.svc.ctl.Notify(ctx, c.Row, title, body); err != nil {
+		h.svc.logf("warning: notify typed text for %s: %v", h.host, err)
+	}
+}
+
 // visible shows control and format (bidi, zero-width) characters as \u{XXXX}.
 func visible(s string) string {
 	var out strings.Builder

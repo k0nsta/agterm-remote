@@ -639,6 +639,9 @@ func TestAuthorizeGrants(t *testing.T) {
 			if !got.Call.Granted {
 				t.Fatal("Call.Granted = false")
 			}
+			if got.Consent == nil || got.Consent.Row != rowAgent || got.Consent.PaneID != paneAgent || got.Consent.Text != "hello\n" {
+				t.Fatalf("Consent = %+v, want the granted pane and text for the notice", got.Consent)
+			}
 			got = f.authorize(t, "session", "type", "--target", rowTwoAgents, "--pane-id", twoAgentsR, "hello")
 			wantAllow(t, got)
 		})

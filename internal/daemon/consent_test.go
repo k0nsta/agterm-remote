@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,34 @@ func TestConsentPairStoresTheGrantAndSkipsLaterDialogs(t *testing.T) {
 	}
 	if env.ctl.askCount(t) != 1 || typedCalls(t, env) != 2 {
 		t.Fatalf("dialogs = %d, typed = %d, want one dialog and two typed calls", env.ctl.askCount(t), typedCalls(t, env))
+	}
+	// One notice points at the dialog; the call under the grant gets its own,
+	// since nothing else on the row shows that text arrived.
+	env.ctl.mu.Lock()
+	notices := append([][3]string(nil), env.ctl.notices...)
+	env.ctl.mu.Unlock()
+	if len(notices) != 2 {
+		t.Fatalf("notices = %q, want the dialog's and the granted call's", notices)
+	}
+	wantTyped := [3]string{rowAgent, "w1 on homelab typed into “orchestrator”", "⟦two⟧"}
+	if notices[1] != wantTyped {
+		t.Fatalf("granted notice = %q, want %q", notices[1], wantTyped)
+	}
+}
+
+func TestConsentNoNoticeWhenTheGrantedCallFails(t *testing.T) {
+	t.Helper()
+	env := newProxyEnv(t)
+	env.ctl.results = []agterm.AskAnswer{answer("pair")}
+	env.callCtx(t, context.Background(), typeInto(t, env, "w1", rowAgent, paneAgent, "one"))
+	env.ctl.execFn = func(context.Context, []byte, io.Writer, io.Writer, []string) (int, error) { return 1, nil }
+	if code, _ := env.callCtx(t, context.Background(), typeInto(t, env, "w1", rowAgent, paneAgent, "two")); code != 1 {
+		t.Fatalf("code = %d, want agtermctl's failure passed through", code)
+	}
+	env.ctl.mu.Lock()
+	defer env.ctl.mu.Unlock()
+	if len(env.ctl.notices) != 1 {
+		t.Fatalf("notices = %q, want only the dialog's", env.ctl.notices)
 	}
 }
 

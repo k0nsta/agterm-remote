@@ -318,7 +318,13 @@ func (h *hostCtl) Ctl(ctx context.Context, req proxy.Request, frames proxy.Frame
 	default:
 		return refuse(frames, decision.Reason)
 	}
-	return h.run(ctx, req, decision.Call, frames)
+	code := h.run(ctx, req, decision.Call, frames)
+	// Text typed under a grant changes nothing on the row; the user just
+	// answered a dialog for anything else, so only a grant gets a notice.
+	if code == 0 && decision.Call.Granted && decision.Consent != nil {
+		h.noticeTyped(ctx, req, decision.Consent)
+	}
+	return code
 }
 
 func (h *hostCtl) run(ctx context.Context, req proxy.Request, call proxy.Call, frames proxy.FrameWriter) int {
