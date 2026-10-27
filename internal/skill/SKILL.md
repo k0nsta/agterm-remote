@@ -31,6 +31,16 @@ A remote row is an agterm session attached to a tmux or zmx session on a host, o
 - Only an allowlist of commands works; a refused one says why.
 - You may write only to rows bound to this host, including rows you created with `session new`.
 
+## Show a page on the Mac
+
+The command is `agtermctl session overlay open` (there is no top-level `overlay`); it covers your own pane.
+
+- Interactive page (decide panel, form): `agtermctl session overlay open --html page.html --js --block --target "$AGTERM_SESSION_ID" --pane "$AGTERM_PANE"`.
+  One self-contained file; it can only submit and close. Prints `{"outcome":"submitted","value":…}`.
+- Web page: `agtermctl session overlay open --url https://… --target "$AGTERM_SESSION_ID" --pane "$AGTERM_PANE"`. No `--js`.
+- Refused from a host: `--follow`, `--persistent`, and `--size-percent` together with `--pane`.
+- A page behind a login (a claude.ai artifact) opens signed out. Show its HTML with `--html` instead, or give the user the link.
+
 ## Hand off to a local agent
 
 - Find the target row by name in `agtermctl tree --json`, then
