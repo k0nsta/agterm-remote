@@ -12,8 +12,12 @@ A remote row is an agterm session attached to a tmux or zmx session on a host, o
 ## Spawn on a host (from the Mac)
 
 - `agtermctl session new --command X` becomes:
-  `agtermctl session new --command "agr open <host> <name> --cwd <dir> --command 'X' --orchestrator $AGTERM_SESSION_ID:$AGTERM_PANE_ID"`
+  `agtermctl session new --command "$(command -v agr) open <host> <name> --cwd <dir> --command 'X' --orchestrator $AGTERM_SESSION_ID:$AGTERM_PANE_ID"`
   Run it from the orchestrator's own shell so the variables expand to the orchestrator.
+- The new row starts with the app's PATH, which may not include `agr`; `$(command -v agr)`
+  expands to its absolute path in your shell before agterm sees it.
+- `<dir>` is an absolute path on the host (`/home/me/repo`, not `~/repo`); leave out `--cwd`
+  for the host's home.
 - If X contains `'`, write X to a script on the host (`ssh <host>`) and pass `--command 'sh <script>'`.
 - Filesystem steps (worktree, brief file) run over `ssh <host>`.
 - Confirm it started with `agtermctl session text`, not `foreground`: a remote row's foreground is `agr`.
