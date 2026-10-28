@@ -118,6 +118,13 @@ func TestPageShimServesThePageWithCSPAndShimFirst(t *testing.T) {
 	if !strings.Contains(body, "hello") || !strings.Contains(body, "window.close") || !strings.Contains(body, "not available to pages from a host") {
 		t.Fatalf("body = %q, want the page and the shim", body)
 	}
+	// data-agterm buttons and forms go through the same request, so only
+	// submit and close can reach the server (live: check_data_agterm_submit).
+	for _, want := range []string{"[data-agterm]", "data-agterm-args", "data-agterm-into", "addEventListener('submit'", "window.agterm.request(el.getAttribute('data-agterm')"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body lacks %q: the shim does not bridge data-agterm", want)
+		}
+	}
 }
 
 func TestInjectShimVariants(t *testing.T) {

@@ -331,7 +331,8 @@ over the authenticated SSH connection; do not use agr with an untrusted host.
   refused. Calls that run or read something on the Mac are refused.
 - **Pages from a host** are never opened as agterm `--html` pages, whose bridge
   could run any command. They are served by a loopback shim with no agterm
-  bridge: only submit and close work, and a CSP keeps page JavaScript on its own
+  bridge: only submit and close work, through `agterm.request` or
+  `data-agterm` buttons and forms, and a CSP keeps page JavaScript on its own
   server. `--url` pages from a host are static (no `--js`). The warning for
   localhost URLs is a hint, not a control.
 - **`events`** streams the Mac's whole event feed, not just this host's rows.

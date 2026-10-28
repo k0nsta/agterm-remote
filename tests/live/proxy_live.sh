@@ -411,6 +411,15 @@ overlay_text_has() {
 	ctl session overlay text --target "$1" 2>/dev/null | grep -q -- "$2"
 }
 
+check_data_agterm_submit() {
+	step 'a data-agterm submit button on a host page returns its value'
+	put_remote attr.html '<!doctype html><title>agrlive</title><button id="b" type="button" data-agterm="session.overlay.submit" data-agterm-args="{&quot;value&quot;:&quot;agrlive-attr&quot;}">ok</button><script>document.getElementById("b").click();</script>'
+	rr "$R1" "agtermctl session overlay open --html $REMOTE_DIR/attr.html --block --target \"\$AGTERM_SESSION_ID\""
+	[ "$RR_RC" = 0 ] || fail "exit $RR_RC: $RR_OUT"
+	assert_contains '"outcome":"submitted"' "$RR_OUT"
+	assert_contains 'agrlive-attr' "$RR_OUT"
+}
+
 check_page_isolation() {
 	step 'a host page cannot type, click or fetch out'
 	mk=$(new_local "${PREFIX}mk" cat)
@@ -680,6 +689,7 @@ main() {
 	R2=$(new_remote "${PREFIX}r2")
 	check_overlay_round_trip
 	check_program_overlay
+	check_data_agterm_submit
 	check_page_isolation
 	check_sibling
 	check_type_refusals

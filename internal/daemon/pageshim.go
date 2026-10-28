@@ -509,7 +509,11 @@ func splice(data []byte, at int, insert []byte) []byte {
 }
 
 // shimScript defines window.agterm.request for a host page: submit and close
-// go to this page's own server, every other command is rejected.
+// go to this page's own server, every other command is rejected. It also
+// gives data-agterm buttons and forms agterm's page-bridge meaning (args from
+// data-agterm-args and the form's named fields, the reply or error in
+// data-agterm-into), routed through that same request, so a page written for
+// a local overlay submits the same way.
 func shimScript(token string) string {
 	return `<script>(function(){var T=` + fmt.Sprintf("%q", token) + `;
 function post(action,body){return fetch('/'+T+'/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
@@ -519,5 +523,14 @@ if(cmd==='session.overlay.submit'){if(typeof args.value!=='string'){return Promi
 if(cmd==='session.overlay.close'){return post('close',{});}
 return Promise.reject(new Error('not available to pages from a host'));}};
 window.close=function(){post('close',{}).catch(function(){});};
+function run(el,fields){var args={};try{args=JSON.parse(el.getAttribute('data-agterm-args')||'{}')||{};}catch(e){}
+for(var k in fields){args[k]=fields[k];}var into=el.getAttribute('data-agterm-into');
+function show(t){var n=into&&document.querySelector(into);if(n){n.textContent=t;}}
+window.agterm.request(el.getAttribute('data-agterm'),{args:args}).then(function(){show('ok');},function(e){show(String(e&&e.message||e));});}
+document.addEventListener('click',function(e){var el=e.target&&e.target.closest&&e.target.closest('[data-agterm]');
+if(!el||el.tagName==='FORM'){return;}e.preventDefault();run(el,{});},true);
+document.addEventListener('submit',function(e){var f=e.target;if(!f||!f.hasAttribute||!f.hasAttribute('data-agterm')){return;}
+e.preventDefault();var fields={};for(var i=0;i<f.elements.length;i++){var x=f.elements[i];if(!x.name){continue;}
+fields[x.name]=x.type==='checkbox'?x.checked:(x.type==='number'?Number(x.value):x.value);}run(f,fields);},true);
 })();</script>`
 }
