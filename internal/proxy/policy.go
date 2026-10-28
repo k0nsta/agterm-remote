@@ -161,7 +161,7 @@ var allowlist = []leafSpec{
 		opts: join(
 			[]optSpec{{name: "html", value: true, role: roleFile}, {name: "url", value: true}},
 			plainFlags("js", "wait"), plainValues("size-percent", "background-color"),
-			[]optSpec{optBlock, optTarget, optPane}),
+			[]optSpec{optBlock, optTarget, optPane, {name: "follow", dropped: "it would move the user's selection"}}),
 		check: checkOverlayOpen},
 	{path: words("session overlay close"), scope: scopePane, write: true, by: bySide, maxPos: 0,
 		opts: []optSpec{optTarget, optPane}},
@@ -375,6 +375,8 @@ type Call struct {
 	Granted bool
 	// Help is set for a --help call, which Args reduces to the path.
 	Help bool
+	// Warnings are the parser's notes on dropped options, for the host.
+	Warnings []string
 }
 
 // Args renders the normalised argv for the real agtermctl, without --socket.
@@ -690,7 +692,7 @@ func (a *authz) run(ctx context.Context, argv []string) Decision {
 // normalise checks the schema-level rules and fills the call's options.
 func (a *authz) normalise() error {
 	leaf, args := a.leaf, a.args
-	a.call = Call{Leaf: leaf.name(), Path: leaf.path}
+	a.call = Call{Leaf: leaf.name(), Path: leaf.path, Warnings: args.warnings}
 	if len(args.pos) < leaf.minPos {
 		return fmt.Errorf("needs %d argument(s), got %d", leaf.minPos, len(args.pos))
 	}

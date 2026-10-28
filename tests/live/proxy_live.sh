@@ -420,6 +420,25 @@ check_data_agterm_submit() {
 	assert_contains 'agrlive-attr' "$RR_OUT"
 }
 
+check_follow_dropped() {
+	step '--follow from a host is dropped with a warning; the selection stays'
+	before=$(selected_row)
+	rr "$R1" "agtermctl session overlay open --html $REMOTE_DIR/attr.html --follow --block --target \"\$AGTERM_SESSION_ID\""
+	[ "$RR_RC" = 0 ] || fail "exit $RR_RC: $RR_OUT"
+	assert_contains '--follow ignored from a host' "$RR_OUT"
+	assert_contains 'agrlive-attr' "$RR_OUT"
+	[ "$(selected_row)" = "$before" ] || fail 'the selection moved'
+}
+
+selected_row() {
+	ctl tree --json | python3 -I -c 'import json, sys
+d = json.load(sys.stdin)
+for ws in d["result"]["tree"].get("workspaces", []):
+    for r in ws.get("sessions", []):
+        if r.get("active"):
+            print(r.get("id"))'
+}
+
 check_page_isolation() {
 	step 'a host page cannot type, click or fetch out'
 	mk=$(new_local "${PREFIX}mk" cat)
@@ -690,6 +709,7 @@ main() {
 	check_overlay_round_trip
 	check_program_overlay
 	check_data_agterm_submit
+	check_follow_dropped
 	check_page_isolation
 	check_sibling
 	check_type_refusals

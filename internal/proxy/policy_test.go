@@ -329,7 +329,7 @@ func TestAuthorizeRefusedLeavesAndOptions(t *testing.T) {
 		{"dashboard", "dashboard", "`dashboard` is not available"},
 		{"unknown leaf", "session frobnicate", "not in the allowlist"},
 		{"overlay cwd", "session overlay open --html @0 --cwd /tmp", "--cwd is not allowed"},
-		{"overlay follow", "session overlay open --html @0 --follow", "--follow is not allowed"},
+		{"hud follow", "session hud open hi --follow", "--follow is not allowed"},
 		{"new after", "session new --after " + rowSib, "--after is not allowed"},
 		{"new create-workspace", "session new --create-workspace", "--create-workspace is not allowed"},
 		{"type select", "session type --select hi", "--select is not allowed"},

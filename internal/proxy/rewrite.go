@@ -86,7 +86,7 @@ func (r *Rewriter) Rewrite(ctx context.Context, req Request, call Call) (Prepare
 }
 
 func (r *Rewriter) rewrite(ctx context.Context, req Request, call Call) (Prepared, error) {
-	prepared := Prepared{}
+	prepared := Prepared{Warnings: append([]string(nil), call.Warnings...)}
 	if hasOpt(call.Opts, "stdin") {
 		prepared.Stdin = req.Stdin
 	}

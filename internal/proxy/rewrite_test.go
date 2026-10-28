@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -396,5 +397,25 @@ func TestRewriteSessionNewConcurrentCallsGetDistinctNames(t *testing.T) {
 	}
 	if again.NewRow.Name != prepared.NewRow.Name {
 		t.Fatalf("released name %q not reused, got %q", prepared.NewRow.Name, again.NewRow.Name)
+	}
+}
+
+// TestRewriteOverlayDropsFollowWithAWarning: decide.py and other page tools
+// pass --follow by default; from a host it is left out, never applied.
+func TestRewriteOverlayDropsFollowWithAWarning(t *testing.T) {
+	t.Helper()
+	for _, argv := range [][]string{
+		{"session", "overlay", "open", "--html", "@0", "--follow", "--block"},
+		{"session", "overlay", "open", "--follow", "top"},
+	} {
+		f := newFixture(t)
+		prepared := f.prepare(t, f.rewriter(t), argv...)
+		if slices.ContainsFunc(prepared.Args, func(arg string) bool { return strings.Contains(arg, "follow") }) {
+			t.Fatalf("%q: Args = %q, want --follow left out", argv, prepared.Args)
+		}
+		want := []string{"--follow ignored from a host (it would move the user's selection)"}
+		if !reflect.DeepEqual(prepared.Warnings, want) {
+			t.Fatalf("%q: Warnings = %q, want %q", argv, prepared.Warnings, want)
+		}
 	}
 }

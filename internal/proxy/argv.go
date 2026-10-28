@@ -35,6 +35,10 @@ type optSpec struct {
 	repeat bool
 	// allowed limits a plain value to these strings when set.
 	allowed []string
+	// dropped, when set, accepts the option and leaves it out of the call,
+	// saying why on the host's stderr: for one a tool passes by default whose
+	// effect a host may not have.
+	dropped string
 }
 
 type parsedOpt struct {
@@ -48,6 +52,8 @@ type parsedArgs struct {
 	pos  []string
 	// help is set by --help; every other argument is then ignored.
 	help bool
+	// warnings name the options that were accepted and dropped.
+	warnings []string
 }
 
 // universalOpts are accepted by every leaf. --window and --socket are
@@ -119,6 +125,10 @@ func parseArgs(leaf *leafSpec, args []string) (parsedArgs, error) {
 			return parsedArgs{}, fmt.Errorf("option --%s given more than once", name)
 		}
 		seen[name] = true
+		if spec.dropped != "" {
+			out.warnings = append(out.warnings, fmt.Sprintf("--%s ignored from a host (%s)", name, spec.dropped))
+			continue
+		}
 		if len(spec.allowed) > 0 && !slices.Contains(spec.allowed, value) {
 			return parsedArgs{}, fmt.Errorf("--%s: %q is not allowed (one of %s)", name, value, strings.Join(spec.allowed, ", "))
 		}

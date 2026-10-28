@@ -227,6 +227,8 @@ agtermctl session overlay open --html /tmp/panel.html --js --block
 - **Allowlist**: only listed commands and options work. Everything else is
   refused with the reason (`pick`, `ask`, `workspace`, `session paste`,
   `session scratch --command`, `--url … --persistent`, …).
+  `--follow` on `session overlay open` is ignored with a warning, so tools
+  that pass it by default still work; the user's selection never moves.
 - **Full ids only**: `--target` and `--pane-id` take full ids from
   `agtermctl tree --json`. Prefixes and `active` are refused.
 - **One-file pages**: an HTML page must be a single self-contained file.
