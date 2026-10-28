@@ -225,8 +225,8 @@ func TestAuthorizeAllowedLeaves(t *testing.T) {
 			fmt.Sprintf("session overlay open --target=%s --html=@0 --js --block --size-percent=70", rowCaller)},
 		{"overlay open html, = form", "session overlay open --html=@0", fmt.Sprintf("session overlay open --target=%s --html=@0", rowCaller)},
 		{"overlay open command", "session overlay open htop --wait", fmt.Sprintf("session overlay open --target=%s --wait htop", rowCaller)},
-		{"overlay open command after --", "session overlay open -- ls -la",
-			fmt.Sprintf("session overlay open --target=%s -- ls -la", rowCaller)},
+		{"overlay open command after --", "session overlay open -- top",
+			fmt.Sprintf("session overlay open --target=%s top", rowCaller)},
 		{"overlay open url", "session overlay open --url https://example.com/a",
 			fmt.Sprintf("session overlay open --target=%s --url=https://example.com/a", rowCaller)},
 		{"overlay close", "session overlay close", fmt.Sprintf("session overlay close --target=%s", rowCaller)},
@@ -273,10 +273,15 @@ func TestAuthorizeNormalisedFields(t *testing.T) {
 		t.Fatalf("Call = %#v, want the --command value", got.Call)
 	}
 
-	got = f.authorize(t, "session", "overlay", "open", "--", "sh", "-c", "x")
+	got = f.authorize(t, "session", "overlay", "open", "--", "ls -la | head")
 	wantAllow(t, got)
-	if got.Call.CommandOpt != "" || !reflect.DeepEqual(got.Call.Command, []string{"sh", "-c", "x"}) {
+	if got.Call.CommandOpt != "" || !reflect.DeepEqual(got.Call.Command, []string{"ls -la | head"}) {
 		t.Fatalf("Call = %#v, want the positional command", got.Call)
+	}
+	// agtermctl takes one COMMAND, a shell line; a second word is refused
+	// here as it would be there.
+	if got := f.authorize(t, "session", "overlay", "open", "--", "sh", "-c", "x"); got.Verdict == Allow {
+		t.Fatalf("three positionals were allowed: %#v", got.Call)
 	}
 
 	got = f.authorize(t, "session", "overlay", "result", "--block")

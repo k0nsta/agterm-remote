@@ -157,7 +157,7 @@ var allowlist = []leafSpec{
 	{path: words("session hud close"), scope: scopeRow, write: true, maxPos: 0,
 		opts: []optSpec{optTarget, optPane, optPaneID}},
 
-	{path: words("session overlay open"), scope: scopePane, write: true, by: bySide, maxPos: -1, posCommand: true,
+	{path: words("session overlay open"), scope: scopePane, write: true, by: bySide, maxPos: 1, posCommand: true,
 		opts: join(
 			[]optSpec{{name: "html", value: true, role: roleFile}, {name: "url", value: true}},
 			plainFlags("js", "wait"), plainValues("size-percent", "background-color"),

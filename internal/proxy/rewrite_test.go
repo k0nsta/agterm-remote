@@ -125,8 +125,8 @@ func TestRewriteSessionNewSessionListFailureIsRefused(t *testing.T) {
 func TestRewriteOverlayCommandBecomesAgrRun(t *testing.T) {
 	t.Helper()
 	f := newFixture(t)
-	prepared := f.prepare(t, f.rewriter(t), "session", "overlay", "open", "--block", "--", "vim", "a b", "it's")
-	command := `'/opt/homebrew/bin/agr' 'run' 'homelab' '--cwd' '/home/u' '--' 'vim' 'a b' 'it'\''s'`
+	prepared := f.prepare(t, f.rewriter(t), "session", "overlay", "open", "--block", "--", `vim 'a b' "it's"`)
+	command := `'/opt/homebrew/bin/agr' 'run' 'homelab' '--cwd' '/home/u' '--' 'sh' '-c' 'vim '\''a b'\'' "it'\''s"'`
 	want := []string{"session", "overlay", "open", "--target=" + rowCaller, "--block", command}
 	if !reflect.DeepEqual(prepared.Args, want) {
 		t.Fatalf("Args = %q, want %q", prepared.Args, want)
@@ -151,7 +151,7 @@ func TestRewriteOverlayCommandOmitsEmptyCwdAndKeepsSide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rewrite() error = %v", err)
 	}
-	command := `'/opt/homebrew/bin/agr' 'run' 'homelab' '--' 'top'`
+	command := `'/opt/homebrew/bin/agr' 'run' 'homelab' '--' 'sh' '-c' 'top'`
 	want := []string{"session", "overlay", "open", "--target=" + rowMixed, "--pane=left", "--block", command}
 	if !reflect.DeepEqual(prepared.Args, want) {
 		t.Fatalf("Args = %q, want %q", prepared.Args, want)

@@ -190,8 +190,9 @@ func (r *Rewriter) rewriteOverlay(prepared Prepared, req Request, call Call) Pre
 		if req.CWD != "" {
 			words = append(words, "--cwd", req.CWD)
 		}
-		words = append(words, "--")
-		words = append(words, call.Command...)
+		// agterm runs an overlay's COMMAND, one shell line, through sh -c;
+		// the host does the same, or the whole line is exec'd as one word.
+		words = append(words, "--", "sh", "-c", strings.Join(call.Command, " "))
 		prepared.Args = call.render(call.Opts, []string{Join(words...)})
 		return prepared
 	}

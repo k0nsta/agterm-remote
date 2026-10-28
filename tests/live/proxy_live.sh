@@ -396,6 +396,21 @@ check_overlay_round_trip() {
 	assert_contains 'agrlive-pong' "$RR_OUT"
 }
 
+check_program_overlay() {
+	step 'overlay COMMAND from a host runs there as a shell line and holds the overlay'
+	want="agrlive-on-$(host_sh hostname)"
+	rr "$R1" "agtermctl session overlay open 'echo agrlive-on-\$(hostname); sleep 8' --target \"\$AGTERM_SESSION_ID\""
+	[ "$RR_RC" = 0 ] || fail "exit $RR_RC: $RR_OUT"
+	wait_for 'the program overlay output' 15 overlay_text_has "$R1" "$want"
+	sleep 2
+	overlay_text_has "$R1" "$want" || fail 'the program overlay closed early'
+	ctl session overlay close --target "$R1" >/dev/null 2>&1 || :
+}
+
+overlay_text_has() {
+	ctl session overlay text --target "$1" 2>/dev/null | grep -q -- "$2"
+}
+
 check_page_isolation() {
 	step 'a host page cannot type, click or fetch out'
 	mk=$(new_local "${PREFIX}mk" cat)
@@ -664,6 +679,7 @@ main() {
 	R1=$(new_remote "${PREFIX}r1")
 	R2=$(new_remote "${PREFIX}r2")
 	check_overlay_round_trip
+	check_program_overlay
 	check_page_isolation
 	check_sibling
 	check_type_refusals
