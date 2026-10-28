@@ -92,6 +92,9 @@ func TestDaemonAgtermRecoveryLogsOnceResubscribesAndResyncs(t *testing.T) {
 	}
 	defer func() { _ = d.Close() }()
 	factory.latest(t)
+	// Recovery must find the event loop subscribed, or its reset has nothing
+	// to interrupt and the loop's first subscription is the only one.
+	waitForTask10(t, func() bool { return events.count(t) >= 1 })
 	d.mu.Lock()
 	d.hosts[host].state = "up"
 	d.mu.Unlock()
