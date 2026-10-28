@@ -32,8 +32,9 @@ Commands:
                           Open a plain remote login shell (no session)
   end [row]                Kill a row's remote sessions and close the row
   paste [row] [pane-id]   Send the clipboard or latest screenshot to a remote row
-  setup [--end-key <chord>] [--paste-key <chord>]
-                          Make agterm's ⌘D and ⌘J follow a remote row; add End and Paste commands
+  new [row]                Pick a host, session and workspace; open it in a new row
+  setup [--end-key <chord>] [--paste-key <chord>] [--new-key <chord>]
+                          Make agterm's ⌘D and ⌘J follow a remote row; add End, Paste and New commands
 
 Options:
   --help, -h               Show this help
@@ -57,6 +58,7 @@ var commandHandlers = map[string]commandHandler{
 	"shell":   runShell,
 	"end":     runEnd,
 	"paste":   runPaste,
+	"new":     runNew,
 	"setup":   runSetup,
 	// Hook entry points, run by agterm's hooks.conf rather than by hand, so
 	// they stay out of --help.
@@ -144,37 +146,42 @@ func runPaste(ctx context.Context, app *application, args []string, _, errw io.W
 	return cli.RunPaste(ctx, row, optionalArg(args, 1), app.paste(), errw)
 }
 
+// runNew takes the current row from its argument (a keymap command passes
+// {AGT_SESSION_ID}) or the environment; without one the row goes to the
+// chosen workspace's end. The window comes from the environment the same way,
+// and without one agterm uses the frontmost.
+func runNew(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
+	if len(args) > 1 {
+		_, _ = fmt.Fprintln(errw, "usage: agr new [row]")
+		return 2
+	}
+	row := optionalArg(args, 0)
+	for _, key := range []string{"AGT_SESSION_ID", "AGTERM_SESSION_ID"} {
+		if row == "" {
+			row = os.Getenv(key)
+		}
+	}
+	window := os.Getenv("AGT_WINDOW_ID")
+	if window == "" {
+		window = os.Getenv("AGTERM_WINDOW_ID")
+	}
+	return cli.RunNew(ctx, row, app.newRow(window), errw)
+}
+
 func runSetup(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
-	var endKey string
-	var pasteKey string
-	seenEnd, seenPaste := false, false
+	const setupUsage = "usage: agr setup [--end-key <chord>] [--paste-key <chord>] [--new-key <chord>]"
+	keys := map[string]string{}
 	for i := 0; i < len(args); i++ {
-		if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" || strings.HasPrefix(args[i+1], "-") {
-			_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+		_, seen := keys[args[i]]
+		known := args[i] == "--end-key" || args[i] == "--paste-key" || args[i] == "--new-key"
+		if !known || seen || i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" || strings.HasPrefix(args[i+1], "-") {
+			_, _ = fmt.Fprintln(errw, setupUsage)
 			return 2
 		}
-		switch args[i] {
-		case "--end-key":
-			if seenEnd {
-				_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
-				return 2
-			}
-			seenEnd = true
-			endKey = args[i+1]
-		case "--paste-key":
-			if seenPaste {
-				_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
-				return 2
-			}
-			seenPaste = true
-			pasteKey = args[i+1]
-		default:
-			_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
-			return 2
-		}
+		keys[args[i]] = args[i+1]
 		i++
 	}
-	return cli.RunSetup(ctx, app.setup(out, endKey, pasteKey), errw)
+	return cli.RunSetup(ctx, app.setup(out, keys["--end-key"], keys["--paste-key"], keys["--new-key"]), errw)
 }
 
 func runOnSplit(ctx context.Context, app *application, args []string, _, errw io.Writer) int {

@@ -144,6 +144,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		{name: "doctor", argv: []string{"doctor", "host"}, want: 1, check: func(t *testing.T) {}},
 		// A hidden split is the hook's no-op branch: it proves dispatch without
 		// reaching agterm.
+		{name: "new", argv: []string{"new", "row-1", "extra"}, want: 2, check: func(t *testing.T) {}},
 		{name: "on-split", argv: []string{"on-split"}, want: 0, check: func(t *testing.T) {}},
 		{name: "on-scratch", argv: []string{"on-scratch"}, want: 0, check: func(t *testing.T) {}},
 		{name: "setup", argv: []string{"setup", "--end-key", "ctrl+a>x"}, want: 0, check: func(t *testing.T) {
@@ -173,7 +174,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		})
 	}
 
-	if got, want := len(commandHandlers), 14; got != want {
+	if got, want := len(commandHandlers), 15; got != want {
 		t.Fatalf("registered command count = %d, want %d", got, want)
 	}
 }

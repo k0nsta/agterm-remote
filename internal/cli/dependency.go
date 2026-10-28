@@ -159,3 +159,13 @@ type BindingStore interface {
 	Load() ([]bindings.Binding, error)
 	Bind(binding bindings.Binding) error
 }
+
+// WorkspaceLister lists agterm's workspaces and their rows.
+type WorkspaceLister interface {
+	Workspaces(ctx context.Context) ([]agterm.Workspace, error)
+}
+
+// RowOpener creates an agterm row with a login shell and selects it.
+type RowOpener interface {
+	NewRow(ctx context.Context, row agterm.NewRow) (string, error)
+}
