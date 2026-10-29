@@ -341,6 +341,8 @@ with an older agterm every proxied call fails and everything else keeps working.
 | Network or bridge drop | Hooks no-op, the agent keeps running, and the daemon reconnects. The last level is pushed again after reconnect. |
 | agterm quits | The relay's short socket timeout drops the event; the next agterm attach rebinds the row. |
 | Switch Macs | The new bridge reclaims the per-host socket and `open` rewrites the session binding. |
+| Remote socket left behind | A dropped connection can leave the forwarded socket on the host, and sshd's `StreamLocalBindUnlink` defaults to `no`, so a new `-R` bind fails. When the bridge log shows that failure, the daemon unlinks the remote socket over SSH and binds again. |
+| `ControlMaster` in `ssh_config` | The bridge always opens its own connection (`ControlMaster=no`, `ControlPath=none`): a forward made through a shared master outlives the bridge and blocks every restart. |
 | No agterm client | The remote agent continues normally; status delivery is simply unavailable. |
 | Event while fully offline | It is not queued. The most recent level is restored when the bridge reconnects. |
 | Bridge down | `agtermctl (via agr): the bridge to the Mac is down (run agr up <host> on the Mac)` |
