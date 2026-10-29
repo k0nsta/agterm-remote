@@ -493,7 +493,15 @@ func (h *hostCtl) runPage(ctx context.Context, prepared proxy.Prepared, frames p
 	var out bytes.Buffer
 	opened := prepared
 	opened.Args = args
-	if code := h.exec(ctx, opened, &out, frames.Stderr()); code != 0 || ctx.Err() != nil {
+	code := h.exec(ctx, opened, &out, frames.Stderr())
+	// Read the cancel once: a call that ends after this goes on and is closed
+	// by the wait below; one that ended after agterm opened the page, too late
+	// for exec to see it, is closed here.
+	canceled := ctx.Err() != nil
+	if code == 0 && canceled {
+		h.cancelHook(ctx, prepared.Cancel)
+	}
+	if code != 0 || canceled {
 		h.svc.shim.release(p)
 		_, _ = frames.Stdout().Write(out.Bytes())
 		return max(code, 1)
