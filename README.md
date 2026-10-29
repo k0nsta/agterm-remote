@@ -5,6 +5,10 @@
 stays remote and survives SSH disconnects; status, colors, and notifications
 return through a self-healing bridge.
 
+![Remote agents' status in the agterm sidebar](docs/media/status.gif)
+
+*Three Claudes run on the host `myhost`. Their status shows in the Mac's sidebar: grey while working, green when done, cleared once you open the row.*
+
 ## Quick start
 
 Install the Mac binary and keep its daemon running:
@@ -171,6 +175,10 @@ shell line. `agr setup` binds that chord when it is free; use
 `agr setup --paste-key 'ctrl+a>v'` to choose a different chord. The same
 operation is available as `agr paste [row] [pane-id]`.
 
+![Pasting an image into a remote Claude](docs/media/paste.gif)
+
+*An image on the Mac clipboard is pasted into the remote `api` Claude (`ctrl+a>v`) and arrives as `[Image #1]`.*
+
 The sources are checked in this order:
 
 - regular files copied in Finder with `⌘C` (several files are supported; these
@@ -244,6 +252,10 @@ runs the real `agtermctl`. `agr open` also exports `AGTERM_ENABLED`,
 `AGTERM_SESSION_ID`, `AGTERM_PANE`, `AGTERM_PANE_ID` and `AGTERM_SOCKET=agr-proxy`
 into the remote session, so tools that look for agterm find it.
 
+![A remote Claude asks with a panel on the Mac](docs/media/remote-panel.gif)
+
+*The `api` Claude runs on `myhost` and asks with a choice panel on the Mac. The pick goes back to it.*
+
 ```sh
 # on the host, inside an agr row:
 agtermctl session overlay open --html /tmp/panel.html --js --block
@@ -290,6 +302,10 @@ notification for its row: **Allow once**, **Allow `<host>` here until it
 closes**, or **Deny**. Return denies, and so does no answer within 2 minutes.
 Nothing is typed until you allow it. Text typed later under the grant posts a
 notification too, which leaves agterm's unseen badge on the row.
+
+![A remote Claude hands a note to a local Claude after consent](docs/media/handoff.gif)
+
+*The remote `api` Claude sends a note to `review`, a Claude on the Mac. agterm asks first; after **Allow once** the text lands in its input.*
 
 ### The `agr` skill
 
