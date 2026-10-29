@@ -129,6 +129,8 @@ func TestRunSetupRejectsBadArguments(t *testing.T) {
 		{"setup", "--page-size", "101"},
 		{"setup", "--page-size", "big"},
 		{"setup", "--page-size", "50", "--page-size", "60"},
+		{"setup", "--new-key"},
+		{"setup", "--new-key", "x", "--new-key", "y"},
 	} {
 		var out, errout strings.Builder
 		if got := runWithApplication(argv, &out, &errout, &application{}); got != 2 {
@@ -137,11 +139,11 @@ func TestRunSetupRejectsBadArguments(t *testing.T) {
 	}
 }
 
-func TestRunSetupAcceptsBothFlagsInEitherOrder(t *testing.T) {
+func TestRunSetupAcceptsTheKeyFlagsInAnyOrder(t *testing.T) {
 	t.Helper()
 	for _, args := range [][]string{
-		{"setup", "--end-key", "ctrl+a>x", "--paste-key", "ctrl+a>v"},
-		{"setup", "--paste-key", "ctrl+a>v", "--end-key", "ctrl+a>x"},
+		{"setup", "--end-key", "ctrl+a>x", "--paste-key", "ctrl+a>v", "--new-key", "ctrl+a>n"},
+		{"setup", "--new-key", "ctrl+a>n", "--paste-key", "ctrl+a>v", "--end-key", "ctrl+a>x"},
 	} {
 		t.Run(strings.Join(args[1:], "/"), func(t *testing.T) {
 			home := t.TempDir()
@@ -154,8 +156,10 @@ func TestRunSetupAcceptsBothFlagsInEitherOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(keymap), `"End remote session" ctrl+a>x`) || !strings.Contains(string(keymap), `"Paste to remote" ctrl+a>v`) {
-				t.Fatalf("keymap.conf = %q, want both requested chords", keymap)
+			for _, want := range []string{`"End remote session" ctrl+a>x`, `"Paste to remote" ctrl+a>v`, `"New remote session" ctrl+a>n`} {
+				if !strings.Contains(string(keymap), want) {
+					t.Fatalf("keymap.conf = %q, want %s", keymap, want)
+				}
 			}
 		})
 	}
@@ -225,5 +229,16 @@ func TestRunSkillPrintsAndRejectsArguments(t *testing.T) {
 	out.Reset()
 	if got := runWithApplication([]string{"skill", "x"}, &out, &errw, &application{}); got != 2 {
 		t.Fatalf("run(skill x) exit = %d, want 2", got)
+	}
+}
+
+func TestRunNewRejectsExtraArguments(t *testing.T) {
+	t.Helper()
+	var out, errout strings.Builder
+	if got := runWithApplication([]string{"new", "row-1", "x"}, &out, &errout, &application{}); got != 2 {
+		t.Fatalf("run(new row-1 x) exit = %d, want 2", got)
+	}
+	if !strings.Contains(errout.String(), "usage: agr new [row]") {
+		t.Fatalf("stderr = %q, want new usage", errout.String())
 	}
 }

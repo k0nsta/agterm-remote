@@ -42,6 +42,9 @@ Commands:
                           Open a plain remote login shell (no session)
   end [row]                Kill a row's remote sessions and close the row
   paste [row] [pane-id]   Send clipboard files/image or latest screenshot to a remote row
+  new [row]                Pick a host, session and workspace; open it in a new row
+  setup [--end-key <chord>] [--paste-key <chord>] [--new-key <chord>]
+                          Make agterm's ⌘D and ⌘J follow a remote row; add End, Paste and New commands
 
 Options:
   --help, -h               Show this help
@@ -122,6 +125,7 @@ On a row opened with `agr open`, agterm's own keys can follow the remote host:
 | ⌘D | local split | `a1-2` on the remote host, in `a1`'s current directory |
 | ⌘J | local scratch | a plain shell on the remote host, in `a1`'s current directory |
 | End key (yours, e.g. ctrl+a x) | — | asks, then ends `a1` and `a1-2` and closes the row |
+| ctrl+a n | pick a host, session and workspace, open it in a new row | the same, `remote` and the row's workspace offered first |
 
 ### Setup
 
@@ -129,6 +133,7 @@ On a row opened with `agr open`, agterm's own keys can follow the remote host:
 agr setup                        # asks for the End key; Enter skips it
 agr setup --end-key 'ctrl+a>x'   # bind or change it later
 agr setup --paste-key 'ctrl+a>v' # Paste gets ctrl+a>v when first added and free
+agr setup --new-key 'ctrl+a>n'   # New gets ctrl+a>n when first added and free
 ```
 
 It writes these lines with the binary's own path, then reloads agterm. Lines
@@ -143,10 +148,20 @@ on pane.scratch   '/opt/homebrew/bin/agr' on-scratch
 # keymap.conf (with no key, run it from agterm's command palette)
 command "End remote session" ctrl+a>x --error-hud '/opt/homebrew/bin/agr' end "{AGT_SESSION_ID}"
 command "Paste to remote" ctrl+a>v --error-hud '/opt/homebrew/bin/agr' paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"
+command "New remote session" ctrl+a>n --error-hud '/opt/homebrew/bin/agr' new "{AGT_SESSION_ID}"
 ```
 
 Run `agr install <host>` once per host so it has the current remote script.
 Tested on agterm 0.35.
+
+### Open a new remote session
+
+Press `ctrl+a>n` (or run `agr new`) and answer three pickers: the host (hosts
+you installed or opened, the current row's first; type any other), the session
+on it (pick one, or type a new name), and the workspace (the current one
+first; type a name to create one). A new row opens right after the current
+one, or in the chosen workspace, and runs `agr open <host> <name>` in its shell,
+so a failed connection stays readable there. Escape at any picker opens nothing.
 
 ### Paste a screenshot (or files)
 
@@ -183,6 +198,20 @@ defaults write com.apple.screencapture show-thumbnail -bool false
 
 The paths arrive as one bracketed paste, so Claude Code shows each image as
 `[Image #N]`, as it does for a local drag. Your Mac clipboard is not touched.
+
+### Links
+
+With tmux `mouse on`, tmux takes a plain ⌘-click; use ⇧⌘-click to open a link
+on a remote row. A URL that wraps is found only up to the line end. For whole
+links, let tmux 3.4+ pass OSC 8 through and make Claude Code emit it on the
+host:
+
+```sh
+# ~/.tmux.conf
+set -as terminal-features ',*:hyperlinks'
+# ~/.profile (FORCE_HYPERLINK also writes link codes into pipes and files)
+export FORCE_HYPERLINK=1
+```
 
 ### What each piece is
 

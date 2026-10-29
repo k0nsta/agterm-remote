@@ -38,8 +38,9 @@ Commands:
   end [row]                Kill a row's remote sessions and close the row
   paste [row] [pane-id]   Send the clipboard or latest screenshot to a remote row
   skill                   Print the agr skill for Claude (agr setup and agr install write it)
-  setup [--end-key <chord>] [--paste-key <chord>] [--page-size <percent>]
-                          Make agterm's ⌘D and ⌘J follow a remote row; add End and Paste commands
+  new [row]                Pick a host, session and workspace; open it in a new row
+  setup [--end-key <chord>] [--paste-key <chord>] [--new-key <chord>] [--page-size <percent>]
+                          Make agterm's ⌘D and ⌘J follow a remote row; add End, Paste and New commands
 
 Options:
   --help, -h               Show this help
@@ -64,6 +65,7 @@ var commandHandlers = map[string]commandHandler{
 	"shell":   runShell,
 	"end":     runEnd,
 	"paste":   runPaste,
+	"new":     runNew,
 	"setup":   runSetup,
 	"skill":   runSkill,
 	// Hook entry points, run by agterm's hooks.conf rather than by hand, so
@@ -160,44 +162,49 @@ func runSkill(_ context.Context, _ *application, args []string, out, errw io.Wri
 	return cli.RunSkill(version, out, errw)
 }
 
-const setupUsage = "usage: agr setup [--end-key <chord>] [--paste-key <chord>] [--page-size <percent>]"
+// runNew takes the current row from its argument (a keymap command passes
+// {AGT_SESSION_ID}) or the environment; without one the row goes to the
+// chosen workspace's end. The window comes from the environment the same way,
+// and without one agterm uses the frontmost.
+func runNew(ctx context.Context, app *application, args []string, _, errw io.Writer) int {
+	if len(args) > 1 {
+		_, _ = fmt.Fprintln(errw, "usage: agr new [row]")
+		return 2
+	}
+	row := optionalArg(args, 0)
+	for _, key := range []string{"AGT_SESSION_ID", "AGTERM_SESSION_ID"} {
+		if row == "" {
+			row = os.Getenv(key)
+		}
+	}
+	window := os.Getenv("AGT_WINDOW_ID")
+	if window == "" {
+		window = os.Getenv("AGTERM_WINDOW_ID")
+	}
+	return cli.RunNew(ctx, row, app.newRow(window), errw)
+}
+
+const setupUsage = "usage: agr setup [--end-key <chord>] [--paste-key <chord>] [--new-key <chord>] [--page-size <percent>]"
 
 func runSetup(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
-	var endKey string
-	var pasteKey string
+	keys := map[string]string{}
 	pageSize := -1
-	seenEnd, seenPaste := false, false
 	for i := 0; i < len(args); i++ {
-		if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" || strings.HasPrefix(args[i+1], "-") {
+		_, seen := keys[args[i]]
+		known := args[i] == "--end-key" || args[i] == "--paste-key" || args[i] == "--new-key" || args[i] == "--page-size"
+		if !known || seen || i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" || strings.HasPrefix(args[i+1], "-") {
 			_, _ = fmt.Fprintln(errw, setupUsage)
 			return 2
 		}
-		switch args[i] {
-		case "--end-key":
-			if seenEnd {
-				_, _ = fmt.Fprintln(errw, setupUsage)
-				return 2
-			}
-			seenEnd = true
-			endKey = args[i+1]
-		case "--paste-key":
-			if seenPaste {
-				_, _ = fmt.Fprintln(errw, setupUsage)
-				return 2
-			}
-			seenPaste = true
-			pasteKey = args[i+1]
-		case "--page-size":
+		if args[i] == "--page-size" {
 			size, err := strconv.Atoi(args[i+1])
-			if pageSize != -1 || err != nil || size < 1 || size > 100 {
+			if err != nil || size < 1 || size > 100 {
 				_, _ = fmt.Fprintln(errw, setupUsage+" (percent is 1-100)")
 				return 2
 			}
 			pageSize = size
-		default:
-			_, _ = fmt.Fprintln(errw, setupUsage)
-			return 2
 		}
+		keys[args[i]] = args[i+1]
 		i++
 	}
 	if pageSize != -1 {
@@ -205,7 +212,7 @@ func runSetup(ctx context.Context, app *application, args []string, out, errw io
 			return code
 		}
 	}
-	return cli.RunSetup(ctx, app.setup(out, endKey, pasteKey), errw)
+	return cli.RunSetup(ctx, app.setup(out, keys["--end-key"], keys["--paste-key"], keys["--new-key"]), errw)
 }
 
 // savePageSize stores the default size of a host's page; 100 means full.

@@ -105,12 +105,30 @@ func (a *application) paste() cli.PasteDependencies {
 	}
 }
 
+// newRow wires agr new on the application's control client, pinned to the
+// window the command fired in: the pickers, the row it creates and the pane it
+// types into all stay there if the user switches windows meanwhile.
+func (a *application) newRow(window string) cli.NewDependencies {
+	ctl := a.control
+	if ctl == nil {
+		ctl = agterm.NewCtl("", "", nil, nil, nil)
+	}
+	ctl = ctl.InWindow(window)
+	dirs := a.dirs
+	return cli.NewDependencies{
+		Hosts: func() ([]string, error) { return remote.CachedHosts(dirs) },
+		Store: a.store, Remote: a.openRemote, Picker: ctl, Rows: ctl, Workspaces: ctl,
+		Opener: ctl, Closer: ctl, Panes: ctl, Agr: stableAgr(),
+	}
+}
+
 // setup wires agr setup. Without agtermctl it still writes the files, to the
 // default config directory, and leaves the reload to agterm's next start. The
-// key for End remote session is asked only on a terminal; Paste never prompts.
-func (a *application) setup(out io.Writer, endKey, pasteKey string) cli.SetupDependencies {
+// key for End remote session is asked only on a terminal; Paste and New never
+// prompt.
+func (a *application) setup(out io.Writer, endKey, pasteKey, newKey string) cli.SetupDependencies {
 	home, _ := os.UserHomeDir()
-	deps := cli.SetupDependencies{Agr: stableAgr(), Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey, Version: version}
+	deps := cli.SetupDependencies{Agr: stableAgr(), Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey, NewKey: newKey, Version: version}
 	if home != "" {
 		deps.SkillDir = filepath.Join(home, ".claude", "skills", "agr")
 	}
@@ -212,6 +230,8 @@ var (
 	_ cli.RowBindings                         = (*bindings.Store)(nil)
 	_ cli.Confirmer                           = (*agterm.Ctl)(nil)
 	_ cli.RowCloser                           = (*agterm.Ctl)(nil)
+	_ cli.WorkspaceLister                     = (*agterm.Ctl)(nil)
+	_ cli.RowOpener                           = (*agterm.Ctl)(nil)
 	_ cli.AgtermConfig                        = (*agterm.Ctl)(nil)
 	_ cli.Sessions                            = (*remote.Runner)(nil)
 	_ cli.Installer                           = (*remote.Runner)(nil)

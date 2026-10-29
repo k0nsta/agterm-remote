@@ -16,8 +16,11 @@ import (
 // by the daemon and CLI. The paths are kept on the adapter so every command
 // uses the same explicitly resolved binary and control socket.
 type Ctl struct {
-	path   string
-	sock   string
+	path string
+	sock string
+	// window pins the window-scoped commands to one window; empty is
+	// agtermctl's default, the frontmost.
+	window string
 	run    Runner
 	out    Outputter
 	stream Streamer
@@ -65,6 +68,25 @@ func NewCtl(path, sock string, runner Runner, outputter Outputter, streamer Stre
 func (c *Ctl) Exec(ctx context.Context, stdin []byte, stdout, stderr io.Writer, args ...string) (int, error) {
 	full := append(append([]string(nil), args...), "--socket", c.sock)
 	return c.exec.Exec(ctx, stdin, stdout, stderr, c.path, full...)
+}
+
+// InWindow returns a copy of the adapter whose tree, picker and row commands
+// address the given window instead of the frontmost one, so a flow started in
+// one window stays there when the user switches. An empty id keeps the
+// default.
+func (c *Ctl) InWindow(window string) *Ctl {
+	scoped := *c
+	scoped.window = window
+	return &scoped
+}
+
+// socket ends an argv with the control socket, and the pinned window when
+// there is one.
+func (c *Ctl) socket(args ...string) []string {
+	if c.window != "" {
+		args = append(args, "--window", c.window)
+	}
+	return append(args, "--socket", c.sock)
 }
 
 // HudOpen opens an agterm HUD for a row.
@@ -225,7 +247,7 @@ func (c *Ctl) Surfaces(ctx context.Context) (map[string][]Surface, error) {
 
 // PaneText returns the visible screen of one pane.
 func (c *Ctl) PaneText(ctx context.Context, row, paneID string) (string, error) {
-	out, exit, err := c.out.Output(ctx, nil, c.path, "session", "text", "--target", row, "--pane-id", paneID, "--socket", c.sock)
+	out, exit, err := c.out.Output(ctx, nil, c.path, c.socket("session", "text", "--target", row, "--pane-id", paneID)...)
 	if err != nil || exit != 0 {
 		if err == nil {
 			err = fmt.Errorf("command exited with status %d", exit)
@@ -248,7 +270,7 @@ func (c *Ctl) TypeLine(ctx context.Context, row, paneID, text string) error {
 }
 
 func (c *Ctl) typeText(ctx context.Context, row, paneID string, text []byte) error {
-	out, exit, err := c.out.Output(ctx, text, c.path, "session", "type", "--stdin", "--target", row, "--pane-id", paneID, "--socket", c.sock)
+	out, exit, err := c.out.Output(ctx, text, c.path, c.socket("session", "type", "--stdin", "--target", row, "--pane-id", paneID)...)
 	if err != nil || exit != 0 {
 		if err == nil {
 			err = fmt.Errorf("command exited with status %d", exit)
@@ -287,8 +309,14 @@ func (c *Ctl) TreeRows(ctx context.Context) ([]TreeRow, error) {
 	return c.treeSessions(ctx)
 }
 
-func (c *Ctl) treeSessions(ctx context.Context) ([]TreeRow, error) {
-	out, exit, err := c.out.Output(ctx, nil, c.path, "tree", "--json", "--socket", c.sock)
+type treeWorkspace struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Sessions []TreeRow `json:"sessions"`
+}
+
+func (c *Ctl) tree(ctx context.Context) ([]treeWorkspace, error) {
+	out, exit, err := c.out.Output(ctx, nil, c.path, c.socket("tree", "--json")...)
 	if err != nil || exit != 0 {
 		if err == nil {
 			err = fmt.Errorf("command exited with status %d", exit)
@@ -299,9 +327,7 @@ func (c *Ctl) treeSessions(ctx context.Context) ([]TreeRow, error) {
 	var response struct {
 		Result *struct {
 			Tree *struct {
-				Workspaces []struct {
-					Sessions []TreeRow `json:"sessions"`
-				} `json:"workspaces"`
+				Workspaces []treeWorkspace `json:"workspaces"`
 			} `json:"tree"`
 		} `json:"result"`
 	}
@@ -311,9 +337,16 @@ func (c *Ctl) treeSessions(ctx context.Context) ([]TreeRow, error) {
 	if response.Result == nil || response.Result.Tree == nil {
 		return nil, errors.New("decode agterm tree: missing result.tree")
 	}
+	return response.Result.Tree.Workspaces, nil
+}
 
+func (c *Ctl) treeSessions(ctx context.Context) ([]TreeRow, error) {
+	workspaces, err := c.tree(ctx)
+	if err != nil {
+		return nil, err
+	}
 	sessions := make([]TreeRow, 0)
-	for _, workspace := range response.Result.Tree.Workspaces {
+	for _, workspace := range workspaces {
 		for _, session := range workspace.Sessions {
 			if session.ID != "" {
 				sessions = append(sessions, session)
@@ -321,6 +354,73 @@ func (c *Ctl) treeSessions(ctx context.Context) ([]TreeRow, error) {
 		}
 	}
 	return sessions, nil
+}
+
+// Workspace is one agterm workspace and the ids of its rows. Names are not
+// unique; the id is the address.
+type Workspace struct {
+	ID   string
+	Name string
+	Rows []string
+}
+
+// Workspaces returns the frontmost window's workspaces in sidebar order.
+func (c *Ctl) Workspaces(ctx context.Context) ([]Workspace, error) {
+	tree, err := c.tree(ctx)
+	if err != nil {
+		return nil, err
+	}
+	workspaces := make([]Workspace, 0, len(tree))
+	for _, workspace := range tree {
+		rows := make([]string, 0, len(workspace.Sessions))
+		for _, session := range workspace.Sessions {
+			rows = append(rows, session.ID)
+		}
+		workspaces = append(workspaces, Workspace{ID: workspace.ID, Name: workspace.Name, Rows: rows})
+	}
+	return workspaces, nil
+}
+
+// NewRow is where `session new` puts a row: right after the After row, in the
+// Workspace with that id, or in the workspace named WorkspaceName, created
+// when there is none. With all three empty it goes to the current workspace.
+type NewRow struct {
+	Name          string
+	After         string
+	Workspace     string
+	WorkspaceName string
+}
+
+// NewRow creates a row with a login shell, selects it, and returns its id.
+func (c *Ctl) NewRow(ctx context.Context, row NewRow) (string, error) {
+	args := []string{"session", "new", "--name", row.Name}
+	switch {
+	case row.After != "":
+		args = append(args, "--after", row.After)
+	case row.Workspace != "":
+		args = append(args, "--workspace", row.Workspace)
+	case row.WorkspaceName != "":
+		args = append(args, "--workspace-name", row.WorkspaceName, "--create-workspace")
+	}
+	out, exit, err := c.out.Output(ctx, nil, c.path, c.socket(append(args, "--json")...)...)
+	if err != nil || exit != 0 {
+		if err == nil {
+			err = fmt.Errorf("command exited with status %d", exit)
+		}
+		return "", commandError("session new", out, exit, err)
+	}
+	var response struct {
+		Result struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out, &response); err != nil {
+		return "", fmt.Errorf("decode agtermctl session new: %w", err)
+	}
+	if response.Result.ID == "" {
+		return "", errors.New("agtermctl session new returned no id")
+	}
+	return response.Result.ID, nil
 }
 
 // Confirm asks a yes/no question in a dialog anchored on row and reports
@@ -462,7 +562,7 @@ func (c *Ctl) Notify(ctx context.Context, row, title, body string) error {
 
 // CloseRow closes an agterm row.
 func (c *Ctl) CloseRow(ctx context.Context, row string) error {
-	return c.run.Run(ctx, c.path, "session", "close", "--target", row, "--socket", c.sock)
+	return c.run.Run(ctx, c.path, c.socket("session", "close", "--target", row)...)
 }
 
 // ConfigPaths returns the hooks.conf and keymap.conf agterm actually reads,
@@ -545,7 +645,7 @@ func (c *Ctl) Pick(ctx context.Context, items []PickItem, prompt string) (PickRe
 	if err != nil {
 		return PickResult{}, fmt.Errorf("encode picker items: %w", err)
 	}
-	out, exit, runErr := c.out.Output(ctx, stdin, c.path, "pick", "open", "--prompt", prompt, "--allow-custom", "--socket", c.sock)
+	out, exit, runErr := c.out.Output(ctx, stdin, c.path, c.socket("pick", "open", "--prompt", prompt, "--allow-custom")...)
 	if runErr != nil && exit != 2 {
 		return PickResult{}, commandError("pick", out, exit, runErr)
 	}
