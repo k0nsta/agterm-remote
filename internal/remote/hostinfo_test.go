@@ -60,7 +60,7 @@ func TestCachedHosts(t *testing.T) {
 	if hosts, err := CachedHosts(dirs); err != nil || len(hosts) != 0 {
 		t.Fatalf("CachedHosts() with no cache = %v, %v; want none", hosts, err)
 	}
-	for _, host := range []string{"user@example.com", "homelab"} {
+	for _, host := range []string{"user@example.com", "myhost"} {
 		if err := SaveHostInfo(dirs, host, HostInfo{}); err != nil {
 			t.Fatalf("SaveHostInfo(%q) error = %v", host, err)
 		}
@@ -79,7 +79,7 @@ func TestCachedHosts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CachedHosts() error = %v", err)
 	}
-	if want := []string{"homelab", "old-box", "user@example.com"}; !reflect.DeepEqual(hosts, want) {
+	if want := []string{"myhost", "old-box", "user@example.com"}; !reflect.DeepEqual(hosts, want) {
 		t.Fatalf("CachedHosts() = %v, want %v", hosts, want)
 	}
 }

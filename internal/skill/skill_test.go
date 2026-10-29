@@ -59,7 +59,7 @@ func TestFrontmatterParses(t *testing.T) {
 func TestNoHostLiterals(t *testing.T) {
 	t.Helper()
 	lower := strings.ToLower(string(source))
-	for _, literal := range []string{"homelab", "user@", ".local\n", "192.168."} {
+	for _, literal := range []string{"myhost", "user@", ".local\n", "192.168."} {
 		if strings.Contains(lower, literal) {
 			t.Errorf("skill contains the host literal %q", literal)
 		}

@@ -250,7 +250,7 @@ agtermctl session overlay open --html /tmp/panel.html --js --block
 {"outcome":"submitted","value":"…"}
 ```
 
-- **Works unchanged**: `decide` panels, `show-image`, `session text` / `type`
+- **Works unchanged**: HTML panels that submit or close, `session text` / `type`
   between rows, `notify`, `session status`, `session new` (the new row runs on
   the same host).
 - **Allowlist**: only listed commands and options work. Everything else is
@@ -267,7 +267,7 @@ agtermctl session overlay open --html /tmp/panel.html --js --block
   `~/.config/agr/config.json`; `100` is full again). A split with a Mac pane
   stays full.
 - **`foreground` limitation**: a remote row's `foreground` in `tree --json` is
-  `agr`, not the remote program. Tools that poll it (such as `spawn-agent`'s
+  `agr`, not the remote program. Tools that poll it (such as a spawn script's
   "is it running" check) see `agr`; read `session text` instead.
 - **New leaf**: a command that is not in the allowlist is added only on request.
   Open an issue with the command line and what it is for.

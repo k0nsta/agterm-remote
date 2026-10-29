@@ -15,7 +15,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/proxy/mocks"
 )
 
-const testHost = "homelab"
+const testHost = "myhost"
 
 // testID is the prefix of every fixture id; two digits follow.
 const testID = "00000000-0000-4000-8000-0000000000"

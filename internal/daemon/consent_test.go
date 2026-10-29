@@ -85,7 +85,7 @@ func TestConsentPairStoresTheGrantAndSkipsLaterDialogs(t *testing.T) {
 	if len(notices) != 2 {
 		t.Fatalf("notices = %q, want the dialog's and the granted call's", notices)
 	}
-	wantTyped := [3]string{rowAgent, "w1 on homelab typed into “orchestrator”", "⟦two⟧"}
+	wantTyped := [3]string{rowAgent, "w1 on myhost typed into “orchestrator”", "⟦two⟧"}
 	if notices[1] != wantTyped {
 		t.Fatalf("granted notice = %q, want %q", notices[1], wantTyped)
 	}
@@ -321,16 +321,16 @@ func TestConsentDialogContent(t *testing.T) {
 	env.ctl.mu.Lock()
 	request := env.ctl.asks[0]
 	env.ctl.mu.Unlock()
-	if request.Title != "Anything on homelab wants to type into “orchestrator”" {
+	if request.Title != "Anything on myhost wants to type into “orchestrator”" {
 		t.Fatalf("Title = %q", request.Title)
 	}
-	if request.Message != "From session w1 on homelab: ⟦hello⏎there⟧" {
+	if request.Message != "From session w1 on myhost: ⟦hello⏎there⟧" {
 		t.Fatalf("Message = %q", request.Message)
 	}
 	if request.Row != rowAgent || request.PaneID != paneAgent || request.Default != "deny" {
 		t.Fatalf("anchor = %s/%s default %q, want the target pane and a deny default", request.Row, request.PaneID, request.Default)
 	}
-	want := []agterm.AskButton{{ID: "once", Label: "Allow once"}, {ID: "pair", Label: "Allow homelab here until it closes"}, {ID: "deny", Label: "Deny"}}
+	want := []agterm.AskButton{{ID: "once", Label: "Allow once"}, {ID: "pair", Label: "Allow myhost here until it closes"}, {ID: "deny", Label: "Deny"}}
 	if len(request.Buttons) != 3 || request.Buttons[0] != want[0] || request.Buttons[1] != want[1] || request.Buttons[2] != want[2] {
 		t.Fatalf("Buttons = %+v, want %+v", request.Buttons, want)
 	}
@@ -364,11 +364,11 @@ func TestConsentDialogCutsAt300CharactersAndEscapesInvisibles(t *testing.T) {
 	request := env.host.dialogFor(req, consent)
 
 	wantShown := strings.Repeat("é", 299) + "X"
-	wantMessage := "From session w1 on homelab: ⟦" + wantShown + "⟧… (306 characters)"
+	wantMessage := "From session w1 on myhost: ⟦" + wantShown + "⟧… (306 characters)"
 	if request.Message != wantMessage {
 		t.Fatalf("Message = %q, want %q", request.Message, wantMessage)
 	}
-	if request.Title != `Anything on homelab wants to type into “bad\u{202E}name\u{001B}[2J\u{000A}”` {
+	if request.Title != `Anything on myhost wants to type into “bad\u{202E}name\u{001B}[2J\u{000A}”` {
 		t.Fatalf("Title = %q, want the row name's invisibles escaped", request.Title)
 	}
 	for _, field := range []string{request.Title, request.Message} {

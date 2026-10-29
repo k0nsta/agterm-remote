@@ -10,10 +10,10 @@ typing `agr open <host>` by hand. This adds the third command:
   name a session on it, pick the workspace (or name a new one), and get a new row there
   running `agr open <host> <name>`.
 
-Example: on row `a1` (homelab, workspace `homelab - tools`) press `ctrl+a>n` → host picker
-(`homelab` first) → Enter → session picker on homelab → type `a2` → workspace picker
-(`homelab - tools` first, then `local`) → Enter → new row right after `a1` named `a2`, its
-shell runs `'/opt/homebrew/bin/agr' open homelab a2`, which binds the row, starts the bridge
+Example: on row `a1` (myhost, workspace `myhost - tools`) press `ctrl+a>n` → host picker
+(`myhost` first) → Enter → session picker on myhost → type `a2` → workspace picker
+(`myhost - tools` first, then `local`) → Enter → new row right after `a1` named `a2`, its
+shell runs `'/opt/homebrew/bin/agr' open myhost a2`, which binds the row, starts the bridge
 and attaches. Typing `staging` at the workspace picker creates (or reuses) a workspace of that
 name and puts the row there.
 
@@ -135,6 +135,5 @@ name and puts the row there.
 - in agterm: `agr setup` adds the line; `ctrl+a>n` → host → session → workspace → new row
   attaches; cancel at each picker → no row; a new workspace name → created; an unreachable
   host → error HUD after the timeout, no row.
-- machine-setup (user's repo, not touched here): add beside End/Paste in `agterm/keymap.conf`
-  `command "New remote session" ctrl+a>n --error-hud '/opt/homebrew/bin/agr' new "{AGT_SESSION_ID}"`,
-  then `rigger sync`.
+- a keymap kept outside this repo needs the same line beside End/Paste:
+  `command "New remote session" ctrl+a>n --error-hud '/opt/homebrew/bin/agr' new "{AGT_SESSION_ID}"`.

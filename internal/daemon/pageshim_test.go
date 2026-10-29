@@ -51,7 +51,7 @@ func newTestShim(t *testing.T, live pageLive) *pageShim {
 	return shim
 }
 
-// openTestPage registers a page for host "homelab" with a file in a temp dir,
+// openTestPage registers a page for host "myhost" with a file in a temp dir,
 // bound to page id "P1".
 func openTestPage(t *testing.T, shim *pageShim, html string) (*page, string) {
 	t.Helper()
@@ -60,7 +60,7 @@ func openTestPage(t *testing.T, shim *pageShim, html string) (*page, string) {
 	if err := os.WriteFile(file, []byte(html), 0o600); err != nil {
 		t.Fatalf("write page: %v", err)
 	}
-	p, url, err := shim.register("homelab", "row-1", "left", file, dir)
+	p, url, err := shim.register("myhost", "row-1", "left", file, dir)
 	if err != nil {
 		t.Fatalf("register() error = %v", err)
 	}
@@ -356,7 +356,7 @@ func TestPageShimRefusesTheSeventeenthHandler(t *testing.T) {
 		t.Fatalf("write page: %v", err)
 	}
 	// An unbound page keeps each POST waiting for its id: 16 handlers busy.
-	_, url, err := shim.register("homelab", "row-1", "left", file, dir)
+	_, url, err := shim.register("myhost", "row-1", "left", file, dir)
 	if err != nil {
 		t.Fatalf("register() error = %v", err)
 	}
@@ -396,7 +396,7 @@ func TestPageShimRefusesTheNinthPage(t *testing.T) {
 	shim := newTestShim(t, newLiveSet(t).live)
 	var first *page
 	for i := 0; i < maxPagesPerHost; i++ {
-		p, _, err := shim.register("homelab", "row", "", "f", "")
+		p, _, err := shim.register("myhost", "row", "", "f", "")
 		if err != nil {
 			t.Fatalf("register #%d error = %v", i+1, err)
 		}
@@ -404,18 +404,18 @@ func TestPageShimRefusesTheNinthPage(t *testing.T) {
 			first = p
 		}
 	}
-	if _, _, err := shim.register("homelab", "row", "", "f", ""); err != errPageLimit {
+	if _, _, err := shim.register("myhost", "row", "", "f", ""); err != errPageLimit {
 		t.Fatalf("9th register error = %v, want %v", err, errPageLimit)
 	}
 	if _, _, err := shim.register("other", "row", "", "f", ""); err != nil {
 		t.Fatalf("another host's register error = %v, want none", err)
 	}
 	shim.release(first)
-	if _, _, err := shim.register("homelab", "row", "", "f", ""); err != nil {
+	if _, _, err := shim.register("myhost", "row", "", "f", ""); err != nil {
 		t.Fatalf("register after a release error = %v, want none", err)
 	}
-	shim.releaseHost("homelab")
-	if _, _, err := shim.register("homelab", "row", "", "f", ""); err != nil {
+	shim.releaseHost("myhost")
+	if _, _, err := shim.register("myhost", "row", "", "f", ""); err != nil {
 		t.Fatalf("register after releaseHost error = %v, want none", err)
 	}
 }
@@ -424,7 +424,7 @@ func TestPageShimWaitsForTheIDOfALatePage(t *testing.T) {
 	t.Helper()
 	shim := newTestShim(t, newLiveSet(t, "P9").live)
 	dir := t.TempDir()
-	p, url, err := shim.register("homelab", "row-1", "", "f", dir)
+	p, url, err := shim.register("myhost", "row-1", "", "f", dir)
 	if err != nil {
 		t.Fatalf("register() error = %v", err)
 	}
@@ -441,7 +441,7 @@ func TestPageShimGivesUpOnAPageThatNeverBinds(t *testing.T) {
 	t.Helper()
 	shim := newTestShim(t, newLiveSet(t).live)
 	shim.bindWait = 50 * time.Millisecond
-	p, url, err := shim.register("homelab", "row-1", "", "f", "")
+	p, url, err := shim.register("myhost", "row-1", "", "f", "")
 	if err != nil {
 		t.Fatalf("register() error = %v", err)
 	}
@@ -535,23 +535,23 @@ func TestPageShimCloseDropsEverything(t *testing.T) {
 func TestWholeRowPageIsInEverySlot(t *testing.T) {
 	t.Helper()
 	shim := newTestShim(t, newLiveSet(t).live)
-	whole, _, err := shim.register("homelab", "row-1", "", "f", "")
+	whole, _, err := shim.register("myhost", "row-1", "", "f", "")
 	if err != nil {
 		t.Fatalf("register whole row: %v", err)
 	}
-	pane, _, err := shim.register("homelab", "row-2", "left", "f", "")
+	pane, _, err := shim.register("myhost", "row-2", "left", "f", "")
 	if err != nil {
 		t.Fatalf("register pane: %v", err)
 	}
 	for _, side := range []string{"left", "right", ""} {
-		if got := shim.openInSlot("homelab", "row-1", side); len(got) != 1 || got[0] != whole {
+		if got := shim.openInSlot("myhost", "row-1", side); len(got) != 1 || got[0] != whole {
 			t.Fatalf("row-1 %q slot = %v, want the whole-row page", side, got)
 		}
 	}
-	if got := shim.openInSlot("homelab", "row-2", "right"); len(got) != 0 {
+	if got := shim.openInSlot("myhost", "row-2", "right"); len(got) != 0 {
 		t.Fatalf("row-2 right slot = %v, want none", got)
 	}
-	if got := shim.openInSlot("homelab", "row-2", "left"); len(got) != 1 || got[0] != pane {
+	if got := shim.openInSlot("myhost", "row-2", "left"); len(got) != 1 || got[0] != pane {
 		t.Fatalf("row-2 left slot = %v, want the pane page", got)
 	}
 	if got := shim.openInSlot("other", "row-1", "left"); len(got) != 0 {

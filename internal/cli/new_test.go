@@ -67,7 +67,7 @@ func newNewFixture(t *testing.T, picks ...agterm.PickResult) newFixture {
 	store := bindings.New(pathstest.Dirs(t))
 	for _, binding := range []bindings.Binding{
 		{Row: "row-0", Host: "zeta", Name: "z1"},
-		{Row: "row-1", Host: "homelab", Name: "a1"},
+		{Row: "row-1", Host: "myhost", Name: "a1"},
 	} {
 		if err := store.Bind(binding); err != nil {
 			t.Fatalf("Bind() error = %v", err)
@@ -82,11 +82,11 @@ func newNewFixture(t *testing.T, picks ...agterm.PickResult) newFixture {
 			texts: []string{"$"}},
 	}
 	f.deps = NewDependencies{
-		Hosts: func() ([]string, error) { return []string{"user@box", "homelab"}, nil },
+		Hosts: func() ([]string, error) { return []string{"user@box", "myhost"}, nil },
 		Store: store, Remote: f.remote, Picker: f.picker,
 		Workspaces: &workspacesFake{items: []agterm.Workspace{
 			{ID: "W1", Name: "local", Rows: []string{"row-9"}},
-			{ID: "W2", Name: "homelab - tools", Rows: []string{"row-0", "row-1"}},
+			{ID: "W2", Name: "myhost - tools", Rows: []string{"row-0", "row-1"}},
 		}},
 		Opener: f.opener, Closer: f.closer, Panes: f.panes, Agr: "/opt/homebrew/bin/agr",
 		PromptWait: time.Second, PromptPoll: 100 * time.Millisecond, Sleep: func(time.Duration) {},
@@ -115,24 +115,24 @@ func labels(t *testing.T, items []agterm.PickItem) []string {
 
 func TestNewOpensTheSessionInARowAfterTheCurrentOne(t *testing.T) {
 	t.Helper()
-	f := newNewFixture(t, picked(t, "homelab"), typed(t, "a2"), picked(t, "W2"))
+	f := newNewFixture(t, picked(t, "myhost"), typed(t, "a2"), picked(t, "W2"))
 	if err := New(context.Background(), "row-1", f.deps); err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 	// The row's own host first, then every other bound or probed one, once.
-	if got, want := labels(t, f.picker.items[0]), []string{"homelab", "user@box", "zeta"}; !reflect.DeepEqual(got, want) {
+	if got, want := labels(t, f.picker.items[0]), []string{"myhost", "user@box", "zeta"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("host picker = %v, want %v", got, want)
 	}
-	if got := f.remote.calls; !reflect.DeepEqual(got, []string{"sessions homelab"}) {
+	if got := f.remote.calls; !reflect.DeepEqual(got, []string{"sessions myhost"}) {
 		t.Fatalf("remote calls = %v", got)
 	}
-	if got, want := labels(t, f.picker.items[2]), []string{"homelab - tools", "local"}; !reflect.DeepEqual(got, want) {
+	if got, want := labels(t, f.picker.items[2]), []string{"myhost - tools", "local"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("workspace picker = %v, want %v", got, want)
 	}
 	if want := []agterm.NewRow{{Name: "a2", After: "row-1"}}; !reflect.DeepEqual(f.opener.rows, want) {
 		t.Fatalf("NewRow() = %#v, want %#v", f.opener.rows, want)
 	}
-	if want := []string{"'/opt/homebrew/bin/agr' 'open' 'homelab' 'a2'"}; !reflect.DeepEqual(f.panes.typed, want) {
+	if want := []string{"'/opt/homebrew/bin/agr' 'open' 'myhost' 'a2'"}; !reflect.DeepEqual(f.panes.typed, want) {
 		t.Fatalf("typed = %q, want %q", f.panes.typed, want)
 	}
 	if want := []string{"row-new/P"}; !reflect.DeepEqual(f.panes.typedIn, want) {
@@ -151,7 +151,7 @@ func TestNewPlacesTheRowInTheChosenWorkspace(t *testing.T) {
 		{name: "a new workspace", workspace: typed(t, " staging "), want: agterm.NewRow{Name: "a1", WorkspaceName: "staging"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newNewFixture(t, picked(t, "homelab"), picked(t, "a1"), tc.workspace)
+			f := newNewFixture(t, picked(t, "myhost"), picked(t, "a1"), tc.workspace)
 			if err := New(context.Background(), "row-1", f.deps); err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -168,7 +168,7 @@ func TestNewWithoutARowListsHostsSorted(t *testing.T) {
 	if err := New(context.Background(), "", f.deps); err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	if got, want := labels(t, f.picker.items[0]), []string{"homelab", "user@box", "zeta"}; !reflect.DeepEqual(got, want) {
+	if got, want := labels(t, f.picker.items[0]), []string{"myhost", "user@box", "zeta"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("host picker = %v, want %v", got, want)
 	}
 	if f.picker.items[2][0].Subtitle != "" {
@@ -182,7 +182,7 @@ func TestNewWithoutARowListsHostsSorted(t *testing.T) {
 func TestNewCancelAtAnyPickerCreatesNoRow(t *testing.T) {
 	t.Helper()
 	for i := range 3 {
-		f := newNewFixture(t, picked(t, "homelab"), picked(t, "a1"), picked(t, "W2"))
+		f := newNewFixture(t, picked(t, "myhost"), picked(t, "a1"), picked(t, "W2"))
 		f.picker.results[i] = agterm.PickResult{}
 		f.picker.errs = make([]error, 3)
 		f.picker.errs[i] = agterm.ErrCancelled
@@ -205,8 +205,8 @@ func TestNewRejectsInvalidAnswers(t *testing.T) {
 	}{
 		{name: "host", picks: []agterm.PickResult{typed(t, "box;rm")}, want: "invalid remote host"},
 		{name: "blank host", picks: []agterm.PickResult{typed(t, " ")}, want: "invalid remote host"},
-		{name: "name", picks: []agterm.PickResult{picked(t, "homelab"), typed(t, "a b")}, want: "invalid name"},
-		{name: "workspace", picks: []agterm.PickResult{picked(t, "homelab"), picked(t, "a1"), typed(t, "  ")}, want: "invalid workspace"},
+		{name: "name", picks: []agterm.PickResult{picked(t, "myhost"), typed(t, "a b")}, want: "invalid name"},
+		{name: "workspace", picks: []agterm.PickResult{picked(t, "myhost"), picked(t, "a1"), typed(t, "  ")}, want: "invalid workspace"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newNewFixture(t, tc.picks...)
@@ -233,7 +233,7 @@ func TestNewClosesTheRowWhenItCannotTypeIntoIt(t *testing.T) {
 		{name: "tree failed", treeE: errors.New("socket gone"), want: "socket gone"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newNewFixture(t, picked(t, "homelab"), picked(t, "a1"), picked(t, "W2"))
+			f := newNewFixture(t, picked(t, "myhost"), picked(t, "a1"), picked(t, "W2"))
 			f.panes.tree, f.panes.treeErr = tc.tree, tc.treeE
 			err := New(context.Background(), "row-1", f.deps)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -255,7 +255,7 @@ func (f *slowSessionsFake) Sessions(ctx context.Context, _ string) ([]remote.Ses
 
 func TestNewTimesOutAnUnreachableHost(t *testing.T) {
 	t.Helper()
-	f := newNewFixture(t, picked(t, "homelab"))
+	f := newNewFixture(t, picked(t, "myhost"))
 	f.deps.Remote = &slowSessionsFake{}
 	f.deps.SessionsTimeout = 10 * time.Millisecond
 	err := New(context.Background(), "row-1", f.deps)

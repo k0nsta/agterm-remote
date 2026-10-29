@@ -59,13 +59,13 @@ func TestRewriteSessionNewBecomesAgrOpen(t *testing.T) {
 	f := newFixture(t)
 	prepared := f.prepare(t, f.rewriter(t), "session", "new", "--name", "w9", "--cwd", "/home/u/p",
 		"--command", "make test", "--no-select")
-	command := `'/opt/homebrew/bin/agr' 'open' 'homelab' 'w9' '--cwd' '/home/u/p' '--command' 'make test'`
+	command := `'/opt/homebrew/bin/agr' 'open' 'myhost' 'w9' '--cwd' '/home/u/p' '--command' 'make test'`
 	want := []string{"session", "new", "--name=w9", "--no-select", "--command=" + command}
 	if !reflect.DeepEqual(prepared.Args, want) {
 		t.Fatalf("Args = %q, want %q", prepared.Args, want)
 	}
 	if prepared.NewRow == nil || prepared.NewRow.Host != testHost || prepared.NewRow.Name != "w9" {
-		t.Fatalf("NewRow = %+v, want homelab/w9", prepared.NewRow)
+		t.Fatalf("NewRow = %+v, want myhost/w9", prepared.NewRow)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestRewriteSessionNewWithoutCommandOrCwd(t *testing.T) {
 	t.Helper()
 	f := newFixture(t)
 	prepared := f.prepare(t, f.rewriter(t), "session", "new", "--name", "w9")
-	want := []string{"session", "new", "--name=w9", "--command=" + `'/opt/homebrew/bin/agr' 'open' 'homelab' 'w9'`}
+	want := []string{"session", "new", "--name=w9", "--command=" + `'/opt/homebrew/bin/agr' 'open' 'myhost' 'w9'`}
 	if !reflect.DeepEqual(prepared.Args, want) {
 		t.Fatalf("Args = %q, want %q", prepared.Args, want)
 	}
@@ -101,7 +101,7 @@ func TestRewriteSessionNewNames(t *testing.T) {
 			if prepared.NewRow == nil || prepared.NewRow.Name != tc.want {
 				t.Fatalf("NewRow = %+v, want name %q", prepared.NewRow, tc.want)
 			}
-			if !strings.Contains(prepared.Args[len(prepared.Args)-1], "'open' 'homelab' '"+tc.want+"'") {
+			if !strings.Contains(prepared.Args[len(prepared.Args)-1], "'open' 'myhost' '"+tc.want+"'") {
 				t.Fatalf("command %q does not open %s", prepared.Args[len(prepared.Args)-1], tc.want)
 			}
 		})
@@ -127,7 +127,7 @@ func TestRewriteOverlayCommandBecomesAgrRun(t *testing.T) {
 	t.Helper()
 	f := newFixture(t)
 	prepared := f.prepare(t, f.rewriter(t), "session", "overlay", "open", "--block", "--", `vim 'a b' "it's"`)
-	command := `'/opt/homebrew/bin/agr' 'run' 'homelab' '--cwd' '/home/u' '--' 'sh' '-c' 'vim '\''a b'\'' "it'\''s"'`
+	command := `'/opt/homebrew/bin/agr' 'run' 'myhost' '--cwd' '/home/u' '--' 'sh' '-c' 'vim '\''a b'\'' "it'\''s"'`
 	want := []string{"session", "overlay", "open", "--target=" + rowCaller, "--block", command}
 	if !reflect.DeepEqual(prepared.Args, want) {
 		t.Fatalf("Args = %q, want %q", prepared.Args, want)
@@ -152,7 +152,7 @@ func TestRewriteOverlayCommandOmitsEmptyCwdAndKeepsSide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rewrite() error = %v", err)
 	}
-	command := `'/opt/homebrew/bin/agr' 'run' 'homelab' '--' 'sh' '-c' 'top'`
+	command := `'/opt/homebrew/bin/agr' 'run' 'myhost' '--' 'sh' '-c' 'top'`
 	want := []string{"session", "overlay", "open", "--target=" + rowMixed, "--pane=left", "--block", command}
 	if !reflect.DeepEqual(prepared.Args, want) {
 		t.Fatalf("Args = %q, want %q", prepared.Args, want)
@@ -166,7 +166,7 @@ func TestRewriteRestoreBecomesAgrOpenCommand(t *testing.T) {
 	t.Helper()
 	f := newFixture(t)
 	prepared := f.prepare(t, f.rewriter(t), "session", "restore", "claude --resume")
-	command := `'/opt/homebrew/bin/agr' 'open' 'homelab' 'w1' '--command' 'claude --resume'`
+	command := `'/opt/homebrew/bin/agr' 'open' 'myhost' 'w1' '--command' 'claude --resume'`
 	want := []string{"session", "restore", "--target=" + rowCaller, "--pane-id=" + paneCaller, command}
 	if !reflect.DeepEqual(prepared.Args, want) {
 		t.Fatalf("Args = %q, want %q", prepared.Args, want)
@@ -336,7 +336,7 @@ func TestRewriteQuotingSurvivesTheShell(t *testing.T) {
 func TestRewriteQuotingExactStringForAQuote(t *testing.T) {
 	t.Helper()
 	got := Join(testAgr, "run", testHost, "--cwd", `/d'ir`, "--", "echo", `a"b;c`)
-	want := `'/opt/homebrew/bin/agr' 'run' 'homelab' '--cwd' '/d'\''ir' '--' 'echo' 'a"b;c'`
+	want := `'/opt/homebrew/bin/agr' 'run' 'myhost' '--cwd' '/d'\''ir' '--' 'echo' 'a"b;c'`
 	if got != want {
 		t.Fatalf("Join() = %s, want %s", got, want)
 	}
@@ -400,7 +400,7 @@ func TestRewriteSessionNewConcurrentCallsGetDistinctNames(t *testing.T) {
 	}
 }
 
-// TestRewriteOverlayDropsFollowWithAWarning: decide.py and other page tools
+// TestRewriteOverlayDropsFollowWithAWarning: page tools
 // pass --follow by default; from a host it is left out, never applied.
 func TestRewriteOverlayDropsFollowWithAWarning(t *testing.T) {
 	t.Helper()

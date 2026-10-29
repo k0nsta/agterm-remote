@@ -433,7 +433,7 @@ PATH="$SCRATCH/bin:$PATH" ./agr sessions
 
 **Sourced checks.**
 ```sh
-bash -c 'source ./agr; remote_agr() { printf "agr\t0.4.0\napi\t2\t1\t180\tclaude\tA69B0B26-X\n"; }; cmd_ls homelab'
+bash -c 'source ./agr; remote_agr() { printf "agr\t0.4.0\napi\t2\t1\t180\tclaude\tA69B0B26-X\n"; }; cmd_ls myhost'
 ```
 (`source` inside `bash -c` so a `die` never takes the interactive shell with it.)
 

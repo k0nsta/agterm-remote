@@ -4,8 +4,7 @@
 
 On a row opened with `agr open`, programs run on the remote host. The host has no `agtermctl`
 and no `AGTERM_*` environment, so every agterm-aware tool refuses to run or falls back to
-something else. That includes the user's skills (`decide`, `spawn-agent`, `teardown-agent`,
-`autoimplementation`, `agterm/show-image.sh`) and anyone else's.
+something else. That includes any skill or script that drives agterm.
 
 This plan makes a remote row look like agterm to those tools:
 
@@ -20,14 +19,14 @@ This plan makes a remote row look like agterm to those tools:
   not those variables.
 
 ```sh
-# on homelab, inside an agr row:
+# on myhost, inside an agr row:
 agtermctl session overlay open --html /tmp/panel.html --js --block --target "$AGTERM_SESSION_ID"
 {"outcome":"submitted","value":"…"}
 ```
 
 What this enables:
 
-- **Remote UI**: `decide` panels and `show-image` overlays from a remote Claude.
+- **Remote UI**: HTML panels and image overlays from a remote Claude.
 - **Messaging**: `session text` / `session type` between panes the host owns. Mac → any row
   already works today.
 - **Remote spawn**: `agtermctl session new --command …` from the host becomes a new row
@@ -45,8 +44,7 @@ What this enables:
 Known limits, documented rather than hidden:
 
 - **Foreground reads `agr`**: a remote row's `foreground` in `tree --json` is the Mac-side
-  `agr`, not the remote program, so tools that poll it see `agr`. `spawn-agent` does this
-  (`spawn-agent.sh:160-183`), so it reports "not running"; see Post-Completion.
+  `agr`, not the remote program, so tools that poll it see `agr` and may report "not running".
 - **Single-file pages**: HTML pages must be one self-contained file.
 - **Restricted commands**: only the commands and options in the allowlist work from a host.
   Everything else fails with a clear message.
@@ -64,8 +62,8 @@ Decided by the user (not open):
 - **Consent grant**: any other pane can be messaged after the user allows it in an agterm `ask`
   dialog; "Allow for this pair" is remembered like an orchestrator grant. See Technical
   Details > Grants.
-- **Skill**: agr ships a generic `agr` skill (this repo). The user's own `spawn-agent` and
-  `teardown-agent` gain `--host` in machine-setup (Post-Completion).
+- **Skill**: agr ships a generic `agr` skill (this repo); users' own skills wrap the programs
+  they start.
 - **Host with a real agtermctl** (a Mac running agterm): `agr install` skips the proxy there.
 - **Status from hosts is scoped too**: a `session_id` status event is applied only to a row
   that has a pane bound to the sending host. This closes the unscoped path in
@@ -124,7 +122,7 @@ Decided by the user (not open):
 - **Skills**: Claude Code reads `~/.claude/skills/<name>/SKILL.md`. agterm installs its own
   `agterm` skill the same way, with an `<!-- agterm-skill -->` marker.
 - **Remote tests**: `tests/remote/{tmux,zmx}` with `lib.sh`.
-- **homelab** uses `AGR_RELAY=python3`; the Mac daemon running now predates 1.2.0.
+- **myhost** uses `AGR_RELAY=python3`; the Mac daemon running now predates 1.2.0.
 
 ## Development Approach
 
@@ -155,7 +153,7 @@ Decided by the user (not open):
 - **remote (sh)**: `tests/remote/{tmux,zmx}/proxy_test.sh` run the installed proxy against a
   fake python3 bridge server.
 - Every test-only helper takes `*testing.T` first and calls `t.Helper()`.
-- **live**: `tests/live/proxy_live.sh` (Task 8) runs the scriptable round trips against `homelab`
+- **live**: `tests/live/proxy_live.sh` (Task 8) runs the scriptable round trips against `myhost`
   and the local agterm; checks that need a click or an agterm restart are Post-Completion.
 
 ## Progress Tracking
@@ -413,7 +411,7 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
     row are refused without a dialog for 60 s
 - **Concurrency**: a call waiting on the dialog counts toward the 16-call cap.
 
-### Spike results (2026-10-22, agterm 0.36.0, tmux 3.5a on homelab)
+### Spike results (2026-10-22, agterm 0.36.0, tmux 3.5a on myhost)
 
 - **Environment**
   - tmux: `new-session -e K=V` reaches the session's shell. `set-environment -t <s> K V` on
@@ -421,14 +419,14 @@ load), where `Grant{Row, PaneID, Kind}` and `Kind` is `orchestrator` or `consent
     leaks into the global environment.
   - A command in place of the shell works: `new-session -d -s <n> -e … '<CMD>; exec "$SHELL" -l'`
     runs CMD, then leaves a login shell.
-  - zmx: homelab has no zmx, and the macOS zmx agterm bundles is an agterm fork that sets
+  - zmx: myhost has no zmx, and the macOS zmx agterm bundles is an agterm fork that sets
     `AGTERM_*` itself, so it can't stand in. Rule: on create, `env K=V … zmx attach <n> <CMD>`;
     on re-attach no refresh. **Unverified on a Linux zmx host** (Post-Completion).
 - **Attached**: a pane is attached when its own fields (left: `foreground`; right:
   `splitForeground`) are present, `basename(argv[0]) == "agr"`, `argv[1] == "open"`,
   `argv[2]` is the binding's host and, when `argv[3]` is present and not an option, it is the
-  binding's name. Seen: `["/opt/homebrew/bin/agr","open","homelab","agrspike-sh"]`, and for a
-  split pane `[…,"open","homelab","agrspike-sh-2","--cwd","/home/kosta","--parent","agrspike-sh"]`.
+  binding's name. Seen: `["/opt/homebrew/bin/agr","open","myhost","agrspike-sh"]`, and for a
+  split pane `[…,"open","myhost","agrspike-sh-2","--cwd","/home/me","--parent","agrspike-sh"]`.
   - after a tmux detach or a killed transport: `foreground` absent, `foregroundShell: "zsh"`,
     and the binding **stays**
   - a `--command` row whose `agr open` exits closes, and its binding is removed
@@ -500,7 +498,7 @@ bridge would get around the whole allowlist. Reviewed with Codex.
   5 s; at most 16 concurrent handlers; at most 8 open pages per host; a GET serves only the one
   page (no directory, no other files). Tokens are dropped and the page's temp directory removed
   when its page closes; daemon start clears leftovers.
-- **Compatibility**: `decide.py` works unchanged (it only calls submit and close). A URL page
+- **Compatibility**: a page that only calls submit and close works unchanged. A URL page
   shows the browser canvas, but the theme CSS variables still apply.
 
 ### Status events (`session_id` path)
@@ -597,7 +595,7 @@ bridge would get around the whole allowlist. Reviewed with Codex.
 ## What Goes Where
 
 - **Implementation Steps**: code, tests, README in this repo.
-- **Post-Completion**: manual round trips on `homelab`, a skill sweep, the release.
+- **Post-Completion**: manual round trips on `myhost`, a skill sweep, the release.
 
 ## Implementation Steps
 
@@ -833,7 +831,7 @@ bridge would get around the whole allowlist. Reviewed with Codex.
       `skillWriteScript` after `mergeHooks`, best-effort (a report line, never an install error)
 - [x] `agr skill` prints it
 - [x] tests:
-  - the marker and version present; the frontmatter parses; no `homelab` or other host literal
+  - the marker and version present; the frontmatter parses; no `myhost` or other host literal
   - install: missing file written; marked file replaced; unmarked file left alone with a notice
   - setup and remote install call it; a remote write failure is a report line and install
     still succeeds
@@ -858,25 +856,25 @@ bridge would get around the whole allowlist. Reviewed with Codex.
 **Files:**
 - Create: `tests/live/proxy_live.sh`, `tests/live/restore_test.sh`, `tests/live/README.md`
 
-A script, not part of `make check` (it needs `homelab` and the running agterm), that runs every
+A script, not part of `make check` (it needs `myhost` and the running agterm), that runs every
 check below with throwaway rows it creates (names start with `agrlive-`) and exits non-zero on
-the first failure, naming it. It exits 2 with `homelab or agterm unreachable` when either can't
+the first failure, naming it. It exits 2 with `myhost or agterm unreachable` when either can't
 be reached, before changing anything.
 
 **Swap and restore** (decided: only one daemon can serve a host, because the bridge socket on
 the host is fixed at `~/.cache/agr/bridge.sock`):
 1. record the running daemon's executable (`agr.pid` → its argv[0], e.g. `~/.local/bin/agr`)
    and stop it
-2. start `bin/agr daemon` in the background, and run `bin/agr install homelab`
+2. start `bin/agr daemon` in the background, and run `bin/agr install myhost`
 3. run the checks
 4. a trap on EXIT, INT and TERM, in this order: closes every `agrlive-` row, kills every
-   `agrlive-` session on homelab, stops the test daemon, runs `<recorded agr> install homelab`
-   (which restores the previous remote script), deletes `~/.claude/skills/agr/` on homelab
+   `agrlive-` session on myhost, stops the test daemon, runs `<recorded agr> install myhost`
+   (which restores the previous remote script), deletes `~/.claude/skills/agr/` on myhost
    when the test created it, and starts `<recorded agr> daemon` again
 5. a SIGKILL skips the trap: `tests/live/README.md` says how to restore by hand (`agr install
-   homelab`, then start the daemon)
+   myhost`, then start the daemon)
 
-- [x] from a throwaway remote row on `homelab`, with unchanged tools:
+- [x] from a throwaway remote row on `myhost`, with unchanged tools:
   - an overlay `--html --js --block` round trip through the shim, answered by the page's own
     `agterm.request('session.overlay.submit', …)` (a test page that submits on load); the
     outcome JSON reaches the host
@@ -886,7 +884,7 @@ the host is fixed at `~/.cache/agr/bridge.sock`):
   - `session text` / `session type` on a sibling row of the same host
   - `session type` refused on a local row with no grant, on the local split pane of an owned
     row, and on a detached pane
-  - `session new --command '<marker program>'` gives a bound homelab row running it; a `type`
+  - `session new --command '<marker program>'` gives a bound myhost row running it; a `type`
     into it before it is attached gets the retry message
   - a worker opened with `--orchestrator` types into a local throwaway pane running a stand-in
     program named `claude`, and is refused once that pane is at a shell prompt
@@ -895,7 +893,7 @@ the host is fixed at `~/.cache/agr/bridge.sock`):
       second request from another session on the same host while it is open is refused; a
       host-bound target row is refused with no dialog
 - [x] the bridge: status events unchanged; refusal, old-daemon and bridge-down messages as
-      documented; `agr down homelab` returns within `teardownTimeout` during a blocking call
+      documented; `agr down myhost` returns within `teardownTimeout` during a blocking call
 - [x] the trap: a test of its own (`tests/live/restore_test.sh`, run with stand-in `agr`,
       `agtermctl` and `ssh` on PATH) shows each restore step runs, in order, on EXIT and on INT
 - [x] `tests/live/README.md`: what it needs, how to run it, and how to restore by hand
@@ -939,29 +937,13 @@ the host is fixed at `~/.cache/agr/bridge.sock`):
 
 ## Post-Completion
 
-- **Skill sweep** (machine-setup): run `decide`, `show-image`, `teardown-agent` and
-  `autoimplementation` from a remote Claude, unchanged, and record what breaks.
-  - `spawn-agent` will break on its `foreground == claude` poll (it reads `agr`). The fix there
-    is skill-side: treat `agr` as running on a remote row, or poll `session text`.
-  - The README notes this class of break for other users.
-- **`--host` in the user's skills** (machine-setup, after this ships):
-  - `spawn-agent.sh --host <host> [--repo <remote path>]`:
-    - the worktree via `ssh <host> 'cd <repo> && git worktree add …'`
-    - the brief copied with `scp`
-    - the row from `session new --command "agr open <host> <name> --cwd <wt> --command 'claude
-      …' --orchestrator $AGTERM_SESSION_ID:$AGTERM_PANE_ID"`
-    - the start check through `session text`
-    - the remote repo path comes from `--repo`, else a per-host default in the skill's config
-  - `teardown-agent --host <host>`: `agr end <row>` (the user confirms), then the remote
-    worktree and branch removed over ssh
-  - trigger phrases in both skills' descriptions: "on <host>", "from <host>"
 - **Checks that need a click or a restart** (the live script can't do them):
-  - consent: **Allow once** types it and the next call asks again; **Allow homelab here** types
+  - consent: **Allow once** types it and the next call asks again; **Allow myhost here** types
     it and the next call goes straight through; **Deny** refuses and a retry within 60 s gets no
     dialog; no answer for 120 s closes it; a dialog on a row in a hidden workspace
   - `session restore` on a host-created row reattaches after an agterm restart
-  - a `decide.py` panel and `show-image.sh` from a remote Claude
-  - the skill: on the Mac, "spawn a worker on homelab for X" wraps the spawn in `agr open …
+  - an HTML panel and an image overlay from a remote Claude
+  - the skill: on the Mac, "spawn a worker on myhost for X" wraps the spawn in `agr open …
     --command`; on the host, "hand this to <local row>" calls `session type` and the dialog
     appears
   - Ctrl-C during a `--block` overlay closes it

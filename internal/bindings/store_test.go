@@ -202,8 +202,8 @@ func paneBinding(t *testing.T, row, pane, paneID, host, name string) Binding {
 
 func TestUpsertRetiresSupersededPanes(t *testing.T) {
 	t.Helper()
-	left := paneBinding(t, "row-1", "left", "tok-left", "homelab", "a")
-	right := paneBinding(t, "row-1", "right", "tok-right", "homelab", "b")
+	left := paneBinding(t, "row-1", "left", "tok-left", "myhost", "a")
+	right := paneBinding(t, "row-1", "right", "tok-right", "myhost", "b")
 	tests := []struct {
 		name    string
 		current []Binding
@@ -219,18 +219,18 @@ func TestUpsertRetiresSupersededPanes(t *testing.T) {
 		{
 			name:    "same pane token replaces across rows after a promote",
 			current: []Binding{left, right},
-			next:    paneBinding(t, "row-2", "left", "tok-right", "homelab", "c"),
-			want:    []Binding{left, paneBinding(t, "row-2", "left", "tok-right", "homelab", "c")},
+			next:    paneBinding(t, "row-2", "left", "tok-right", "myhost", "c"),
+			want:    []Binding{left, paneBinding(t, "row-2", "left", "tok-right", "myhost", "c")},
 		},
 		{
 			name:    "same row and slot replaces a dead pane's successor",
 			current: []Binding{left, right},
-			next:    paneBinding(t, "row-1", "right", "tok-new", "homelab", "c"),
-			want:    []Binding{left, paneBinding(t, "row-1", "right", "tok-new", "homelab", "c")},
+			next:    paneBinding(t, "row-1", "right", "tok-new", "myhost", "c"),
+			want:    []Binding{left, paneBinding(t, "row-1", "right", "tok-new", "myhost", "c")},
 		},
 		{
 			name:    "same host and name moves the session to the new pane",
-			current: []Binding{left, paneBinding(t, "row-2", "left", "tok-other", "homelab", "b")},
+			current: []Binding{left, paneBinding(t, "row-2", "left", "tok-other", "myhost", "b")},
 			next:    right,
 			want:    []Binding{left, right},
 		},
@@ -242,13 +242,13 @@ func TestUpsertRetiresSupersededPanes(t *testing.T) {
 		},
 		{
 			name:    "empty token replaces the whole row",
-			current: []Binding{left, right, paneBinding(t, "row-2", "left", "tok-other", "homelab", "c")},
-			next:    paneBinding(t, "row-1", "right", "", "homelab", "d"),
-			want:    []Binding{paneBinding(t, "row-2", "left", "tok-other", "homelab", "c"), paneBinding(t, "row-1", "right", "", "homelab", "d")},
+			current: []Binding{left, right, paneBinding(t, "row-2", "left", "tok-other", "myhost", "c")},
+			next:    paneBinding(t, "row-1", "right", "", "myhost", "d"),
+			want:    []Binding{paneBinding(t, "row-2", "left", "tok-other", "myhost", "c"), paneBinding(t, "row-1", "right", "", "myhost", "d")},
 		},
 		{
 			name:    "a tokenless entry is replaced by any open in its row",
-			current: []Binding{paneBinding(t, "row-1", "left", "", "homelab", "a")},
+			current: []Binding{paneBinding(t, "row-1", "left", "", "myhost", "a")},
 			next:    right,
 			want:    []Binding{right},
 		},
@@ -266,8 +266,8 @@ func TestUpsertRetiresSupersededPanes(t *testing.T) {
 func TestStoreSplitRowKeepsBothPanes(t *testing.T) {
 	t.Helper()
 	store := testStore(t)
-	left := paneBinding(t, "row-1", "left", "tok-left", "homelab", "a")
-	right := paneBinding(t, "row-1", "right", "tok-right", "homelab", "b")
+	left := paneBinding(t, "row-1", "left", "tok-left", "myhost", "a")
+	right := paneBinding(t, "row-1", "right", "tok-right", "myhost", "b")
 	for _, item := range []Binding{left, right} {
 		if err := store.Bind(item); err != nil {
 			t.Fatalf("Bind(%#v) error = %v", item, err)

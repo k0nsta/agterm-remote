@@ -688,7 +688,7 @@ func TestCtlWorkspacesListsRowsPerWorkspace(t *testing.T) {
 	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
 	tree := `{"result":{"tree":{"workspaces":[
 		{"id":"W1","name":"local","active":false,"sessions":[{"id":"row-1"}]},
-		{"id":"W2","name":"homelab - tools","active":true,"sessions":[{"id":"row-2"},{"id":"row-3"}]}]}}}`
+		{"id":"W2","name":"myhost - tools","active":true,"sessions":[{"id":"row-2"},{"id":"row-3"}]}]}}}`
 	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
 		Return([]byte(tree), 0, nil)
 	got, err := ctl.Workspaces(context.Background())
@@ -697,7 +697,7 @@ func TestCtlWorkspacesListsRowsPerWorkspace(t *testing.T) {
 	}
 	want := []agterm.Workspace{
 		{ID: "W1", Name: "local", Rows: []string{"row-1"}},
-		{ID: "W2", Name: "homelab - tools", Rows: []string{"row-2", "row-3"}},
+		{ID: "W2", Name: "myhost - tools", Rows: []string{"row-2", "row-3"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Workspaces() = %#v, want %#v", got, want)

@@ -10,7 +10,7 @@ set -eu
 
 LIVE_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$LIVE_DIR/../.." && pwd)
-HOST=${AGR_LIVE_HOST:-homelab}
+HOST=${AGR_LIVE_HOST:?set AGR_LIVE_HOST to an ssh host that runs tmux and python3}
 AGR_BIN=${AGR_LIVE_BIN:-$ROOT/bin/agr}
 AGTERMCTL=${AGTERMCTL:-agtermctl}
 CACHE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/agr
@@ -542,7 +542,7 @@ not_attached() {
 }
 
 check_session_new() {
-	step 'session new --command gives a bound homelab row; an early type is typed or told to retry'
+	step 'session new --command gives a bound myhost row; an early type is typed or told to retry'
 	tries=0
 	while :; do
 		tries=$((tries + 1))

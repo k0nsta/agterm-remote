@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	pxHost = "homelab"
+	pxHost = "myhost"
 	pxID   = "00000000-0000-4000-8000-0000000000"
 
 	rowCaller = pxID + "01" // w1: the caller, attached
@@ -677,7 +677,7 @@ func TestProxyNewRowIsPreBoundBeforeAgrOpenRuns(t *testing.T) {
 	if code != 0 || strings.TrimSpace(frames.stdout(t)) != rowNew {
 		t.Fatalf("session new: code = %d, stdout = %q, want the row id passed through", code, frames.stdout(t))
 	}
-	wantCommand := `--command='/opt/homebrew/bin/agr' 'open' 'homelab' 'w9' '--cwd' '/home/u/p' '--command' 'make test'`
+	wantCommand := `--command='/opt/homebrew/bin/agr' 'open' 'myhost' 'w9' '--cwd' '/home/u/p' '--command' 'make test'`
 	if got := env.ctl.execArgs(t)[0]; strings.Join(got, "\x00") != strings.Join([]string{"session", "new", "--name=w9", wantCommand}, "\x00") {
 		t.Fatalf("exec = %q, want the agr open command", got)
 	}
@@ -697,7 +697,7 @@ func TestProxyNewRowIsPreBoundBeforeAgrOpenRuns(t *testing.T) {
 		t.Fatalf("restore once attached: code = %d, stderr = %q, want it authorised", code, frames.stderr(t))
 	}
 	last := env.ctl.execArgs(t)
-	wantRestore := "'/opt/homebrew/bin/agr' 'open' 'homelab' 'w9' '--command' 'claude'"
+	wantRestore := "'/opt/homebrew/bin/agr' 'open' 'myhost' 'w9' '--command' 'claude'"
 	if got := last[len(last)-1]; got[len(got)-1] != wantRestore {
 		t.Fatalf("restore exec = %q, want the agr open command %s", got, wantRestore)
 	}

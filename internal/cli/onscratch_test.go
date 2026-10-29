@@ -25,7 +25,7 @@ func TestOnScratchStartsARemoteShellInTheSessionsDirectory(t *testing.T) {
 	if err := OnScratch(context.Background(), "row-1", "shown", deps); err != nil {
 		t.Fatalf("OnScratch() error = %v", err)
 	}
-	want := []string{`'exec' '/Users/me/go/bin/agr' 'shell' 'homelab' '--cwd' '/srv/repo'`}
+	want := []string{`'exec' '/Users/me/go/bin/agr' 'shell' 'myhost' '--cwd' '/srv/repo'`}
 	if !reflect.DeepEqual(panes.typed, want) || !reflect.DeepEqual(panes.typedIn, []string{"row-1/S"}) {
 		t.Fatalf("typed %#v into %#v, want %#v into row-1/S", panes.typed, panes.typedIn, want)
 	}
@@ -38,14 +38,14 @@ func TestOnScratchFallsBackToTheRemoteHome(t *testing.T) {
 	if err := OnScratch(context.Background(), "row-1", "shown", deps); err != nil {
 		t.Fatalf("OnScratch() error = %v", err)
 	}
-	if want := []string{`'exec' '/Users/me/go/bin/agr' 'shell' 'homelab'`}; !reflect.DeepEqual(panes.typed, want) {
+	if want := []string{`'exec' '/Users/me/go/bin/agr' 'shell' 'myhost'`}; !reflect.DeepEqual(panes.typed, want) {
 		t.Fatalf("typed = %#v, want %#v", panes.typed, want)
 	}
 }
 
 func TestOnScratchLeavesTheScratchAlone(t *testing.T) {
 	t.Helper()
-	scratchBound := bindings.Binding{Row: "row-1", PaneID: "S", Pane: "scratch", Host: "homelab", Name: "x", Mux: "tmux"}
+	scratchBound := bindings.Binding{Row: "row-1", PaneID: "S", Pane: "scratch", Host: "myhost", Name: "x", Mux: "tmux"}
 	for _, tc := range []struct {
 		name  string
 		tree  map[string][]agterm.Surface

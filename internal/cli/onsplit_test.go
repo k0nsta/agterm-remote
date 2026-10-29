@@ -93,7 +93,7 @@ func newPaneHookDeps(t *testing.T, panes *panesFake, cwd *cwdFake, bound ...bind
 
 func leftBinding(t *testing.T) bindings.Binding {
 	t.Helper()
-	return bindings.Binding{Row: "row-1", PaneID: "L", Pane: "left", Host: "homelab", Name: "a1", Mux: "tmux"}
+	return bindings.Binding{Row: "row-1", PaneID: "L", Pane: "left", Host: "myhost", Name: "a1", Mux: "tmux"}
 }
 
 func TestOnSplitOpensChildSessionInTheParentsDirectory(t *testing.T) {
@@ -105,11 +105,11 @@ func TestOnSplitOpensChildSessionInTheParentsDirectory(t *testing.T) {
 	if err := OnSplit(context.Background(), "row-1", "shown", deps); err != nil {
 		t.Fatalf("OnSplit() error = %v", err)
 	}
-	want := []string{`'/Users/me/go/bin/agr' 'open' 'homelab' 'a1-2' '--cwd' '/srv/it'\''s here' '--parent' 'a1'`}
+	want := []string{`'/Users/me/go/bin/agr' 'open' 'myhost' 'a1-2' '--cwd' '/srv/it'\''s here' '--parent' 'a1'`}
 	if !reflect.DeepEqual(panes.typed, want) || !reflect.DeepEqual(panes.typedIn, []string{"row-1/R"}) {
 		t.Fatalf("typed %#v into %#v, want %#v into row-1/R", panes.typed, panes.typedIn, want)
 	}
-	if !reflect.DeepEqual(cwd.calls, []string{"homelab a1"}) {
+	if !reflect.DeepEqual(cwd.calls, []string{"myhost a1"}) {
 		t.Fatalf("cwd calls = %#v", cwd.calls)
 	}
 	if panes.textHits != 3 {
@@ -124,7 +124,7 @@ func TestOnSplitOmitsAttachOptionsForARemoteWithoutCwd(t *testing.T) {
 	if err := OnSplit(context.Background(), "row-1", "shown", deps); err != nil {
 		t.Fatalf("OnSplit() error = %v", err)
 	}
-	want := []string{`'/Users/me/go/bin/agr' 'open' 'homelab' 'a1-2'`}
+	want := []string{`'/Users/me/go/bin/agr' 'open' 'myhost' 'a1-2'`}
 	if !reflect.DeepEqual(panes.typed, want) {
 		t.Fatalf("typed = %#v, want %#v", panes.typed, want)
 	}
@@ -137,7 +137,7 @@ func TestOnSplitKeepsParentWhenTheDirectoryIsUnknown(t *testing.T) {
 	if err := OnSplit(context.Background(), "row-1", "shown", deps); err != nil {
 		t.Fatalf("OnSplit() error = %v", err)
 	}
-	want := []string{`'/Users/me/go/bin/agr' 'open' 'homelab' 'a1-2' '--parent' 'a1'`}
+	want := []string{`'/Users/me/go/bin/agr' 'open' 'myhost' 'a1-2' '--parent' 'a1'`}
 	if !reflect.DeepEqual(panes.typed, want) {
 		t.Fatalf("typed = %#v, want %#v", panes.typed, want)
 	}
@@ -184,7 +184,7 @@ func TestOnSplitLeavesThePaneAlone(t *testing.T) {
 	t.Helper()
 	hiddenSplit := map[string][]agterm.Surface{"row-1": {{Kind: "left", PaneID: "L", Visible: true}, {Kind: "right", PaneID: "R"}}}
 	noSplit := map[string][]agterm.Surface{"row-1": {{Kind: "left", PaneID: "L", Visible: true}}}
-	rightBound := bindings.Binding{Row: "row-1", PaneID: "R", Pane: "right", Host: "homelab", Name: "other", Mux: "tmux"}
+	rightBound := bindings.Binding{Row: "row-1", PaneID: "R", Pane: "right", Host: "myhost", Name: "other", Mux: "tmux"}
 	for _, tc := range []struct {
 		name   string
 		status string
@@ -229,7 +229,7 @@ func TestOnSplitActsOncePerPane(t *testing.T) {
 
 func TestOnSplitMatchesALegacyBindingBySlot(t *testing.T) {
 	t.Helper()
-	legacy := bindings.Binding{Row: "row-1", Host: "homelab", Name: "a1", Mux: "tmux"}
+	legacy := bindings.Binding{Row: "row-1", Host: "myhost", Name: "a1", Mux: "tmux"}
 	panes := &panesFake{tree: splitTree(t), texts: []string{"$ "}}
 	deps := newPaneHookDeps(t, panes, &cwdFake{dir: "/srv"}, legacy)
 	if err := OnSplit(context.Background(), "row-1", "shown", deps); err != nil {
