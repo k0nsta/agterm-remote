@@ -978,10 +978,20 @@ func (a *authz) wholeRowRefusal(row agterm.TreeRow) string {
 			return fmt.Sprintf("row %s has a local %s terminal the host does not own (a row-level call needs every pane of the row)", row.ID, surface.Kind)
 		}
 	}
+	owned := 0
 	for _, surface := range list {
+		// A split hidden across an agterm restart has no pane until it is
+		// shown; there is nothing in it yet to own or to cover.
+		if surface.PaneID == "" && !surface.Visible {
+			continue
+		}
 		if why := a.checkOwned(row, surface); why != "" {
 			return fmt.Sprintf("row %s: %s (a row-level call needs every pane of the row)", row.ID, why)
 		}
+		owned++
+	}
+	if owned == 0 {
+		return fmt.Sprintf("row %s has no pane", row.ID)
 	}
 	return ""
 }

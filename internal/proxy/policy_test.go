@@ -924,3 +924,28 @@ func TestAuthorizeOverlayOpenMarksAWholeRow(t *testing.T) {
 		t.Fatal("WholeRow is for overlay open only")
 	}
 }
+
+// TestAuthorizeWholeRowSkipsASplitHiddenAcrossARestart: after an agterm
+// restart a hidden split has no pane until it is shown, so it neither blocks
+// a row-level call nor makes a page pane-only.
+func TestAuthorizeWholeRowSkipsASplitHiddenAcrossARestart(t *testing.T) {
+	f := newFixture(t)
+	f.binds = append(f.binds, bind(t, rowMixed, mixedRight, "right", testHost, "w3-2"))
+	row := f.row(t, rowMixed)
+	row.SplitForegroundShell = ""
+	row.Surfaces[1] = agterm.Surface{Kind: "right"}
+	got := f.authorize(t, "session", "overlay", "open", "--url", "https://example.com", "--target", rowMixed, "--pane", "left")
+	wantAllow(t, got)
+	if !got.Call.Targets[0].WholeRow {
+		t.Fatalf("Targets = %+v, want WholeRow with the hidden split skipped", got.Call.Targets)
+	}
+	wantAllow(t, f.authorize(t, "session", "status", "active", "--target", rowMixed))
+
+	// A pane that is shown but has no id is not skipped.
+	row.Surfaces[1] = agterm.Surface{Kind: "right", Visible: true}
+	got = f.authorize(t, "session", "overlay", "open", "--url", "https://example.com", "--target", rowMixed, "--pane", "left")
+	wantAllow(t, got)
+	if got.Call.Targets[0].WholeRow {
+		t.Fatal("a shown pane without an id must still count")
+	}
+}
