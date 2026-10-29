@@ -34,6 +34,13 @@ stop_ctl_server() {
 cleanup_remote_test() {
 	stop_ctl_server
 	"$REAL_TMUX" -L agr-test kill-server >/dev/null 2>&1 || :
+	# kill-server returns before the pane shells exit, and a login shell can
+	# still write into $HOME on its way out: retry until they are gone.
+	i=0
+	while ! rm -rf "$REMOTE_TEST_TMP" 2>/dev/null && [ "$i" -lt 20 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
 	rm -rf "$REMOTE_TEST_TMP"
 }
 trap cleanup_remote_test EXIT HUP INT TERM
