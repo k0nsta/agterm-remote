@@ -144,6 +144,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		{name: "doctor", argv: []string{"doctor", "host"}, want: 1, check: func(t *testing.T) {}},
 		// A hidden split is the hook's no-op branch: it proves dispatch without
 		// reaching agterm.
+		{name: "new", argv: []string{"new", "row-1", "extra"}, want: 2, check: func(t *testing.T) {}},
 		{name: "on-split", argv: []string{"on-split"}, want: 0, check: func(t *testing.T) {}},
 		{name: "on-scratch", argv: []string{"on-scratch"}, want: 0, check: func(t *testing.T) {}},
 		{name: "setup", argv: []string{"setup", "--end-key", "ctrl+a>x"}, want: 0, check: func(t *testing.T) {
@@ -151,12 +152,21 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 			if err != nil || !strings.Contains(string(keymap), `"End remote session" ctrl+a>x`) {
 				t.Fatalf("keymap.conf = %q, %v; want the End command on the given key", keymap, err)
 			}
+			if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "agr", "SKILL.md")); err != nil {
+				t.Fatalf("agr setup did not install the skill: %v", err)
+			}
 		}},
+		{name: "skill", argv: []string{"skill"}, want: 0, check: func(t *testing.T) {}},
 		{name: "shell", argv: []string{"shell", "host", "--cwd", "/srv"}, want: 0, check: func(t *testing.T) {
 			// The fake is shared across subtests; check what shell sent, not a
 			// count that depends on which subtests ran before it.
 			if len(tty.argv) < 1 || tty.argv[0] != "ssh" || !strings.Contains(strings.Join(tty.argv, " "), "'/srv'") {
 				t.Fatalf("TTY argv = %q, want the shell's ssh into /srv", tty.argv)
+			}
+		}},
+		{name: "run", argv: []string{"run", "host", "--cwd", "/srv", "--", "make", "-j2"}, want: 0, check: func(t *testing.T) {
+			if len(tty.argv) < 1 || tty.argv[0] != "ssh" || !strings.Contains(strings.Join(tty.argv, " "), "'/srv' 'make' '-j2'") {
+				t.Fatalf("TTY argv = %q, want the run's ssh of make in /srv", tty.argv)
 			}
 		}},
 	}
@@ -173,7 +183,7 @@ func TestRunDispatchesEveryRegisteredCommand(t *testing.T) {
 		})
 	}
 
-	if got, want := len(commandHandlers), 14; got != want {
+	if got, want := len(commandHandlers), 17; got != want {
 		t.Fatalf("registered command count = %d, want %d", got, want)
 	}
 }
@@ -220,4 +230,71 @@ func containsString(t *testing.T, items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestSetupAndPaneHooksGetTheStablePath(t *testing.T) {
+	t.Helper()
+	const stable = "/opt/homebrew/bin/agr"
+	original := stableAgr
+	stableAgr = func() string { return stable }
+	t.Cleanup(func() { stableAgr = original })
+	t.Setenv("HOME", t.TempDir())
+	dirs := pathstest.Dirs(t)
+	app := &application{dirs: dirs, store: bindings.New(dirs)}
+
+	if got := app.setup(new(strings.Builder), "", "", "").Agr; got != stable {
+		t.Fatalf("setup Agr = %q, want %q", got, stable)
+	}
+	if got := app.paneHooks().Agr; got != stable {
+		t.Fatalf("paneHooks Agr = %q, want %q", got, stable)
+	}
+	if got := app.newRow("").Agr; got != stable {
+		t.Fatalf("newRow Agr = %q, want %q", got, stable)
+	}
+}
+
+func TestParseOpenArgsTakesCommandAndOrchestrator(t *testing.T) {
+	t.Helper()
+	positional, opts, ok := parseOpenArgs([]string{"host", "--command", "make dev", "api", "--orchestrator", "r:p", "--cwd", "/srv"})
+	if !ok || !reflect.DeepEqual(positional, []string{"host", "api"}) {
+		t.Fatalf("parseOpenArgs() = %v, %+v, %v", positional, opts, ok)
+	}
+	if opts.Command != "make dev" || opts.Orchestrator != "r:p" || opts.Cwd != "/srv" {
+		t.Fatalf("opts = %+v", opts)
+	}
+	for _, bad := range [][]string{{"host", "--command"}, {"host", "--command", "a", "--command", "b"}, {"host", "--orchestrator"}} {
+		if _, _, ok := parseOpenArgs(bad); ok {
+			t.Errorf("parseOpenArgs(%v) accepted a malformed flag", bad)
+		}
+	}
+}
+
+func TestRunRunUsageErrors(t *testing.T) {
+	t.Helper()
+	for _, argv := range [][]string{
+		{"run"},
+		{"run", "host"},
+		{"run", "host", "make"},
+		{"run", "host", "--"},
+		{"run", "host", "--cwd", "/srv"},
+		{"run", "host", "--cwd", "/srv", "make"},
+		{"run", "--cwd", "/srv", "--", "make"},
+	} {
+		var out, errout strings.Builder
+		app := &application{tty: &dispatchTTYFake{}}
+		if got := runWithApplication(argv, &out, &errout, app); got != 2 || !strings.Contains(errout.String(), "usage: agr run <host>") {
+			t.Errorf("run(%v) = %d, %q; want a usage error", argv, got, errout.String())
+		}
+	}
+}
+
+func TestShellRefusesOpenOnlyFlags(t *testing.T) {
+	t.Helper()
+	for _, flag := range []string{"--command", "--orchestrator"} {
+		var out, errout strings.Builder
+		app := &application{tty: &dispatchTTYFake{}}
+		if got := runWithApplication([]string{"shell", "host", flag, "x"}, &out, &errout, app); got != 2 {
+			t.Errorf("shell %s exit = %d, want 2", flag, got)
+		}
+	}
 }

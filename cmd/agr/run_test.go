@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/k0nsta/agterm-remote/internal/settings"
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -122,6 +125,12 @@ func TestRunSetupRejectsBadArguments(t *testing.T) {
 		{"setup", "--end-key", "x", "--end-key", "y"},
 		{"setup", "--paste-key", "x", "--paste-key", "y"},
 		{"setup", "--end-key", "--paste-key", "x"},
+		{"setup", "--page-size", "0"},
+		{"setup", "--page-size", "101"},
+		{"setup", "--page-size", "big"},
+		{"setup", "--page-size", "50", "--page-size", "60"},
+		{"setup", "--new-key"},
+		{"setup", "--new-key", "x", "--new-key", "y"},
 	} {
 		var out, errout strings.Builder
 		if got := runWithApplication(argv, &out, &errout, &application{}); got != 2 {
@@ -130,11 +139,11 @@ func TestRunSetupRejectsBadArguments(t *testing.T) {
 	}
 }
 
-func TestRunSetupAcceptsBothFlagsInEitherOrder(t *testing.T) {
+func TestRunSetupAcceptsTheKeyFlagsInAnyOrder(t *testing.T) {
 	t.Helper()
 	for _, args := range [][]string{
-		{"setup", "--end-key", "ctrl+a>x", "--paste-key", "ctrl+a>v"},
-		{"setup", "--paste-key", "ctrl+a>v", "--end-key", "ctrl+a>x"},
+		{"setup", "--end-key", "ctrl+a>x", "--paste-key", "ctrl+a>v", "--new-key", "ctrl+a>n"},
+		{"setup", "--new-key", "ctrl+a>n", "--paste-key", "ctrl+a>v", "--end-key", "ctrl+a>x"},
 	} {
 		t.Run(strings.Join(args[1:], "/"), func(t *testing.T) {
 			home := t.TempDir()
@@ -147,10 +156,38 @@ func TestRunSetupAcceptsBothFlagsInEitherOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(keymap), `"End remote session" ctrl+a>x`) || !strings.Contains(string(keymap), `"Paste to remote" ctrl+a>v`) {
-				t.Fatalf("keymap.conf = %q, want both requested chords", keymap)
+			for _, want := range []string{`"End remote session" ctrl+a>x`, `"Paste to remote" ctrl+a>v`, `"New remote session" ctrl+a>n`} {
+				if !strings.Contains(string(keymap), want) {
+					t.Fatalf("keymap.conf = %q, want %s", keymap, want)
+				}
 			}
 		})
+	}
+}
+
+func TestRunSetupSavesThePageSize(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
+	for _, tt := range []struct {
+		size, want string
+		stored     int
+	}{
+		{size: "70", want: "host pages: 70%", stored: 70},
+		{size: "100", want: "host pages: full", stored: 0},
+	} {
+		var out, errout strings.Builder
+		if got := runWithApplication([]string{"setup", "--page-size", tt.size}, &out, &errout, &application{}); got != 0 {
+			t.Fatalf("setup --page-size %s exit = %d, stderr = %q", tt.size, got, errout.String())
+		}
+		if !strings.Contains(out.String(), tt.want) {
+			t.Fatalf("setup --page-size %s said %q, want %q", tt.size, out.String(), tt.want)
+		}
+		saved, err := settings.Load(settings.Path())
+		if err != nil || saved.PageSize != tt.stored {
+			t.Fatalf("saved = %+v, %v, want PageSize %d", saved, err, tt.stored)
+		}
 	}
 }
 
@@ -177,5 +214,31 @@ func TestRunPasteRequiresARowWhenNoArgumentOrEnvironment(t *testing.T) {
 	}
 	if !strings.Contains(errout.String(), "no agterm row in the environment") {
 		t.Fatalf("run(paste) stderr = %q, want missing-row usage", errout.String())
+	}
+}
+
+func TestRunSkillPrintsAndRejectsArguments(t *testing.T) {
+	t.Helper()
+	var out, errw strings.Builder
+	if got := runWithApplication([]string{"skill"}, &out, &errw, &application{}); got != 0 {
+		t.Fatalf("run(skill) exit = %d, stderr = %q", got, errw.String())
+	}
+	if out.String() != string(skill.Bytes(version)) {
+		t.Fatal("agr skill output differs from the embedded skill")
+	}
+	out.Reset()
+	if got := runWithApplication([]string{"skill", "x"}, &out, &errw, &application{}); got != 2 {
+		t.Fatalf("run(skill x) exit = %d, want 2", got)
+	}
+}
+
+func TestRunNewRejectsExtraArguments(t *testing.T) {
+	t.Helper()
+	var out, errout strings.Builder
+	if got := runWithApplication([]string{"new", "row-1", "x"}, &out, &errout, &application{}); got != 2 {
+		t.Fatalf("run(new row-1 x) exit = %d, want 2", got)
+	}
+	if !strings.Contains(errout.String(), "usage: agr new [row]") {
+		t.Fatalf("stderr = %q, want new usage", errout.String())
 	}
 }

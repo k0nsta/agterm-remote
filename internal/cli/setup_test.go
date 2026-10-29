@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 const testAgr = "'/opt/homebrew/bin/agr'"
@@ -498,4 +500,151 @@ func readFile(t *testing.T, name string) string {
 		t.Fatalf("read %s: %v", name, err)
 	}
 	return string(content)
+}
+
+func TestSetupInstallsTheSkill(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, ".claude", "skills", "agr")
+	deps := SetupDependencies{Agr: "/opt/homebrew/bin/agr", Home: dir, EndKey: "ctrl+a>x", SkillDir: skillDir, Version: "9.9.9"}
+
+	var out bytes.Buffer
+	deps.Out = &out
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	if got := readFile(t, filepath.Join(skillDir, "SKILL.md")); got != string(skill.Bytes("9.9.9")) {
+		t.Fatalf("SKILL.md = %q, want the stamped skill", got)
+	}
+	if !strings.Contains(out.String(), "installed "+filepath.Join(skillDir, "SKILL.md")) {
+		t.Fatalf("output = %q, want the installed line", out.String())
+	}
+
+	out.Reset()
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("second Setup() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "unchanged "+filepath.Join(skillDir, "SKILL.md")) {
+		t.Fatalf("second run output = %q", out.String())
+	}
+
+	own := "my own agr skill\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(own), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("third Setup() error = %v", err)
+	}
+	if got := readFile(t, filepath.Join(skillDir, "SKILL.md")); got != own {
+		t.Fatalf("an unmarked SKILL.md was replaced: %q", got)
+	}
+	if !strings.Contains(out.String(), "kept") || !strings.Contains(out.String(), "not replaced") {
+		t.Fatalf("output = %q, want a notice that the file was kept", out.String())
+	}
+}
+
+func TestSetupSkillFailureIsAReportLine(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	deps := SetupDependencies{Agr: "/opt/homebrew/bin/agr", Home: dir, EndKey: "ctrl+a>x", Out: &out,
+		SkillDir: filepath.Join(blocker, "skills", "agr"), Version: "1"}
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v, want the skill failure to be a report line", err)
+	}
+	if !strings.Contains(out.String(), "agr skill: not written") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestSetupWiresNewWithDefaultKey(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	config := &agtermConfigFake{hooks: filepath.Join(dir, "hooks.conf"), keymap: filepath.Join(dir, "keymap.conf")}
+	var out bytes.Buffer
+	deps := SetupDependencies{Config: config, Agr: "/opt/homebrew/bin/agr", Home: dir, Out: &out, EndKey: "ctrl+a>x"}
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	if keymap := readFile(t, config.keymap); !strings.Contains(keymap,
+		newKeyNote+"\n"+`command "New remote session" ctrl+a>n --error-hud `+testAgr+` new "{AGT_SESSION_ID}"`+"\n") {
+		t.Fatalf("keymap.conf = %q, want the default New chord", keymap)
+	}
+	if !strings.Contains(out.String(), "New remote session runs agr new") {
+		t.Fatalf("output = %q, want the New reload message", out.String())
+	}
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("second Setup() error = %v", err)
+	}
+	if got := readFile(t, config.keymap); strings.Count(got, `command "New remote session"`) != 1 {
+		t.Fatalf("keymap.conf = %q, want one New command", got)
+	}
+}
+
+func TestSetupNeverDefaultsOntoAChordRequestedForAnotherCommand(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name               string
+		deps               SetupDependencies
+		wantPaste, wantNew string
+	}{
+		{name: "new takes paste's default", deps: SetupDependencies{EndKey: "ctrl+a>x", NewKey: "ctrl+a>v"},
+			wantPaste: `"Paste to remote" --error-hud`, wantNew: `"New remote session" ctrl+a>v --error-hud`},
+		{name: "paste takes new's default", deps: SetupDependencies{EndKey: "ctrl+a>x", PasteKey: "ctrl+a>n"},
+			wantPaste: `"Paste to remote" ctrl+a>n --error-hud`, wantNew: `"New remote session" --error-hud`},
+		{name: "end takes new's default", deps: SetupDependencies{EndKey: "ctrl+a>n"},
+			wantPaste: `"Paste to remote" ctrl+a>v --error-hud`, wantNew: `"New remote session" --error-hud`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := &agtermConfigFake{hooks: filepath.Join(dir, "hooks.conf"), keymap: filepath.Join(dir, "keymap.conf")}
+			var out bytes.Buffer
+			deps := tc.deps
+			deps.Config, deps.Agr, deps.Home, deps.Out = config, "/opt/homebrew/bin/agr", dir, &out
+			if err := Setup(context.Background(), deps); err != nil {
+				t.Fatalf("Setup() error = %v", err)
+			}
+			keymap := readFile(t, config.keymap)
+			if !strings.Contains(keymap, tc.wantPaste) || !strings.Contains(keymap, tc.wantNew) {
+				t.Fatalf("keymap.conf = %q, want %q and %q", keymap, tc.wantPaste, tc.wantNew)
+			}
+		})
+	}
+}
+
+func TestSetupKeepsAnExistingNewChordAndHintsWhenTaken(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	config := &agtermConfigFake{hooks: filepath.Join(dir, "hooks.conf"), keymap: filepath.Join(dir, "keymap.conf")}
+	if err := os.WriteFile(config.keymap, []byte(`command "Notes" ctrl+a>n notes`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	deps := SetupDependencies{Config: config, Agr: "/opt/homebrew/bin/agr", Home: dir, Out: &out, EndKey: "ctrl+a>x"}
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	if keymap := readFile(t, config.keymap); !strings.Contains(keymap, `command "New remote session" --error-hud `+testAgr+` new`) {
+		t.Fatalf("keymap.conf = %q, want New without a chord", keymap)
+	}
+	if !strings.Contains(out.String(), "New remote session has no key") || !strings.Contains(out.String(), "--new-key") {
+		t.Fatalf("output = %q, want the New no-key hint", out.String())
+	}
+
+	deps.NewKey = "cmd+shift+n"
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("Setup(--new-key) error = %v", err)
+	}
+	deps.NewKey = ""
+	if err := Setup(context.Background(), deps); err != nil {
+		t.Fatalf("third Setup() error = %v", err)
+	}
+	if keymap := readFile(t, config.keymap); !strings.Contains(keymap, `command "New remote session" cmd+shift+n --error-hud `+testAgr+` new`) {
+		t.Fatalf("keymap.conf = %q, want the explicit chord kept", keymap)
+	}
 }

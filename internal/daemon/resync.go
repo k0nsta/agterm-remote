@@ -3,11 +3,15 @@ package daemon
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/bridge"
+	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
 func (d *Daemon) watchHostStates(ctx context.Context, host string, changes <-chan bridge.State) {
@@ -39,7 +43,11 @@ func (d *Daemon) hostStateChanged(ctx context.Context, host, state string) {
 	previous := runtime.state
 	runtime.state = state
 	runtime.since = time.Now().UTC()
+	hostKey := runtime.hostKey
 	d.mu.Unlock()
+	if previous == string(bridge.StateUp) {
+		d.markLeftUp(hostKey)
+	}
 	// Connecting is reported (doctor shows it) but changes nothing else: the
 	// resync waits for a proven bridge, and the reconnecting HUD marks the
 	// loss of one that was up — not a start that has not been proven yet.
@@ -95,13 +103,21 @@ func (d *Daemon) resyncHost(ctx context.Context, host string) {
 		d.logf("warning: resync sessions for %s: %v", host, err)
 		return
 	}
-	live := make(map[string]string, len(sessions))
+	live := make(map[string]remote.Session, len(sessions))
 	for _, session := range sessions {
-		live[session.Name] = session.State
+		live[session.Name] = session
 	}
+	leftUp, known := d.leftUp(d.hostKey(host))
+	now := time.Now()
 	for _, binding := range bindingsForHost {
-		state, ok := live[binding.Name]
+		session, ok := live[binding.Name]
+		state := session.State
 		if !ok || state == "" {
+			continue
+		}
+		// A finish from before the bridge went down was shown then, and
+		// visiting the row cleared it; replaying it would turn it green again.
+		if state == "completed" && known && !finishedSince(now, session.IdleSecs, leftUp) {
 			continue
 		}
 		args := agterm.StatusArgs{Status: state, Pane: binding.Pane, PaneID: binding.PaneID}
@@ -113,6 +129,62 @@ func (d *Daemon) resyncHost(ctx context.Context, host string) {
 			d.logf("warning: resync status for %q: %v", binding.Row, err)
 		}
 	}
+}
+
+// leftUpSlack widens the replay window: a finish relayed in the last moments
+// before the bridge dropped may never have arrived.
+const leftUpSlack = 10 * time.Second
+
+// finishedSince reports whether a state set idleSecs ago (by the host's own
+// clock, so skew cancels out) is newer than leftUp. An unknown age replays.
+func finishedSince(now time.Time, idleSecs int, leftUp time.Time) bool {
+	if idleSecs < 0 {
+		return true
+	}
+	return !now.Add(-time.Duration(idleSecs) * time.Second).Before(leftUp.Add(-leftUpSlack))
+}
+
+func (d *Daemon) hostKey(host string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if runtime, ok := d.hosts[host]; ok {
+		return runtime.hostKey
+	}
+	return ""
+}
+
+// markLeftUp records that hostKey's bridge stopped being up now. It is kept
+// on disk so a restarted daemon still knows which finishes it already showed.
+func (d *Daemon) markLeftUp(hostKey string) {
+	if hostKey == "" {
+		return
+	}
+	path := d.dirs.HostLeftUp(hostKey)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		d.logf("warning: record bridge down for %s: %v", hostKey, err)
+		return
+	}
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := os.WriteFile(path, []byte(stamp+"\n"), 0o600); err != nil {
+		d.logf("warning: record bridge down for %s: %v", hostKey, err)
+	}
+}
+
+// leftUp reads markLeftUp's record. Without one (first start, or a daemon
+// that was killed) every completed state replays, as before.
+func (d *Daemon) leftUp(hostKey string) (time.Time, bool) {
+	if hostKey == "" {
+		return time.Time{}, false
+	}
+	data, err := os.ReadFile(d.dirs.HostLeftUp(hostKey))
+	if err != nil {
+		return time.Time{}, false
+	}
+	stamp, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(data)))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return stamp, true
 }
 
 func (d *Daemon) resyncAll(ctx context.Context) {

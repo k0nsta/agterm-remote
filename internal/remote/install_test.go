@@ -11,6 +11,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/paths"
 	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remotescript"
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 func TestInstallDefaultChoicesAndWriteOrder(t *testing.T) {
@@ -25,20 +26,22 @@ func TestInstallDefaultChoicesAndWriteOrder(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		[]byte(`{"existing":true}`),
 		nil,
+		[]byte("written\n"),
 	}}
 	runner := NewRunnerWithVersion(ssh, dirs, "1.0.0")
 	result, err := runner.InstallResult(context.Background(), "user@example.com", "")
 	if err != nil {
 		t.Fatalf("InstallResult() error = %v", err)
 	}
-	if want := (InstallResult{Host: "user@example.com", Version: "1.0.0", Mux: "zmx", Relay: "nc"}); !reflect.DeepEqual(result, want) {
+	if want := (InstallResult{Host: "user@example.com", Version: "1.0.0", Mux: "zmx", Relay: "nc", Proxy: "agtermctl proxy: updated", Skill: "agr skill: written to ~/.claude/skills/agr/SKILL.md"}); !reflect.DeepEqual(result, want) {
 		t.Fatalf("InstallResult() = %#v, want %#v", result, want)
 	}
 	calls := ssh.Calls(t)
-	if len(calls) != 6 {
-		t.Fatalf("SSH calls = %d, want probe, dirs, env, script, hooks read/write", len(calls))
+	if len(calls) != 8 {
+		t.Fatalf("SSH calls = %d, want probe, dirs, env, script, proxy, hooks read/write, skill", len(calls))
 	}
 	if got, want := calls[0].argv, []string{"sh"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("probe argv = %#v, want %#v", got, want)
@@ -47,7 +50,7 @@ func TestInstallDefaultChoicesAndWriteOrder(t *testing.T) {
 		t.Fatalf("EnsureDirs argv = %#v, want %#v", got, want)
 	}
 	for index := 2; index < len(calls); index++ {
-		if len(calls[index].stdin) == 0 && index != 4 {
+		if len(calls[index].stdin) == 0 && index != 5 {
 			t.Fatalf("call %d has no stdin: %#v", index, calls[index])
 		}
 	}
@@ -71,10 +74,16 @@ func TestInstallDefaultChoicesAndWriteOrder(t *testing.T) {
 	if !reflect.DeepEqual(calls[3].stdin, remotescript.Script("1.0.0")) {
 		t.Fatal("script write did not send the versioned embedded script")
 	}
-	if got, want := calls[4].argv, []string{"sh", "-c", hooksReadScript}; !reflect.DeepEqual(got, want) {
+	if got, want := calls[4].argv, []string{"sh", "-c", proxyWriteScript}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("proxy write argv = %#v, want %#v", got, want)
+	}
+	if got, want := string(calls[4].stdin), "#!/bin/sh\n# agr-proxy-wrapper: written by agr install; replaced on update\nexec \"$HOME/.local/bin/agr\" ctl \"$@\"\n"; got != want {
+		t.Fatalf("proxy wrapper = %q, want %q", got, want)
+	}
+	if got, want := calls[5].argv, []string{"sh", "-c", hooksReadScript}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("hooks read argv = %#v, want %#v", got, want)
 	}
-	if got, want := calls[5].argv, []string{"sh", "-c", hooksWriteScript}; !reflect.DeepEqual(got, want) {
+	if got, want := calls[6].argv, []string{"sh", "-c", hooksWriteScript}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("hooks write argv = %#v, want %#v", got, want)
 	}
 	info, err := LoadHostInfo(dirs, "user@example.com")
@@ -92,13 +101,59 @@ func TestInstallMuxOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read probe fixture: %v", err)
 	}
-	ssh := &runnerSSH{result: [][]byte{probe, nil, nil, nil, []byte(`{}`), nil}}
+	ssh := &runnerSSH{result: [][]byte{probe, nil, nil, nil, nil, []byte(`{}`), nil, nil}}
 	result, err := NewRunnerWithVersion(ssh, testDirsForInstall(t), "1.0.0").InstallResult(context.Background(), "host", "tmux")
 	if err != nil {
 		t.Fatalf("InstallResult() error = %v", err)
 	}
-	if result.Mux != "tmux" || len(ssh.Calls(t)) != 6 {
+	if result.Mux != "tmux" || len(ssh.Calls(t)) != 8 {
 		t.Fatalf("InstallResult() = %#v, calls = %d, want tmux and complete install", result, len(ssh.Calls(t)))
+	}
+}
+
+func TestInstallSkillWrite(t *testing.T) {
+	t.Helper()
+	probe, err := os.ReadFile("testdata/probe.txt")
+	if err != nil {
+		t.Fatalf("read probe fixture: %v", err)
+	}
+	tests := []struct {
+		name     string
+		out      string
+		err      error
+		wantNote string
+	}{
+		{"written", "written\n", nil, "agr skill: written"},
+		{"kept", "kept\n", nil, "agr skill: kept"},
+		{"write failure is a report line", "", errors.New("connection reset"), "agr skill: not written: connection reset"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Helper()
+			ssh := &runnerSSH{
+				result: [][]byte{probe, nil, nil, nil, nil, []byte(`{}`), nil, []byte(tc.out)},
+				errors: []error{nil, nil, nil, nil, nil, nil, nil, tc.err},
+			}
+			result, err := NewRunnerWithVersion(ssh, testDirsForInstall(t), "1.0.0").InstallResult(context.Background(), "host", "")
+			if err != nil {
+				t.Fatalf("InstallResult() error = %v, want the skill failure to be a report line", err)
+			}
+			if !strings.Contains(result.Skill, tc.wantNote) {
+				t.Fatalf("InstallResult().Skill = %q, want it to contain %q", result.Skill, tc.wantNote)
+			}
+			calls := ssh.Calls(t)
+			last := calls[len(calls)-1]
+			if !reflect.DeepEqual(last.argv, []string{"sh", "-c", skillWriteScript}) || !reflect.DeepEqual(last.stdin, skill.Bytes("1.0.0")) {
+				t.Fatalf("skill write = argv %#v, want skillWriteScript fed the stamped skill", last.argv)
+			}
+		})
+	}
+}
+
+func TestSkillWriteScriptUsesTheSkillMarker(t *testing.T) {
+	t.Helper()
+	if !strings.Contains(skillWriteScript, "grep -q '^"+skill.Marker+"'") {
+		t.Fatalf("skillWriteScript = %q, want a check for %q", skillWriteScript, skill.Marker)
 	}
 }
 
@@ -157,11 +212,11 @@ func TestInstallRefusesMalformedHooksBeforeHookWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read probe fixture: %v", err)
 	}
-	ssh := &runnerSSH{result: [][]byte{probe, nil, nil, nil, []byte("{")}}
+	ssh := &runnerSSH{result: [][]byte{probe, nil, nil, nil, nil, []byte("{")}}
 	if _, err := NewRunner(ssh, testDirsForInstall(t)).InstallResult(context.Background(), "host", ""); err == nil {
 		t.Fatal("InstallResult() error = nil for malformed hooks")
 	}
-	if got := len(ssh.Calls(t)); got != 5 {
+	if got := len(ssh.Calls(t)); got != 6 {
 		t.Fatalf("SSH calls = %d, want no hooks write after malformed input", got)
 	}
 }
@@ -216,16 +271,16 @@ func TestInstallPushesMissingTerminfo(t *testing.T) {
 		wantNote  string
 		wantTic   bool
 	}{
-		{"missing with tic: pushed", "terminfo\t0\ntic\t1\n", &terminfoFake{entry: []byte("xterm-ghostty|entry,\n")}, 7, "terminfo xterm-ghostty: installed", true},
-		{"present: nothing pushed", "terminfo\t1\ntic\t1\n", &terminfoFake{entry: []byte("unused")}, 6, "terminfo xterm-ghostty: present", false},
-		{"missing without tic: reported", "terminfo\t0\ntic\t0\n", &terminfoFake{entry: []byte("unused")}, 6, "tic is not installed", false},
-		{"local infocmp fails: reported", "terminfo\t0\ntic\t1\n", &terminfoFake{err: errors.New("no entry")}, 6, "could not read the local entry", false},
+		{"missing with tic: pushed", "terminfo\t0\ntic\t1\n", &terminfoFake{entry: []byte("xterm-ghostty|entry,\n")}, 9, "terminfo xterm-ghostty: installed", true},
+		{"present: nothing pushed", "terminfo\t1\ntic\t1\n", &terminfoFake{entry: []byte("unused")}, 8, "terminfo xterm-ghostty: present", false},
+		{"missing without tic: reported", "terminfo\t0\ntic\t0\n", &terminfoFake{entry: []byte("unused")}, 8, "tic is not installed", false},
+		{"local infocmp fails: reported", "terminfo\t0\ntic\t1\n", &terminfoFake{err: errors.New("no entry")}, 8, "could not read the local entry", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Helper()
 			dirs := testDirsForInstall(t)
-			ssh := &runnerSSH{result: [][]byte{append(append([]byte(nil), base...), []byte(tc.probe)...), nil, nil, nil, []byte(`{}`), nil, nil}}
+			ssh := &runnerSSH{result: [][]byte{append(append([]byte(nil), base...), []byte(tc.probe)...), nil, nil, nil, nil, []byte(`{}`), nil, nil}}
 			runner := NewRunnerWithVersion(ssh, dirs, "1.0.0")
 			runner.SetTerm("xterm-ghostty")
 			runner.terminfo = tc.infocmp
@@ -247,5 +302,82 @@ func TestInstallPushesMissingTerminfo(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// probeWith swaps the agtermctl and PATH lines of the fixture, which describes
+// a host that already has the agr proxy on its PATH.
+func probeWith(t *testing.T, agtermctl, localBin string) string {
+	t.Helper()
+	body, err := os.ReadFile("testdata/probe.txt")
+	if err != nil {
+		t.Fatalf("read probe fixture: %v", err)
+	}
+	text := strings.Replace(string(body), "agtermctl\tproxy\n", "agtermctl\t"+agtermctl+"\n", 1)
+	return strings.Replace(text, "local_bin_path\t1\n", "local_bin_path\t"+localBin+"\n", 1)
+}
+
+// TestInstallProxyWrapper pins the three cases: a host without an agtermctl
+// gets the wrapper, an earlier agr wrapper is updated, and a foreign agtermctl
+// (a Mac running agterm) is left alone and the install says so.
+func TestInstallProxyWrapper(t *testing.T) {
+	t.Helper()
+	tests := []struct {
+		name      string
+		agtermctl string
+		localBin  string
+		wantWrite bool
+		wantNote  string
+	}{
+		{"none: written", "MISSING", "1", true, "agtermctl proxy: installed"},
+		{"marked: updated", "proxy", "1", true, "agtermctl proxy: updated"},
+		{"foreign: skipped", "other", "1", false, "agtermctl proxy: skipped"},
+		{"none, not on PATH: written with a warning", "MISSING", "0", true, "installed (~/.local/bin is not on a login shell PATH there)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Helper()
+			results := [][]byte{[]byte(probeWith(t, tc.agtermctl, tc.localBin)), nil, nil, nil}
+			wantCalls := 7
+			if tc.wantWrite {
+				results = append(results, nil)
+				wantCalls = 8
+			}
+			results = append(results, []byte(`{}`), nil)
+			ssh := &runnerSSH{result: results}
+			result, err := NewRunnerWithVersion(ssh, testDirsForInstall(t), "1.0.0").InstallResult(context.Background(), "host", "")
+			if err != nil {
+				t.Fatalf("InstallResult() error = %v", err)
+			}
+			if !strings.Contains(result.Proxy, tc.wantNote) {
+				t.Fatalf("InstallResult().Proxy = %q, want it to contain %q", result.Proxy, tc.wantNote)
+			}
+			calls := ssh.Calls(t)
+			if len(calls) != wantCalls {
+				t.Fatalf("SSH calls = %d, want %d", len(calls), wantCalls)
+			}
+			wrote := false
+			for _, call := range calls {
+				if reflect.DeepEqual(call.argv, []string{"sh", "-c", proxyWriteScript}) {
+					wrote = true
+				}
+			}
+			if wrote != tc.wantWrite {
+				t.Fatalf("wrapper written = %v, want %v", wrote, tc.wantWrite)
+			}
+		})
+	}
+}
+
+func TestProxyWriteScriptKeepsUnmarkedFileAndSetsMode(t *testing.T) {
+	t.Helper()
+	if !strings.Contains(proxyWriteScript, "chmod 755") || !strings.Contains(proxyWriteScript, "grep -q '^"+proxyMarker+"'") {
+		t.Fatalf("proxyWriteScript = %q, want mode 755 and a marker check", proxyWriteScript)
+	}
+	if !strings.Contains(probeScript, "grep -q '^"+proxyMarker+"'") {
+		t.Fatal("probe script does not look for the proxy marker line")
+	}
+	if !strings.HasPrefix(proxyWrapper, "#!/bin/sh\n"+proxyMarker) {
+		t.Fatalf("proxyWrapper = %q, want the marker on its second line", proxyWrapper)
 	}
 }

@@ -100,6 +100,45 @@ func (mr *MockRowsMockRecorder) Tree(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Tree", reflect.TypeOf((*MockRows)(nil).Tree), ctx)
 }
 
+// MockPaneTree is a mock of PaneTree interface.
+type MockPaneTree struct {
+	ctrl     *gomock.Controller
+	recorder *MockPaneTreeMockRecorder
+	isgomock struct{}
+}
+
+// MockPaneTreeMockRecorder is the mock recorder for MockPaneTree.
+type MockPaneTreeMockRecorder struct {
+	mock *MockPaneTree
+}
+
+// NewMockPaneTree creates a new mock instance.
+func NewMockPaneTree(ctrl *gomock.Controller) *MockPaneTree {
+	mock := &MockPaneTree{ctrl: ctrl}
+	mock.recorder = &MockPaneTreeMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPaneTree) EXPECT() *MockPaneTreeMockRecorder {
+	return m.recorder
+}
+
+// TreeRows mocks base method.
+func (m *MockPaneTree) TreeRows(ctx context.Context) ([]agterm.TreeRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TreeRows", ctx)
+	ret0, _ := ret[0].([]agterm.TreeRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TreeRows indicates an expected call of TreeRows.
+func (mr *MockPaneTreeMockRecorder) TreeRows(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TreeRows", reflect.TypeOf((*MockPaneTree)(nil).TreeRows), ctx)
+}
+
 // MockLabeler is a mock of Labeler interface.
 type MockLabeler struct {
 	ctrl     *gomock.Controller
@@ -1201,4 +1240,82 @@ func (m *MockBindingStore) Load() ([]bindings.Binding, error) {
 func (mr *MockBindingStoreMockRecorder) Load() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Load", reflect.TypeOf((*MockBindingStore)(nil).Load))
+}
+
+// MockWorkspaceLister is a mock of WorkspaceLister interface.
+type MockWorkspaceLister struct {
+	ctrl     *gomock.Controller
+	recorder *MockWorkspaceListerMockRecorder
+	isgomock struct{}
+}
+
+// MockWorkspaceListerMockRecorder is the mock recorder for MockWorkspaceLister.
+type MockWorkspaceListerMockRecorder struct {
+	mock *MockWorkspaceLister
+}
+
+// NewMockWorkspaceLister creates a new mock instance.
+func NewMockWorkspaceLister(ctrl *gomock.Controller) *MockWorkspaceLister {
+	mock := &MockWorkspaceLister{ctrl: ctrl}
+	mock.recorder = &MockWorkspaceListerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockWorkspaceLister) EXPECT() *MockWorkspaceListerMockRecorder {
+	return m.recorder
+}
+
+// Workspaces mocks base method.
+func (m *MockWorkspaceLister) Workspaces(ctx context.Context) ([]agterm.Workspace, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Workspaces", ctx)
+	ret0, _ := ret[0].([]agterm.Workspace)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Workspaces indicates an expected call of Workspaces.
+func (mr *MockWorkspaceListerMockRecorder) Workspaces(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Workspaces", reflect.TypeOf((*MockWorkspaceLister)(nil).Workspaces), ctx)
+}
+
+// MockRowOpener is a mock of RowOpener interface.
+type MockRowOpener struct {
+	ctrl     *gomock.Controller
+	recorder *MockRowOpenerMockRecorder
+	isgomock struct{}
+}
+
+// MockRowOpenerMockRecorder is the mock recorder for MockRowOpener.
+type MockRowOpenerMockRecorder struct {
+	mock *MockRowOpener
+}
+
+// NewMockRowOpener creates a new mock instance.
+func NewMockRowOpener(ctrl *gomock.Controller) *MockRowOpener {
+	mock := &MockRowOpener{ctrl: ctrl}
+	mock.recorder = &MockRowOpenerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRowOpener) EXPECT() *MockRowOpenerMockRecorder {
+	return m.recorder
+}
+
+// NewRow mocks base method.
+func (m *MockRowOpener) NewRow(ctx context.Context, row agterm.NewRow) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewRow", ctx, row)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NewRow indicates an expected call of NewRow.
+func (mr *MockRowOpenerMockRecorder) NewRow(ctx, row any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewRow", reflect.TypeOf((*MockRowOpener)(nil).NewRow), ctx, row)
 }

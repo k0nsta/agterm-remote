@@ -42,6 +42,9 @@ Commands:
                           Open a plain remote login shell (no session)
   end [row]                Kill a row's remote sessions and close the row
   paste [row] [pane-id]   Send clipboard files/image or latest screenshot to a remote row
+  new [row]                Pick a host, session and workspace; open it in a new row
+  setup [--end-key <chord>] [--paste-key <chord>] [--new-key <chord>]
+                          Make agterm's ⌘D and ⌘J follow a remote row; add End, Paste and New commands
 
 Options:
   --help, -h               Show this help
@@ -122,6 +125,7 @@ On a row opened with `agr open`, agterm's own keys can follow the remote host:
 | ⌘D | local split | `a1-2` on the remote host, in `a1`'s current directory |
 | ⌘J | local scratch | a plain shell on the remote host, in `a1`'s current directory |
 | End key (yours, e.g. ctrl+a x) | — | asks, then ends `a1` and `a1-2` and closes the row |
+| ctrl+a n | pick a host, session and workspace, open it in a new row | the same, `remote` and the row's workspace offered first |
 
 ### Setup
 
@@ -129,6 +133,7 @@ On a row opened with `agr open`, agterm's own keys can follow the remote host:
 agr setup                        # asks for the End key; Enter skips it
 agr setup --end-key 'ctrl+a>x'   # bind or change it later
 agr setup --paste-key 'ctrl+a>v' # Paste gets ctrl+a>v when first added and free
+agr setup --new-key 'ctrl+a>n'   # New gets ctrl+a>n when first added and free
 ```
 
 It writes these lines with the binary's own path, then reloads agterm. Lines
@@ -143,10 +148,20 @@ on pane.scratch   '/opt/homebrew/bin/agr' on-scratch
 # keymap.conf (with no key, run it from agterm's command palette)
 command "End remote session" ctrl+a>x --error-hud '/opt/homebrew/bin/agr' end "{AGT_SESSION_ID}"
 command "Paste to remote" ctrl+a>v --error-hud '/opt/homebrew/bin/agr' paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"
+command "New remote session" ctrl+a>n --error-hud '/opt/homebrew/bin/agr' new "{AGT_SESSION_ID}"
 ```
 
 Run `agr install <host>` once per host so it has the current remote script.
 Tested on agterm 0.35.
+
+### Open a new remote session
+
+Press `ctrl+a>n` (or run `agr new`) and answer three pickers: the host (hosts
+you installed or opened, the current row's first; type any other), the session
+on it (pick one, or type a new name), and the workspace (the current one
+first; type a name to create one). A new row opens right after the current
+one, or in the chosen workspace, and runs `agr open <host> <name>` in its shell,
+so a failed connection stays readable there. Escape at any picker opens nothing.
 
 ### Paste a screenshot (or files)
 
@@ -221,6 +236,72 @@ children.
   it keeps the row so you can run it again.
 - Hook errors are written to `~/.cache/agr/hooks.log`.
 
+## Remote agterm control
+
+On a row opened with `agr open`, `agtermctl` also works on the host. `agr install`
+puts a proxy there; each call goes over the bridge to the Mac, is checked, and
+runs the real `agtermctl`. `agr open` also exports `AGTERM_ENABLED`,
+`AGTERM_SESSION_ID`, `AGTERM_PANE`, `AGTERM_PANE_ID` and `AGTERM_SOCKET=agr-proxy`
+into the remote session, so tools that look for agterm find it.
+
+```sh
+# on the host, inside an agr row:
+agtermctl session overlay open --html /tmp/panel.html --js --block
+{"outcome":"submitted","value":"…"}
+```
+
+- **Works unchanged**: HTML panels that submit or close, `session text` / `type`
+  between rows, `notify`, `session status`, `session new` (the new row runs on
+  the same host).
+- **Allowlist**: only listed commands and options work. Everything else is
+  refused with the reason (`pick`, `ask`, `workspace`, `session paste`,
+  `session scratch --command`, `--url … --persistent`, …).
+  `--follow` on `session overlay open` is ignored with a warning, so tools
+  that pass it by default still work; the user's selection never moves.
+- **Full ids only**: `--target` and `--pane-id` take full ids from
+  `agtermctl tree --json`. Prefixes and `active` are refused.
+- **One-file pages**: an HTML page must be a single self-contained file.
+- **Page size**: a page covers the caller's pane, full size. On a row whose
+  panes are all the host's it floats instead, at the size the caller gives or
+  your default: `agr setup --page-size 70` (stored in
+  `~/.config/agr/config.json`; `100` is full again). A split with a Mac pane
+  stays full.
+- **`foreground` limitation**: a remote row's `foreground` in `tree --json` is
+  `agr`, not the remote program. Tools that poll it (such as a spawn script's
+  "is it running" check) see `agr`; read `session text` instead.
+- **New leaf**: a command that is not in the allowlist is added only on request.
+  Open an issue with the command line and what it is for.
+
+### Workers on a host
+
+```sh
+agr open <host> <name> --cwd <dir> --command '<program>'   # runs only when the session is new
+agr run <host> [--cwd <dir>] -- make test                   # one-shot ssh -t, exit code passed through
+```
+
+`--command` and the environment need the host's agr to be 1.3.0 or newer
+(`agr install <host>`).
+
+### Handing off to a local agent
+
+A remote session may `session type` into a local pane that runs `claude` or
+`codex`. The first time, agterm shows a dialog on that pane, plus a desktop
+notification for its row: **Allow once**, **Allow `<host>` here until it
+closes**, or **Deny**. Return denies, and so does no answer within 2 minutes.
+Nothing is typed until you allow it. Text typed later under the grant posts a
+notification too, which leaves agterm's unseen badge on the row.
+
+### The `agr` skill
+
+`agr setup` installs `~/.claude/skills/agr/SKILL.md` on the Mac and
+`agr install <host>` installs it on each host. A file without agr's
+`<!-- agr-skill -->` marker is yours and is left alone. `agr skill` prints it
+for agents that read instructions elsewhere.
+
+Your own skills compose with it: keep your spawn skill and wrap the program it
+starts, for example `agtermctl session new --command "agr open <host> <name>
+--command '<program>'"`. The skill tells Claude how.
+
 ## agterm versions
 
 agterm 0.26 is recommended. Enable its Live sessions restore mode so pane
@@ -245,8 +326,13 @@ Remote side:
 
 - POSIX `sh`, SSH access, and zmx or tmux (zmx is preferred when installed);
 - one relay with Unix-socket support: OpenBSD `nc -U`, `python3`, or `socat`;
+- `python3` (the `agtermctl` proxy needs it);
 - `mosh-server` is optional. `agr install` probes the host and persists the
   selected multiplexer, relay, and zmx socket directory.
+
+Versions: the Mac daemon and the remote script must both be 1.3.0 or newer for
+`--command`, the environment and the proxy. The proxy needs agterm 0.36.0;
+with an older agterm every proxied call fails and everything else keeps working.
 
 ## Failure modes
 
@@ -259,6 +345,13 @@ Remote side:
 | `ControlMaster` in `ssh_config` | The bridge always opens its own connection (`ControlMaster=no`, `ControlPath=none`): a forward made through a shared master outlives the bridge and blocks every restart. |
 | No agterm client | The remote agent continues normally; status delivery is simply unavailable. |
 | Event while fully offline | It is not queued. The most recent level is restored when the bridge reconnects. |
+| Bridge down | `agtermctl (via agr): the bridge to the Mac is down (run agr up <host> on the Mac)` |
+| Old or stopped daemon | `agtermctl (via agr): the Mac's agr daemon is too old or not running` |
+| Bridge dropped mid-call | `agtermctl (via agr): the bridge to the Mac dropped` |
+| Not in an agr row | `agtermctl (via agr): not inside a row opened with agr open` |
+| No python3 on the host | `agtermctl (via agr): python3 is required on this host` |
+| agterm older than 0.36.0 | `agtermctl (via agr): needs agterm 0.36.0 (found <v>)` |
+| Refused call | `agtermctl (via agr): <reason>`, exit 1 |
 | Local and remote versions differ | `ls`, `kill`, and `doctor` report a warning; run `agr install <host>` to upgrade the remote script. |
 
 ## Security
@@ -267,6 +360,39 @@ The forwarded Unix socket exposes agterm's control API, including operations
 that can inject text into terminals. Treat the remote host as trusted as a
 local terminal. The socket is user-owned, is not a TCP listener, and travels
 over the authenticated SSH connection; do not use agr with an untrusted host.
+
+### Remote agterm control
+
+- **Scoped per pane**: a host may read, and may write only to panes bound to it
+  (including rows it created). A write also needs the pane to be attached, that
+  is, still running `agr open`; a detached pane is a local Mac shell and is
+  refused. Calls that run or read something on the Mac are refused.
+- **Pages from a host** are never opened as agterm `--html` pages, whose bridge
+  could run any command. They are served by a loopback shim with no agterm
+  bridge: only submit and close work, through `agterm.request` or
+  `data-agterm` buttons and forms, and a CSP keeps page JavaScript on its own
+  server. `--url` pages from a host are static (no `--js`). The warning for
+  localhost URLs is a hint, not a control.
+- **`events`** streams the Mac's whole event feed, not just this host's rows.
+- **Grants**: a grant lets a host type into one local pane. Anything on that host
+  may use it, not just one session.
+  - *Orchestrator*: `agr open --orchestrator <row>:<pane>` lets the host's
+    session message the pane that spawned it.
+  - *Consent*: the dialog above; "here until it closes" lasts as long as the
+    caller's binding, re-attaches included.
+  - Local `claude` or `codex` panes only, `session type` only, plain text up to
+    64 KiB (control and invisible characters are refused). A refused or
+    unanswered dialog blocks that host's requests to the same row for 60 s.
+- **Status events**: a `session_id` status event is applied only to rows with a
+  pane bound to the sending host. Cookbook senders on rows not opened with
+  `agr open` are dropped.
+- **Real agtermctl**: the proxy is skipped on hosts that already have one.
+
+## Upgrading to 1.3
+
+Run `agr install <host>` for each host, then re-open its rows with `agr open`
+to get the `AGTERM_*` environment. Agents started before the upgrade need a
+restart to see agterm.
 
 ## Upgrading from agr 0.4 or 0.3
 

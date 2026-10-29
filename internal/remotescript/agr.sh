@@ -9,7 +9,7 @@ have() {
 
 usage() {
 	printf '%s\n' "agr $AGR_VERSION — remote session bridge" >&2
-	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|paste-put|status|--version} ..." >&2
+	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|paste-put|status|ctl|--version} ..." >&2
 	exit "${1:-2}"
 }
 
@@ -168,13 +168,29 @@ tmux_clipboard_override() {
 tmux_attach() {
 	n=$1
 	if ! tmux has-session -t "=$n" 2>/dev/null; then
+		set -- new-session -d -s "$n"
 		if [ -n "$attach_cwd" ]; then
 			# -c is format-expanded: a literal # must be doubled, or a path
 			# like /d/a#{x} lands in $HOME (and #() would run a command).
-			tmux new-session -d -s "$n" -c "$(printf '%s' "$attach_cwd" | sed 's/#/##/g')"
-		else
-			tmux new-session -d -s "$n"
+			set -- "$@" -c "$(printf '%s' "$attach_cwd" | sed 's/#/##/g')"
 		fi
+		while IFS= read -r pair; do
+			[ -z "$pair" ] || set -- "$@" -e "$pair"
+		done <<EOF
+$attach_env
+EOF
+		# CMD runs once, in the new session only, and leaves a login shell.
+		[ -z "$attach_command" ] || set -- "$@" "$attach_command
+exec \"\${SHELL:-/bin/sh}\" -l"
+		tmux "$@"
+	else
+		# A re-attach reaches new windows and panes only; the running shell
+		# keeps the values it started with.
+		while IFS= read -r pair; do
+			[ -z "$pair" ] || tmux set-environment -t "=$n" "${pair%%=*}" "${pair#*=}" 2>/dev/null || :
+		done <<EOF
+$attach_env
+EOF
 	fi
 	tmux set-option -t "=$n:" @agr 1
 	[ -z "$attach_parent" ] || tmux set-option -t "=$n:" @agr_parent "$attach_parent"
@@ -306,15 +322,20 @@ sock.sendall(sys.stdin.buffer.read())
 	return 0
 }
 
+# tmux_current_session prints the agr-owned session the calling pane belongs
+# to, and fails (printing nothing) outside tmux or outside an owned session.
+tmux_current_session() {
+	[ -n "${TMUX_PANE:-}" ] || return 1
+	cur=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || return 1
+	[ -n "$cur" ] || return 1
+	tmux_owned "$cur" || return 1
+	printf '%s\n' "$cur"
+}
+
 tmux_status() {
 	state=$1
 	shift
-	[ -n "${TMUX_PANE:-}" ] || exit 0
-	n=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || exit 0
-	[ -n "$n" ] || exit 0
-	if ! tmux_owned "$n"; then
-		exit 0
-	fi
+	n=$(tmux_current_session) || exit 0
 	label="$state@$(date +%s)"
 	if ! tmux set-option -t "=$n:" @agr_state "$label" 2>/dev/null; then
 		exit 0
@@ -452,18 +473,36 @@ zmx_set_labels() {
 
 zmx_attach() {
 	n=$1
+	# Env and CMD apply to a new session only: zmx has no way to refresh a
+	# running one's environment, and CMD must not run twice.
+	fresh=1
+	if zmx_line "$n" >/dev/null; then
+		fresh=0
+	fi
 	zmx_set_labels "$n" || true
 	# A new zmx session starts its shell in the caller's directory; an
 	# existing one ignores it, which is the re-attach behaviour wanted.
 	[ -z "$attach_cwd" ] || cd "$attach_cwd" 2>/dev/null || :
 	if [ "${AGR_ZMX_LABELS:-0}" = 1 ]; then
-		if [ -n "$attach_parent" ]; then
-			exec zmx attach --labels "agr=1" --labels "agr_parent=$attach_parent" "$n"
-		fi
-		exec zmx attach --labels "agr=1" "$n"
+		set -- --labels "agr=1"
+		[ -z "$attach_parent" ] || set -- "$@" --labels "agr_parent=$attach_parent"
+	else
+		set --
+		zmx_label_retry "$n" &
 	fi
-	zmx_label_retry "$n" &
-	exec zmx attach "$n"
+	set -- zmx attach "$@" "$n"
+	if [ "$fresh" = 1 ] && [ -n "$attach_command" ]; then
+		set -- "$@" sh -c "$attach_command
+exec \"\${SHELL:-/bin/sh}\" -l"
+	fi
+	if [ "$fresh" = 1 ]; then
+		while IFS= read -r pair; do
+			[ -z "$pair" ] || set -- env "$pair" "$@"
+		done <<EOF
+$attach_env
+EOF
+	fi
+	exec "$@"
 }
 
 zmx_line() {
@@ -559,12 +598,19 @@ EOF
 	return 0
 }
 
+# zmx_current_session prints the agr-owned session the caller runs in, and
+# fails (printing nothing) outside zmx or outside an owned session.
+zmx_current_session() {
+	[ -n "${ZMX_SESSION:-}" ] || return 1
+	v=$(zmx get "$ZMX_SESSION" agr 2>/dev/null) || return 1
+	[ "$v" = 1 ] || return 1
+	printf '%s\n' "$ZMX_SESSION"
+}
+
 zmx_status() {
 	state=$1
 	shift
-	[ -n "${ZMX_SESSION:-}" ] || exit 0
-	v=$(zmx get "$ZMX_SESSION" agr 2>/dev/null) || exit 0
-	[ "$v" = 1 ] || exit 0
+	zmx_current_session >/dev/null || exit 0
 	label="$state@$(date +%s)"
 	if ! zmx set "$ZMX_SESSION" "agr_state=$label" 2>/dev/null; then
 		exit 0
@@ -595,12 +641,210 @@ paste_put() {
 	printf '%s\n' "$target"
 }
 
+# ctl is the remote half of the agtermctl proxy: one header line, the Mac's
+# "ack 1" line, then the file and stdin bytes, then the o/e/x frames back. The
+# client is python3 (stdlib only); its source sits in single quotes, so a literal
+# single quote in it is written '\''.
+ctl() {
+	if ! have python3; then
+		printf '%s\n' 'agtermctl (via agr): python3 is required on this host' >&2
+		exit 1
+	fi
+	case "$AGR_MUX" in
+		tmux) ctl_session=$(tmux_current_session) || ctl_session= ;;
+		zmx) ctl_session=$(zmx_current_session) || ctl_session= ;;
+		*) ctl_session= ;;
+	esac
+	if [ -z "$ctl_session" ] || ! valid_token "$ctl_session"; then
+		printf '%s\n' 'agtermctl (via agr): not inside a row opened with agr open' >&2
+		exit 1
+	fi
+	ctl_py='
+import json
+import os
+import socket
+import sys
+
+PREFIX = "agtermctl (via agr): "
+FILE_OPTIONS = ("--html",)
+ACK_TIMEOUT = 5
+
+
+def fail(message, code=1):
+    sys.stderr.write(PREFIX + message + "\n")
+    sys.stderr.flush()
+    sys.exit(code)
+
+
+def read_file(path):
+    if not os.path.isfile(path):
+        fail("not a readable regular file: " + path)
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except OSError as error:
+        fail("cannot read " + path + ": " + error.strerror)
+
+
+def prepare(argv):
+    # File options become @<index>; the bytes travel after the ack.
+    files = []
+    out = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--":
+            out.extend(argv[index:])
+            break
+        if arg in FILE_OPTIONS and index + 1 < len(argv):
+            out.extend([arg, "@" + str(len(files))])
+            files.append(read_file(argv[index + 1]))
+            index += 2
+            continue
+        name, equals, value = arg.partition("=")
+        if equals and name in FILE_OPTIONS:
+            out.append(name + "=@" + str(len(files)))
+            files.append(read_file(value))
+            index += 1
+            continue
+        out.append(arg)
+        index += 1
+    return out, files
+
+
+def wants_stdin(argv):
+    for arg in argv:
+        if arg == "--":
+            return False
+        if arg == "--stdin":
+            return True
+    return False
+
+
+def read_line(sock, buf):
+    while b"\n" not in buf:
+        if len(buf) > 4096:
+            return None, buf
+        chunk = sock.recv(4096)
+        if not chunk:
+            return None, buf
+        buf += chunk
+    line, _, rest = buf.partition(b"\n")
+    return line, rest
+
+
+def demux(sock, buf):
+    # Frames: "o <n>" stdout, "e <n>" stderr, each followed by n bytes; one
+    # "x <code>" ends the call.
+    while True:
+        line, buf = read_line(sock, buf)
+        if line is None:
+            fail("the bridge to the Mac dropped")
+        kind, _, number = line.decode("ascii", "replace").partition(" ")
+        if kind == "x" and number.lstrip("-").isdigit():
+            code = int(number)
+            sys.exit(code if 0 <= code <= 255 else 1)
+        if kind not in ("o", "e") or not number.isdigit():
+            fail("unexpected reply from the Mac'\''s agr daemon")
+        size = int(number)
+        while len(buf) < size:
+            chunk = sock.recv(65536)
+            if not chunk:
+                fail("the bridge to the Mac dropped")
+            buf += chunk
+        data, buf = buf[:size], buf[size:]
+        stream = sys.stdout if kind == "o" else sys.stderr
+        try:
+            stream.buffer.write(data)
+            stream.buffer.flush()
+        except BrokenPipeError:
+            sys.exit(1)
+
+
+def main():
+    sock_path, session = sys.argv[1], sys.argv[2]
+    argv, files = prepare(sys.argv[3:])
+    stdin = b""
+    if wants_stdin(argv):
+        stdin = sys.stdin.buffer.read()
+    cwd = os.environ.get("PWD") or os.getcwd()
+    header = {
+        "cmd": "ctl",
+        "v": 1,
+        "session": session,
+        "self": {
+            "row": os.environ.get("AGTERM_SESSION_ID", ""),
+            "pane_id": os.environ.get("AGTERM_PANE_ID", ""),
+        },
+        "cwd": cwd,
+        "argv": argv,
+        "files": [len(data) for data in files],
+        "stdin": len(stdin),
+    }
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(ACK_TIMEOUT)
+    try:
+        sock.connect(sock_path)
+    except OSError:
+        fail("the bridge to the Mac is down (run agr up <host> on the Mac)")
+    old = "the Mac'\''s agr daemon is too old or not running"
+    try:
+        sock.sendall(json.dumps(header, separators=(",", ":")).encode("ascii") + b"\n")
+        line, buf = read_line(sock, b"")
+    except OSError:
+        fail(old)
+    if line is None:
+        fail(old)
+    sock.settimeout(None)
+    if line == b"ack 1":
+        try:
+            for data in files:
+                sock.sendall(data)
+            sock.sendall(stdin)
+        except OSError:
+            pass
+    else:
+        # A refusal before the ack arrives as frames; read them as they are.
+        buf = line + b"\n" + buf
+    demux(sock, buf)
+
+
+try:
+    main()
+except KeyboardInterrupt:
+    sys.exit(130)
+'
+	exec python3 -I -c "$ctl_py" "$AGR_SOCK" "$ctl_session" "$@"
+}
+
 attach_cwd=
 attach_parent=
+attach_env=
+attach_command=
 
 # reap's exit status for a session that does not exist, so the Mac can tell
 # "already gone" from a refusal without parsing stderr.
 AGR_NO_SESSION=3
+
+# valid_env accepts one AGTERM_* assignment whose value is an id or a token:
+# attach hands it to tmux and env, so nothing else may reach them.
+valid_env() {
+	case "${1:-}" in
+		*=*) ;;
+		*) return 1 ;;
+	esac
+	case "${1%%=*}" in
+		AGTERM_?*) ;;
+		*) return 1 ;;
+	esac
+	case "${1%%=*}" in
+		*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_]*) return 1 ;;
+	esac
+	case "${1#*=}" in
+		''|*[!A-Za-z0-9_.-]*) return 1 ;;
+	esac
+	return 0
+}
 
 # attach's options follow the session name. An unusable directory is dropped
 # rather than refused: the attach matters more than where a new session starts.
@@ -618,6 +862,19 @@ parse_attach_options() {
 				[ "$#" -ge 2 ] || usage 2
 				valid_token "$2" || { printf '%s\n' 'agr: invalid parent name' >&2; exit 2; }
 				attach_parent=$2
+				shift 2
+				;;
+			--env)
+				[ "$#" -ge 2 ] || usage 2
+				valid_env "$2" || { printf '%s\n' 'agr: invalid --env' >&2; exit 2; }
+				attach_env="$attach_env$2
+"
+				shift 2
+				;;
+			--command)
+				[ "$#" -ge 2 ] || usage 2
+				[ -n "$2" ] || { printf '%s\n' 'agr: empty --command' >&2; exit 2; }
+				attach_command=$2
 				shift 2
 				;;
 			*) usage 2 ;;
@@ -699,6 +956,9 @@ dispatch() {
 				zmx) zmx_status "$state" "$@" ;;
 				*) exit 2 ;;
 			esac
+			;;
+		ctl)
+			ctl "$@"
 			;;
 		--version|-V)
 			[ "$#" -eq 0 ] || usage 2

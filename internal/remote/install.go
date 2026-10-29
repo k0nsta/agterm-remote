@@ -8,10 +8,21 @@ import (
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/remotescript"
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 const (
-	envWriteScript    = `cat > "$HOME/.config/agr/env.tmp" && chmod 600 "$HOME/.config/agr/env.tmp" && mv -f "$HOME/.config/agr/env.tmp" "$HOME/.config/agr/env"`
+	envWriteScript = `cat > "$HOME/.config/agr/env.tmp" && chmod 600 "$HOME/.config/agr/env.tmp" && mv -f "$HOME/.config/agr/env.tmp" "$HOME/.config/agr/env"`
+	// proxyMarker is the line that marks an agtermctl as agr's proxy wrapper.
+	// The probe script greps for the same text.
+	proxyMarker = "# agr-proxy-wrapper"
+	// proxyWrapper is ~/.local/bin/agtermctl: the host's tools call it as if it
+	// were agtermctl, and it hands the call to agr.
+	proxyWrapper = "#!/bin/sh\n" + proxyMarker + ": written by agr install; replaced on update\n" +
+		"exec \"$HOME/.local/bin/agr\" ctl \"$@\"\n"
+	// proxyWriteScript never replaces a file that lacks the marker, whatever
+	// the probe said: the stdin is drained so ssh does not see a broken pipe.
+	proxyWriteScript  = `t="$HOME/.local/bin/agtermctl"; if [ -e "$t" ] && ! grep -q '^` + proxyMarker + `' "$t" 2>/dev/null; then cat >/dev/null; exit 0; fi; cat > "$t.tmp" && chmod 755 "$t.tmp" && mv -f "$t.tmp" "$t"`
 	remoteScriptWrite = `cat > "$HOME/.local/bin/agr.tmp" && chmod +x "$HOME/.local/bin/agr.tmp" && mv -f "$HOME/.local/bin/agr.tmp" "$HOME/.local/bin/agr"`
 )
 
@@ -25,6 +36,12 @@ type InstallResult struct {
 	// Terminfo is one phrase about the local terminal's entry on the host —
 	// present, installed, or why it could not be — empty when not checked.
 	Terminfo string
+	// Proxy is one phrase about the agtermctl proxy wrapper: installed,
+	// updated, or why it was skipped.
+	Proxy string
+	// Skill is one phrase about the agr skill on the host: written, kept, or
+	// why it could not be written.
+	Skill string
 }
 
 // Install probes the host, installs the versioned remote script, writes the
@@ -70,6 +87,11 @@ func (r *Runner) InstallResult(ctx context.Context, host, muxOverride string) (I
 		return InstallResult{}, fmt.Errorf("write remote agr script: %w", err)
 	}
 
+	proxy, err := r.ensureProxy(ctx, host, probe)
+	if err != nil {
+		return InstallResult{}, err
+	}
+
 	// The same validation Home() applies: install is the other producer of a
 	// cached home, and a non-absolute value here would be persisted and then
 	// used to build every remote path for this host.
@@ -94,9 +116,44 @@ func (r *Runner) InstallResult(ctx context.Context, host, muxOverride string) (I
 		return InstallResult{}, err
 	}
 
-	result := InstallResult{Host: host, Version: r.version, Mux: mux, Relay: relay}
+	result := InstallResult{Host: host, Version: r.version, Mux: mux, Relay: relay, Proxy: proxy}
+	result.Skill = r.ensureSkill(ctx, host)
 	result.Terminfo = r.ensureTerminfo(ctx, host, probe)
 	return result, nil
+}
+
+// ensureProxy writes the agtermctl wrapper, unless the host already has an
+// agtermctl that is not agr's (a Mac running agterm): that one stays, and the
+// returned phrase says so.
+func (r *Runner) ensureProxy(ctx context.Context, host string, probe ProbeResult) (string, error) {
+	if probe.Agtermctl == "other" {
+		return "agtermctl proxy: skipped, the host already has its own agtermctl", nil
+	}
+	if _, err := r.sshClient().Run(ctx, host, []byte(proxyWrapper), "sh", "-c", proxyWriteScript); err != nil {
+		return "", fmt.Errorf("write agtermctl proxy: %w", err)
+	}
+	note := "agtermctl proxy: installed"
+	if probe.Agtermctl == "proxy" {
+		note = "agtermctl proxy: updated"
+	}
+	if !probe.LocalBinOnPath {
+		note += " (~/.local/bin is not on a login shell PATH there)"
+	}
+	return note, nil
+}
+
+// ensureSkill writes the agr skill to the host, leaving a SKILL.md without the
+// agr marker alone. Best effort, like ensureTerminfo: a failure is a report
+// line, never an install error.
+func (r *Runner) ensureSkill(ctx context.Context, host string) string {
+	out, err := r.sshClient().Run(ctx, host, skill.Bytes(r.version), "sh", "-c", skillWriteScript)
+	if err != nil {
+		return fmt.Sprintf("agr skill: not written: %v", err)
+	}
+	if strings.TrimSpace(string(out)) == skill.Kept {
+		return "agr skill: kept, ~/.claude/skills/agr/SKILL.md is not agr's"
+	}
+	return "agr skill: written to ~/.claude/skills/agr/SKILL.md"
 }
 
 // ensureTerminfo pushes the local terminal's terminfo entry to host when the

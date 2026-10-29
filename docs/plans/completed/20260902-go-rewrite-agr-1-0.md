@@ -789,7 +789,7 @@ One request per connection; 1 MiB cap; 2 s client timeout. Fallback exec only on
 {"cmd":"session-status","state":"active","session_id":"A69B…","pane":"left","pane_id":"…","args":["--blink"]}
 ```
 
-**bindings.json:** `[{"row":"A69B…","paneID":"…","pane":"left","host":"homelab","name":"api","mux":"zmx","boundAt":"2026-09-02T12:00:00Z"}]`
+**bindings.json:** `[{"row":"A69B…","paneID":"…","pane":"left","host":"myhost","name":"api","mux":"zmx","boundAt":"2026-09-02T12:00:00Z"}]`
 
 **Daemon control socket (`<cache>/agr/agrd.sock`):** `{"op":"up|down|status|reload-bindings","host":"…"}` → `{"ok":true,"result":…}`.
 

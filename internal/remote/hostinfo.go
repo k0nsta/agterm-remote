@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/k0nsta/agterm-remote/internal/paths"
@@ -14,6 +16,9 @@ import (
 
 // HostInfo is the locally cached result of probing one remote host.
 type HostInfo struct {
+	// Host is the destination the file was saved for: the file name keeps it
+	// only lossily (FileKey).
+	Host        string    `json:"host,omitempty"`
 	Home        string    `json:"home"`
 	Mux         string    `json:"mux"`
 	Relay       string    `json:"relay"`
@@ -48,6 +53,7 @@ func SaveHostInfo(dirs paths.Dirs, host string, info HostInfo) error {
 	if !token.ValidHost(host) {
 		return fmt.Errorf("invalid host %q", host)
 	}
+	info.Host = host
 	path := dirs.HostInfo(token.FileKey(host))
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create host info directory: %w", err)
@@ -86,6 +92,32 @@ func SaveHostInfo(dirs paths.Dirs, host string, info HostInfo) error {
 	}
 	removeTemp = false
 	return nil
+}
+
+// CachedHosts lists the hosts with cached probe information, sorted. A file
+// written before HostInfo.Host yields its host only when the file name's
+// prefix maps back to the same key, which holds for any host in the token
+// alphabet; one that does not (user@host) is left out.
+func CachedHosts(dirs paths.Dirs) ([]string, error) {
+	files, err := filepath.Glob(filepath.Join(filepath.Dir(dirs.HostInfo("")), "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	hosts := make([]string, 0, len(files))
+	for _, file := range files {
+		key := strings.TrimSuffix(filepath.Base(file), ".json")
+		var info HostInfo
+		if data, err := os.ReadFile(file); err == nil && json.Unmarshal(data, &info) == nil &&
+			token.ValidHost(info.Host) && token.FileKey(info.Host) == key {
+			hosts = append(hosts, info.Host)
+			continue
+		}
+		if dash := strings.LastIndexByte(key, '-'); dash > 0 && token.FileKey(key[:dash]) == key {
+			hosts = append(hosts, key[:dash])
+		}
+	}
+	sort.Strings(hosts)
+	return hosts, nil
 }
 
 func hostInfoMissing(err error) bool {

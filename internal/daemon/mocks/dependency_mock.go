@@ -11,11 +11,13 @@ package mocks
 
 import (
 	context "context"
+	io "io"
 	reflect "reflect"
 
 	agterm "github.com/k0nsta/agterm-remote/internal/agterm"
 	bindings "github.com/k0nsta/agterm-remote/internal/bindings"
 	daemon "github.com/k0nsta/agterm-remote/internal/daemon"
+	proxy "github.com/k0nsta/agterm-remote/internal/proxy"
 	remote "github.com/k0nsta/agterm-remote/internal/remote"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -438,4 +440,278 @@ func (m *MockBindingStore) UnbindRow(row string) error {
 func (mr *MockBindingStoreMockRecorder) UnbindRow(row any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnbindRow", reflect.TypeOf((*MockBindingStore)(nil).UnbindRow), row)
+}
+
+// MockCtlBackend is a mock of CtlBackend interface.
+type MockCtlBackend struct {
+	ctrl     *gomock.Controller
+	recorder *MockCtlBackendMockRecorder
+	isgomock struct{}
+}
+
+// MockCtlBackendMockRecorder is the mock recorder for MockCtlBackend.
+type MockCtlBackendMockRecorder struct {
+	mock *MockCtlBackend
+}
+
+// NewMockCtlBackend creates a new mock instance.
+func NewMockCtlBackend(ctrl *gomock.Controller) *MockCtlBackend {
+	mock := &MockCtlBackend{ctrl: ctrl}
+	mock.recorder = &MockCtlBackendMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockCtlBackend) EXPECT() *MockCtlBackendMockRecorder {
+	return m.recorder
+}
+
+// AskCancel mocks base method.
+func (m *MockCtlBackend) AskCancel(ctx context.Context, id string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AskCancel", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AskCancel indicates an expected call of AskCancel.
+func (mr *MockCtlBackendMockRecorder) AskCancel(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AskCancel", reflect.TypeOf((*MockCtlBackend)(nil).AskCancel), ctx, id)
+}
+
+// AskOpen mocks base method.
+func (m *MockCtlBackend) AskOpen(ctx context.Context, request agterm.AskRequest) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AskOpen", ctx, request)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AskOpen indicates an expected call of AskOpen.
+func (mr *MockCtlBackendMockRecorder) AskOpen(ctx, request any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AskOpen", reflect.TypeOf((*MockCtlBackend)(nil).AskOpen), ctx, request)
+}
+
+// AskResult mocks base method.
+func (m *MockCtlBackend) AskResult(ctx context.Context, id string) (agterm.AskAnswer, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AskResult", ctx, id)
+	ret0, _ := ret[0].(agterm.AskAnswer)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AskResult indicates an expected call of AskResult.
+func (mr *MockCtlBackendMockRecorder) AskResult(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AskResult", reflect.TypeOf((*MockCtlBackend)(nil).AskResult), ctx, id)
+}
+
+// Exec mocks base method.
+func (m *MockCtlBackend) Exec(ctx context.Context, stdin []byte, stdout, stderr io.Writer, args ...string) (int, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, stdin, stdout, stderr}
+	for _, a := range args {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Exec", varargs...)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Exec indicates an expected call of Exec.
+func (mr *MockCtlBackendMockRecorder) Exec(ctx, stdin, stdout, stderr any, args ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, stdin, stdout, stderr}, args...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exec", reflect.TypeOf((*MockCtlBackend)(nil).Exec), varargs...)
+}
+
+// Notify mocks base method.
+func (m *MockCtlBackend) Notify(ctx context.Context, row, title, body string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Notify", ctx, row, title, body)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Notify indicates an expected call of Notify.
+func (mr *MockCtlBackendMockRecorder) Notify(ctx, row, title, body any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Notify", reflect.TypeOf((*MockCtlBackend)(nil).Notify), ctx, row, title, body)
+}
+
+// TreeRows mocks base method.
+func (m *MockCtlBackend) TreeRows(ctx context.Context) ([]agterm.TreeRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TreeRows", ctx)
+	ret0, _ := ret[0].([]agterm.TreeRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TreeRows indicates an expected call of TreeRows.
+func (mr *MockCtlBackendMockRecorder) TreeRows(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TreeRows", reflect.TypeOf((*MockCtlBackend)(nil).TreeRows), ctx)
+}
+
+// MockAuthorizer is a mock of Authorizer interface.
+type MockAuthorizer struct {
+	ctrl     *gomock.Controller
+	recorder *MockAuthorizerMockRecorder
+	isgomock struct{}
+}
+
+// MockAuthorizerMockRecorder is the mock recorder for MockAuthorizer.
+type MockAuthorizerMockRecorder struct {
+	mock *MockAuthorizer
+}
+
+// NewMockAuthorizer creates a new mock instance.
+func NewMockAuthorizer(ctrl *gomock.Controller) *MockAuthorizer {
+	mock := &MockAuthorizer{ctrl: ctrl}
+	mock.recorder = &MockAuthorizerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAuthorizer) EXPECT() *MockAuthorizerMockRecorder {
+	return m.recorder
+}
+
+// Authorize mocks base method.
+func (m *MockAuthorizer) Authorize(ctx context.Context, host string, caller bindings.Binding, hdr proxy.Header, argv []string, stdin []byte) proxy.Decision {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Authorize", ctx, host, caller, hdr, argv, stdin)
+	ret0, _ := ret[0].(proxy.Decision)
+	return ret0
+}
+
+// Authorize indicates an expected call of Authorize.
+func (mr *MockAuthorizerMockRecorder) Authorize(ctx, host, caller, hdr, argv, stdin any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Authorize", reflect.TypeOf((*MockAuthorizer)(nil).Authorize), ctx, host, caller, hdr, argv, stdin)
+}
+
+// CheckAgent mocks base method.
+func (m *MockAuthorizer) CheckAgent(ctx context.Context, row, paneID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckAgent", ctx, row, paneID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CheckAgent indicates an expected call of CheckAgent.
+func (mr *MockAuthorizerMockRecorder) CheckAgent(ctx, row, paneID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckAgent", reflect.TypeOf((*MockAuthorizer)(nil).CheckAgent), ctx, row, paneID)
+}
+
+// MockRewriter is a mock of Rewriter interface.
+type MockRewriter struct {
+	ctrl     *gomock.Controller
+	recorder *MockRewriterMockRecorder
+	isgomock struct{}
+}
+
+// MockRewriterMockRecorder is the mock recorder for MockRewriter.
+type MockRewriterMockRecorder struct {
+	mock *MockRewriter
+}
+
+// NewMockRewriter creates a new mock instance.
+func NewMockRewriter(ctrl *gomock.Controller) *MockRewriter {
+	mock := &MockRewriter{ctrl: ctrl}
+	mock.recorder = &MockRewriterMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRewriter) EXPECT() *MockRewriterMockRecorder {
+	return m.recorder
+}
+
+// Rewrite mocks base method.
+func (m *MockRewriter) Rewrite(ctx context.Context, req proxy.Request, call proxy.Call) (proxy.Prepared, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Rewrite", ctx, req, call)
+	ret0, _ := ret[0].(proxy.Prepared)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Rewrite indicates an expected call of Rewrite.
+func (mr *MockRewriterMockRecorder) Rewrite(ctx, req, call any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Rewrite", reflect.TypeOf((*MockRewriter)(nil).Rewrite), ctx, req, call)
+}
+
+// MockProxyStore is a mock of ProxyStore interface.
+type MockProxyStore struct {
+	ctrl     *gomock.Controller
+	recorder *MockProxyStoreMockRecorder
+	isgomock struct{}
+}
+
+// MockProxyStoreMockRecorder is the mock recorder for MockProxyStore.
+type MockProxyStoreMockRecorder struct {
+	mock *MockProxyStore
+}
+
+// NewMockProxyStore creates a new mock instance.
+func NewMockProxyStore(ctrl *gomock.Controller) *MockProxyStore {
+	mock := &MockProxyStore{ctrl: ctrl}
+	mock.recorder = &MockProxyStoreMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockProxyStore) EXPECT() *MockProxyStoreMockRecorder {
+	return m.recorder
+}
+
+// AddGrant mocks base method.
+func (m *MockProxyStore) AddGrant(host, name string, grant bindings.Grant) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddGrant", host, name, grant)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddGrant indicates an expected call of AddGrant.
+func (mr *MockProxyStoreMockRecorder) AddGrant(host, name, grant any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddGrant", reflect.TypeOf((*MockProxyStore)(nil).AddGrant), host, name, grant)
+}
+
+// Bind mocks base method.
+func (m *MockProxyStore) Bind(binding bindings.Binding) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Bind", binding)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Bind indicates an expected call of Bind.
+func (mr *MockProxyStoreMockRecorder) Bind(binding any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Bind", reflect.TypeOf((*MockProxyStore)(nil).Bind), binding)
+}
+
+// DropGrant mocks base method.
+func (m *MockProxyStore) DropGrant(host, name string, grant bindings.Grant) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DropGrant", host, name, grant)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DropGrant indicates an expected call of DropGrant.
+func (mr *MockProxyStoreMockRecorder) DropGrant(host, name, grant any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropGrant", reflect.TypeOf((*MockProxyStore)(nil).DropGrant), host, name, grant)
 }

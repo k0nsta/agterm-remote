@@ -26,6 +26,12 @@ func (d *Daemon) startEvents(ctx context.Context) {
 
 func (d *Daemon) eventLoop(ctx context.Context) {
 	for {
+		// Take the reset channel before subscribing: a recovery that resets
+		// while ClosedRows is still starting must still interrupt this
+		// subscription, not close a channel nothing waits on yet.
+		d.mu.Lock()
+		reset := d.eventReset
+		d.mu.Unlock()
 		rows, err := d.events.ClosedRows(ctx)
 		if err != nil {
 			if isConnectionRefused(err) {
@@ -52,9 +58,6 @@ func (d *Daemon) eventLoop(ctx context.Context) {
 			}
 			continue
 		}
-		d.mu.Lock()
-		reset := d.eventReset
-		d.mu.Unlock()
 		resetRequested := false
 		streamClosed := false
 		for {

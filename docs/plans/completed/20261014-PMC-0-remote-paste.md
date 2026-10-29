@@ -79,7 +79,7 @@ drop hook, which has no timeline.
   table cases.
 - **remote**: `paste-put` writes stdin, prints the absolute path, rejects bad names and
   prunes old files (tmux and zmx test dirs share the verb; one test file is enough).
-- **e2e**: manual on `homelab` in agterm (Post-Completion).
+- **e2e**: manual on `myhost` in agterm (Post-Completion).
 
 ## Progress Tracking
 
@@ -153,7 +153,7 @@ ctrl+a>v ─ agterm keymap ─▶ agr paste <row> <pane-id>        (Mac)
 ## What Goes Where
 
 - **Implementation Steps**: code, tests, README in this repo.
-- **Post-Completion**: manual checks on `homelab`, release notes.
+- **Post-Completion**: manual checks on `myhost`, release notes.
 
 ## Implementation Steps
 
@@ -165,7 +165,7 @@ when it is typed (`agtermctl session type`, plain keystrokes) or only when it is
 live agent rows.
 
 Spike findings (2026-10-15, run by hand after the autonomous run skipped it; that run had
-bound the orchestrating row to `paste-spike`, since removed): on `homelab`, inside tmux, Claude
+bound the orchestrating row to `paste-spike`, since removed): on `myhost`, inside tmux, Claude
 Code leaves a **typed** path as text, while the same path sent through `agtermctl session
 type` wrapped in `ESC[200~ … ESC[201~` becomes `[Image #N]`. Two space-separated paths in one
 paste give two images; a trailing space is fine. So delivery is `Ctl.Type` with a bracketed
@@ -175,7 +175,7 @@ thumbnail timing are covered by the Post-Completion check.
 **Files:**
 - Modify: this plan (findings)
 
-- [x] `agr open homelab paste-spike`, start `claude` there, `scp` a PNG to
+- [x] `agr open myhost paste-spike`, start `claude` there, `scp` a PNG to
       `~/.cache/agr/paste/spike.png` (skipped - the requested name resolved to a live
       Claude/ralphex row; no throwaway row was available without risking the user's work)
 - [x] type the path with `agtermctl session type --pane-id …` (no newline) → attached?
@@ -195,7 +195,7 @@ thumbnail timing are covered by the Post-Completion check.
       (skipped - requires hands-on macOS clipboard sources and a keymap command)
 - [x] measure the thumbnail delay: ⌘⇧4, then `ls -lt ~/Desktop` once a second until the file
       appears (skipped - requires a hands-on screenshot capture)
-- [x] kill the spike session (`agr kill homelab paste-spike`) (skipped - no separate spike
+- [x] kill the spike session (`agr kill myhost paste-spike`) (skipped - no separate spike
       session was created; the pre-existing shared row was restored rather than killed)
 
 ### Task 2: Remote `paste-put` verb and runner `PastePut`
@@ -306,8 +306,8 @@ thumbnail timing are covered by the Post-Completion check.
 
 ## Post-Completion
 
-- `homelab` in agterm: ⌘⇧4 → `ctrl+a>v` on a bound row → image attached in Claude; Finder
+- `myhost` in agterm: ⌘⇧4 → `ctrl+a>v` on a bound row → image attached in Claude; Finder
   ⌘C of two files → both paths; Copy Image in a browser → attached; the ⌘D side pane →
   uploads to the same host; a local row → error HUD.
-- `agr install homelab` after release (new remote verb).
+- `agr install myhost` after release (new remote verb).
 - release notes (v1.2.0): the key, the sources, `agr setup` then `agr install <host>`.

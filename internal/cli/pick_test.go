@@ -31,7 +31,7 @@ func TestItemsForSubtitleGolden(t *testing.T) {
 
 func TestItemsForUnknownTreeUsesDash(t *testing.T) {
 	t.Helper()
-	items := ItemsFor("homelab", []remote.Session{{Name: "api", Cmds: "claude", IdleSecs: 61}}, []bindings.Binding{{Row: "row", Name: "api", Host: "homelab"}}, nil)
+	items := ItemsFor("myhost", []remote.Session{{Name: "api", Cmds: "claude", IdleSecs: 61}}, []bindings.Binding{{Row: "row", Name: "api", Host: "myhost"}}, nil)
 	if len(items) != 1 || items[0].Subtitle != "claude · - · 1m" {
 		t.Fatalf("ItemsFor() = %#v, want unknown row state", items)
 	}

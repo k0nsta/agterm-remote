@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/k0nsta/agterm-remote/internal/agrpath"
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/bridge"
@@ -17,7 +19,10 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/handled"
 	"github.com/k0nsta/agterm-remote/internal/pasteboard"
 	"github.com/k0nsta/agterm-remote/internal/paths"
+	"github.com/k0nsta/agterm-remote/internal/proxy"
+	"github.com/k0nsta/agterm-remote/internal/receiver"
 	"github.com/k0nsta/agterm-remote/internal/remote"
+	"github.com/k0nsta/agterm-remote/internal/settings"
 	"golang.org/x/term"
 )
 
@@ -32,6 +37,7 @@ type application struct {
 	daemon      daemonRunner
 	picker      cli.Picker
 	rows        cli.Rows
+	paneTree    cli.PaneTree
 	labeler     cli.Labeler
 	installer   cli.Installer
 	openRemote  cli.OpenerRemote
@@ -43,6 +49,10 @@ type application struct {
 	moshPath    func() string
 	doctor      cli.DoctorDependencies
 }
+
+// stableAgr is where hooks, keymap commands and setup learn the path to run
+// agr by. It is a variable so a test can pin it.
+var stableAgr = agrpath.Stable
 
 type applicationBridge interface {
 	cli.Bridge
@@ -67,12 +77,8 @@ func (a *application) paneHooks() cli.PaneHookDependencies {
 	if ctl == nil {
 		ctl = agterm.NewCtl("", "", nil, nil, nil)
 	}
-	self, err := os.Executable()
-	if err != nil || self == "" {
-		self = "agr"
-	}
 	return cli.PaneHookDependencies{
-		Panes: ctl, Store: a.store, Remote: a.cwd, Handled: handled.New(a.dirs.Handled()), Agr: self,
+		Panes: ctl, Store: a.store, Remote: a.cwd, Handled: handled.New(a.dirs.Handled()), Agr: stableAgr(),
 	}
 }
 
@@ -99,13 +105,33 @@ func (a *application) paste() cli.PasteDependencies {
 	}
 }
 
+// newRow wires agr new on the application's control client, pinned to the
+// window the command fired in: the pickers, the row it creates and the pane it
+// types into all stay there if the user switches windows meanwhile.
+func (a *application) newRow(window string) cli.NewDependencies {
+	ctl := a.control
+	if ctl == nil {
+		ctl = agterm.NewCtl("", "", nil, nil, nil)
+	}
+	ctl = ctl.InWindow(window)
+	dirs := a.dirs
+	return cli.NewDependencies{
+		Hosts: func() ([]string, error) { return remote.CachedHosts(dirs) },
+		Store: a.store, Remote: a.openRemote, Picker: ctl, Rows: ctl, Workspaces: ctl,
+		Opener: ctl, Closer: ctl, Panes: ctl, Agr: stableAgr(),
+	}
+}
+
 // setup wires agr setup. Without agtermctl it still writes the files, to the
 // default config directory, and leaves the reload to agterm's next start. The
-// key for End remote session is asked only on a terminal; Paste never prompts.
-func (a *application) setup(out io.Writer, endKey, pasteKey string) cli.SetupDependencies {
-	self, _ := os.Executable()
+// key for End remote session is asked only on a terminal; Paste and New never
+// prompt.
+func (a *application) setup(out io.Writer, endKey, pasteKey, newKey string) cli.SetupDependencies {
 	home, _ := os.UserHomeDir()
-	deps := cli.SetupDependencies{Agr: self, Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey}
+	deps := cli.SetupDependencies{Agr: stableAgr(), Home: home, Out: out, EndKey: endKey, PasteKey: pasteKey, NewKey: newKey, Version: version}
+	if home != "" {
+		deps.SkillDir = filepath.Join(home, ".claude", "skills", "agr")
+	}
 	if a.control != nil && agterm.CtlPath() != "" {
 		deps.Config = a.control
 	}
@@ -160,11 +186,14 @@ func newApplication() *application {
 	if ctlPath != "" {
 		app.picker = control
 		app.rows = control
+		app.paneTree = control
 		app.labeler = control
 	}
 	app.daemon = daemon.New(daemon.Config{
 		Dirs: dirs, UI: control, Remote: remoteRunner, Events: control,
 		Rows: control, Sink: status, Supervisors: bridgeFactory{}, Bindings: store,
+		Ctl: control, Authorizer: proxy.NewPolicy(control, store), ProxyStore: store,
+		Rewriter: &proxy.Rewriter{Agr: stableAgr(), Root: dirs.Proxy(), Sessions: remoteRunner, Binds: store, PageSize: pageSize},
 		// No Logger: injecting one makes Daemon.openLog return early, so
 		// dirs.Log() is never created. The daemon is normally started detached
 		// with stdio on /dev/null, so a stderr logger discards every
@@ -181,8 +210,17 @@ var (
 	_ daemon.EventSource                      = (*agterm.Ctl)(nil)
 	_ daemon.Rows                             = (*agterm.Ctl)(nil)
 	_ daemon.StatusSink                       = (*agterm.Client)(nil)
+	_ daemon.CtlBackend                       = (*agterm.Ctl)(nil)
+	_ daemon.Authorizer                       = (*proxy.Policy)(nil)
+	_ daemon.Rewriter                         = (*proxy.Rewriter)(nil)
+	_ daemon.ProxyStore                       = (*bindings.Store)(nil)
+	_ proxy.TreeReader                        = (*agterm.Ctl)(nil)
+	_ proxy.BindingLoader                     = (*bindings.Store)(nil)
+	_ proxy.SessionLister                     = (*remote.Runner)(nil)
+	_ receiver.Resolver                       = (*bindings.Store)(nil)
 	_ cli.Picker                              = (*agterm.Ctl)(nil)
 	_ cli.Rows                                = (*agterm.Ctl)(nil)
+	_ cli.PaneTree                            = (*agterm.Ctl)(nil)
 	_ cli.Labeler                             = (*agterm.Ctl)(nil)
 	_ cli.Panes                               = (*agterm.Ctl)(nil)
 	_ cli.RemoteCwd                           = (*remote.Runner)(nil)
@@ -192,6 +230,8 @@ var (
 	_ cli.RowBindings                         = (*bindings.Store)(nil)
 	_ cli.Confirmer                           = (*agterm.Ctl)(nil)
 	_ cli.RowCloser                           = (*agterm.Ctl)(nil)
+	_ cli.WorkspaceLister                     = (*agterm.Ctl)(nil)
+	_ cli.RowOpener                           = (*agterm.Ctl)(nil)
 	_ cli.AgtermConfig                        = (*agterm.Ctl)(nil)
 	_ cli.Sessions                            = (*remote.Runner)(nil)
 	_ cli.Installer                           = (*remote.Runner)(nil)
@@ -204,3 +244,14 @@ var (
 	_ daemon.Supervisor                       = (*bridge.Supervisor)(nil)
 	_ interface{ Run(context.Context) error } = (*daemon.Daemon)(nil)
 )
+
+// pageSize reads the user's default size for a host's page on each use, so
+// `agr setup --page-size` applies without a daemon restart. An unreadable
+// file keeps pages full.
+func pageSize() int {
+	s, err := settings.Load(settings.Path())
+	if err != nil {
+		return 0
+	}
+	return s.PageSize
+}

@@ -62,9 +62,9 @@ func newEndDeps(t *testing.T, confirm *confirmFake, reaper *reaperFake, bound ..
 func sidePaneBindings(t *testing.T) []bindings.Binding {
 	t.Helper()
 	return []bindings.Binding{
-		{Row: "row-1", PaneID: "L", Pane: "left", Host: "homelab", Name: "a1", Mux: "tmux"},
-		{Row: "row-1", PaneID: "R", Pane: "right", Host: "homelab", Name: "a1-2", Mux: "tmux"},
-		{Row: "row-2", PaneID: "X", Pane: "left", Host: "homelab", Name: "b1", Mux: "tmux"},
+		{Row: "row-1", PaneID: "L", Pane: "left", Host: "myhost", Name: "a1", Mux: "tmux"},
+		{Row: "row-1", PaneID: "R", Pane: "right", Host: "myhost", Name: "a1-2", Mux: "tmux"},
+		{Row: "row-2", PaneID: "X", Pane: "left", Host: "myhost", Name: "b1", Mux: "tmux"},
 	}
 }
 
@@ -77,7 +77,7 @@ func TestEndReapsTheRowsSessionsThenClosesTheRow(t *testing.T) {
 	if err := End(context.Background(), "row-1", deps); err != nil {
 		t.Fatalf("End() error = %v", err)
 	}
-	if want := []string{"homelab a1", "homelab a1-2"}; !reflect.DeepEqual(reaper.calls, want) {
+	if want := []string{"myhost a1", "myhost a1-2"}; !reflect.DeepEqual(reaper.calls, want) {
 		t.Fatalf("reaped %#v, want %#v", reaper.calls, want)
 	}
 	if !reflect.DeepEqual(rows.closed, []string{"row-1"}) {
@@ -86,7 +86,7 @@ func TestEndReapsTheRowsSessionsThenClosesTheRow(t *testing.T) {
 	if len(store.ForRow("row-1")) != 0 || len(store.ForRow("row-2")) != 1 {
 		t.Fatal("End() did not drop exactly the row's bindings")
 	}
-	if confirm.title != "End a1, a1-2 on homelab?" {
+	if confirm.title != "End a1, a1-2 on myhost?" {
 		t.Fatalf("title = %q", confirm.title)
 	}
 }
@@ -140,13 +140,13 @@ func TestEndRefusesALocalOrInvalidRow(t *testing.T) {
 func TestEndNamesEveryHostWhenTheRowSpansHosts(t *testing.T) {
 	t.Helper()
 	bound := []bindings.Binding{
-		{Row: "row-1", PaneID: "L", Pane: "left", Host: "homelab", Name: "a1", Mux: "tmux"},
+		{Row: "row-1", PaneID: "L", Pane: "left", Host: "myhost", Name: "a1", Mux: "tmux"},
 		{Row: "row-1", PaneID: "R", Pane: "right", Host: "otherhost", Name: "x", Mux: "tmux"},
 	}
 	confirm := &confirmFake{}
 	deps, _, _ := newEndDeps(t, confirm, &reaperFake{}, bound...)
 	_ = End(context.Background(), "row-1", deps)
-	if want := "End a1 on homelab, x on otherhost?"; confirm.title != want {
+	if want := "End a1 on myhost, x on otherhost?"; confirm.title != want {
 		t.Fatalf("title = %q, want %q", confirm.title, want)
 	}
 }

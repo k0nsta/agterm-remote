@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/bridge"
 	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
+	"github.com/k0nsta/agterm-remote/internal/token"
 )
 
 func TestDaemonResyncsLevelsAndHUDAcrossBridgeTransitions(t *testing.T) {
@@ -178,4 +181,94 @@ func TestDaemonReconnectingHUDOncePerSplitRow(t *testing.T) {
 	if opens != 1 {
 		t.Fatalf("reconnecting HUD opened %d times for one split row, want 1; trace=%#v", opens, trace.snapshot(t))
 	}
+}
+
+func TestFinishedSince(t *testing.T) {
+	t.Helper()
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	leftUp := now.Add(-time.Hour)
+	tests := []struct {
+		name     string
+		idleSecs int
+		want     bool
+	}{
+		{name: "unknown age replays", idleSecs: -1, want: true},
+		{name: "after the bridge went down", idleSecs: 60, want: true},
+		{name: "within the slack before it went down", idleSecs: 3605, want: true},
+		{name: "long before it went down", idleSecs: 7200, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := finishedSince(now, tt.idleSecs, leftUp); got != tt.want {
+				t.Fatalf("finishedSince(idle %d) = %v, want %v", tt.idleSecs, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResyncSkipsFinishesAlreadyShown: a completed state older than the
+// bridge's last time up was shown then, so a reconnect must not bring it back.
+func TestResyncSkipsFinishesAlreadyShown(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	trace := newTask10Trace(t)
+	r := newTask10Remote(t, trace)
+	host := "host-a"
+	r.home[host] = "/home/test"
+	r.sessions[host] = []remote.Session{
+		{Name: "stale", State: "completed", IdleSecs: 7200},
+		{Name: "fresh", State: "completed", IdleSecs: 5},
+		{Name: "busy", State: "active", IdleSecs: 7200},
+	}
+	store := bindings.New(dirs)
+	rows := []bindings.Binding{
+		daemonBinding(t, "row-stale", host, "stale"),
+		daemonBinding(t, "row-fresh", host, "fresh"),
+		daemonBinding(t, "row-busy", host, "busy"),
+	}
+	if err := store.Save(rows); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	leftUpPath := dirs.HostLeftUp(token.FileKey(host))
+	if err := os.MkdirAll(filepath.Dir(leftUpPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	stamp := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	if err := os.WriteFile(leftUpPath, []byte(stamp+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	ui := newTask10UI(t, trace)
+	sink := newTask10Sink(t, trace)
+	factory := &task10Supervisors{}
+	d := New(task10Config(t, dirs, r, ui, nil, sink, factory, store))
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	supervisor := factory.latest(t)
+	supervisor.changes <- bridge.StateUp
+
+	waitForTask10(t, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		return len(sink.calls) == 2
+	})
+	time.Sleep(50 * time.Millisecond)
+	sink.mu.Lock()
+	var got []string
+	for _, call := range sink.calls {
+		got = append(got, call.target+" "+call.args.Status)
+	}
+	sink.mu.Unlock()
+	want := []string{"row-fresh completed", "row-busy active"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resync statuses = %#v, want %#v", got, want)
+	}
+
+	before := time.Now()
+	supervisor.changes <- bridge.StateDown
+	waitForTask10(t, func() bool {
+		recorded, ok := d.leftUp(token.FileKey(host))
+		return ok && !recorded.Before(before.Add(-time.Second))
+	})
 }

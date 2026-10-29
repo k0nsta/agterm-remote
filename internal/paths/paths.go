@@ -49,6 +49,9 @@ func (d Dirs) Handled() string { return filepath.Join(d.Cache, "handled-panes.js
 // HookLog is where the detached pane hooks report failures.
 func (d Dirs) HookLog() string { return filepath.Join(d.Cache, "hooks.log") }
 
+// Proxy holds the temp files of agtermctl proxy calls, one directory per call.
+func (d Dirs) Proxy() string { return filepath.Join(d.Cache, "proxy") }
+
 // Recv is the local Unix socket receiving events for one host.
 func (d Dirs) Recv(hostKey string) string {
 	return filepath.Join(d.Cache, "recv-"+hostKey+".sock")
@@ -62,4 +65,9 @@ func (d Dirs) BridgeLog(hostKey string) string {
 // HostInfo is the cached probe information for one host.
 func (d Dirs) HostInfo(hostKey string) string {
 	return filepath.Join(d.Cache, "hosts", hostKey+".json")
+}
+
+// HostLeftUp records when one host's bridge last stopped being up.
+func (d Dirs) HostLeftUp(hostKey string) string {
+	return filepath.Join(d.Cache, "hosts", hostKey+".left-up")
 }

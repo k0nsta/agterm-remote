@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/k0nsta/agterm-remote/internal/remote"
+	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
 // SetupDependencies are the collaborators of Setup.
@@ -31,23 +32,33 @@ type SetupDependencies struct {
 	// (--paste-key); empty keeps an existing chord or chooses the default when
 	// it is available.
 	PasteKey string
+	// NewKey is the agterm chord for the New remote session command
+	// (--new-key), chosen the same way as PasteKey.
+	NewKey string
 	// AskKey asks for that chord when no command runs agr end yet; nil (not a
 	// terminal) adds the command without a key.
 	AskKey func() (string, error)
+	// SkillDir is where the agr skill goes (~/.claude/skills/agr); empty skips
+	// it. Version is stamped into the skill's marker.
+	SkillDir string
+	Version  string
 }
 
 const (
 	endName         = `"End remote session"`
 	pasteName       = `"Paste to remote"`
+	newName         = `"New remote session"`
 	hooksNote       = "# agr setup: on a row bound with `agr open`, ⌘D opens <name>-2 and ⌘J a shell on its host"
 	keymapNote      = "# agr setup: end a row's remote work (confirm, kill its sessions, close the row)"
 	pasteKeyNote    = "# agr setup: paste Mac clipboard files or screenshots into a remote row"
+	newKeyNote      = "# agr setup: pick a host, session and workspace, and open it in a new row"
 	defaultPasteKey = "ctrl+a>v"
+	defaultNewKey   = "ctrl+a>n"
 )
 
 // Setup wires agterm to agr on this Mac: the pane.split and pane.scratch
 // hooks that make ⌘D and ⌘J follow a remote row, and the keymap commands that
-// run agr end and agr paste. Lines that already run an agr have only the
+// run agr end, agr paste and agr new. Lines that already run an agr have only the
 // binary's path replaced, so a rebound or removed key or a second run changes
 // nothing else; missing lines are appended. agterm then reloads both files.
 func Setup(ctx context.Context, deps SetupDependencies) error {
@@ -83,7 +94,12 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 	if err != nil {
 		return err
 	}
-	paste, err := pasteKey(keymapPath, deps, key)
+	// A chord requested for one command is never another's default.
+	paste, err := defaultedKey(keymapPath, deps.PasteKey, "paste", defaultPasteKey, key, deps.NewKey)
+	if err != nil {
+		return err
+	}
+	newKey, err := defaultedKey(keymapPath, deps.NewKey, "new", defaultNewKey, key, paste)
 	if err != nil {
 		return err
 	}
@@ -95,7 +111,8 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 		{hooksPath, func(content string) string { return wireHooks(content, agr) }},
 		{keymapPath, func(content string) string {
 			content = wireKeymap(content, agr, key)
-			return wirePasteKeymap(content, agr, paste)
+			content = wirePasteKeymap(content, agr, paste)
+			return wireNewKeymap(content, agr, newKey)
 		}},
 	} {
 		changed, err := rewriteFile(file.path, file.rewrite)
@@ -108,11 +125,15 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 		}
 		_, _ = fmt.Fprintf(out, "%-9s %s\n", state, file.path)
 	}
+	installSkill(deps, out)
 	if key == "" && !keymapHasKey(keymapPath) {
 		_, _ = fmt.Fprintln(out, "End remote session has no key: run it from agterm's command palette, or bind one with `agr setup --end-key 'ctrl+a>x'`")
 	}
 	if paste == "" && !keymapHasKey(keymapPath, "paste") {
 		_, _ = fmt.Fprintln(out, "Paste to remote has no key: run it from agterm's command palette, or bind one with `agr setup --paste-key 'ctrl+a>v'`")
+	}
+	if newKey == "" && !keymapHasKey(keymapPath, "new") {
+		_, _ = fmt.Fprintln(out, "New remote session has no key: run it from agterm's command palette, or bind one with `agr setup --new-key 'ctrl+a>n'`")
 	}
 	if !reachable {
 		_, _ = fmt.Fprintln(out, "start agterm, or run `agtermctl hooks reload` and `agtermctl keymap reload`, to apply")
@@ -131,8 +152,25 @@ func Setup(ctx context.Context, deps SetupDependencies) error {
 	if len(problems) > 0 {
 		return fmt.Errorf("agterm reports problems: %s", strings.Join(problems, ", "))
 	}
-	_, _ = fmt.Fprintln(out, "agterm reloaded: ⌘D and ⌘J follow a remote row; End remote session runs agr end; Paste to remote runs agr paste")
+	_, _ = fmt.Fprintln(out, "agterm reloaded: ⌘D and ⌘J follow a remote row; End remote session runs agr end; Paste to remote runs agr paste; New remote session runs agr new")
 	return nil
+}
+
+// installSkill writes the agr skill and says what happened. It never fails
+// setup: the hooks and keymap are already in place.
+func installSkill(deps SetupDependencies, out io.Writer) {
+	if deps.SkillDir == "" {
+		return
+	}
+	state, err := skill.Install(deps.SkillDir, deps.Version)
+	switch {
+	case err != nil:
+		_, _ = fmt.Fprintf(out, "agr skill: not written: %v\n", err)
+	case state == skill.Kept:
+		_, _ = fmt.Fprintf(out, "%-9s %s (no agr-skill marker: not replaced; `agr skill` prints agr's)\n", state, filepath.Join(deps.SkillDir, skill.FileName))
+	default:
+		_, _ = fmt.Fprintf(out, "%-9s %s\n", state, filepath.Join(deps.SkillDir, skill.FileName))
+	}
 }
 
 // RunSetup adapts Setup to agr's integer-exit CLI convention.
@@ -210,28 +248,20 @@ func endKey(keymapPath string, deps SetupDependencies) (string, error) {
 	return key, nil
 }
 
-// pasteKey chooses a requested chord, an existing Paste chord, or, for a
-// first Paste command only, the default chord when nothing already owns it. Paste never
-// prompts: setup can be run unattended and the default is intentionally
-// conservative when the keymap already has a conflicting binding.
-func pasteKey(keymapPath string, deps SetupDependencies, occupied ...string) (string, error) {
-	key := strings.TrimSpace(deps.PasteKey)
+// defaultedKey chooses a requested chord, the existing chord of the command
+// running agr verb, or, for a first such command only, def when nothing
+// already owns it: no keymap line and none of the occupied chords requested
+// for the other commands this run. It never prompts: setup can be run
+// unattended, and the default is intentionally conservative when the keymap
+// already has a conflicting binding.
+func defaultedKey(keymapPath, requested, verb, def string, occupied ...string) (string, error) {
+	key := strings.TrimSpace(requested)
 	lines := splitLines(readConf(keymapPath))
 	if key == "" {
-		for _, line := range lines {
-			if agrWord(line, confToken.FindAllStringIndex(line, -1), "paste") > 0 {
-				if existing := chord(line, "paste"); existing != "" {
-					key = existing
-					break
-				}
-			}
-		}
-		defaultAvailable := !keymapBindsChord(lines, defaultPasteKey)
-		if len(occupied) > 0 && chordListContains(occupied[0], defaultPasteKey) {
-			defaultAvailable = false
-		}
-		if key == "" && defaultAvailable && commandLine(lines, "paste") < 0 {
-			key = defaultPasteKey
+		if i := commandLine(lines, verb); i >= 0 {
+			key = chord(lines[i], verb)
+		} else if !keymapBindsChord(lines, def) && !occupiedBy(occupied, def) {
+			key = def
 		}
 	}
 	if key != "" && (strings.HasPrefix(key, "-") || strings.ContainsAny(key, " \t'\"#") || !remote.Printable(key)) {
@@ -240,8 +270,17 @@ func pasteKey(keymapPath string, deps SetupDependencies, occupied ...string) (st
 	return key, nil
 }
 
-// wireKeymap points the custom command that runs `<agr> end` at agr. End and
-// Paste both use wireCommand so repointing, deduplication, and chord carrying
+func occupiedBy(chords []string, key string) bool {
+	for _, chords := range chords {
+		if chordListContains(strings.TrimSpace(chords), key) {
+			return true
+		}
+	}
+	return false
+}
+
+// wireKeymap points the custom command that runs `<agr> end` at agr. End,
+// Paste and New all use wireCommand so repointing, deduplication, and chord carrying
 // stay identical.
 func wireKeymap(content, agr, key string) string {
 	return wireCommand(content, agr, key, "end", endName, keymapNote, `end "{AGT_SESSION_ID}"`)
@@ -249,6 +288,10 @@ func wireKeymap(content, agr, key string) string {
 
 func wirePasteKeymap(content, agr, key string) string {
 	return wireCommand(content, agr, key, "paste", pasteName, pasteKeyNote, `paste "{AGT_SESSION_ID}" "{AGT_PANE_ID}"`)
+}
+
+func wireNewKeymap(content, agr, key string) string {
+	return wireCommand(content, agr, key, "new", newName, newKeyNote, `new "{AGT_SESSION_ID}"`)
 }
 
 // wireCommand points a custom command running verb at agr, keeping its name

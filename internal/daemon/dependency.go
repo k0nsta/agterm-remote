@@ -2,9 +2,11 @@ package daemon
 
 import (
 	"context"
+	"io"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/bindings"
+	"github.com/k0nsta/agterm-remote/internal/proxy"
 	"github.com/k0nsta/agterm-remote/internal/remote"
 )
 
@@ -65,4 +67,35 @@ type BindingStore interface {
 	ByHostName(host, name string) (bindings.Binding, bool)
 	ForHost(host string) []bindings.Binding
 	UnbindRow(row string) error
+}
+
+// CtlBackend is the agtermctl the proxy runs calls on: the streaming call, the
+// tree the page shim and the pre-bind read, and the dialog calls of consent.
+type CtlBackend interface {
+	Exec(ctx context.Context, stdin []byte, stdout, stderr io.Writer, args ...string) (int, error)
+	TreeRows(ctx context.Context) ([]agterm.TreeRow, error)
+	AskOpen(ctx context.Context, request agterm.AskRequest) (string, error)
+	AskResult(ctx context.Context, id string) (agterm.AskAnswer, error)
+	AskCancel(ctx context.Context, id string) error
+	Notify(ctx context.Context, row, title, body string) error
+}
+
+// Authorizer decides whether a host's agtermctl call may run, and re-checks
+// the program rule once the user has answered a consent dialog.
+type Authorizer interface {
+	Authorize(ctx context.Context, host string, caller bindings.Binding, hdr proxy.Header, argv []string, stdin []byte) proxy.Decision
+	CheckAgent(ctx context.Context, row, paneID string) error
+}
+
+// Rewriter turns an authorized call into the command the daemon runs.
+type Rewriter interface {
+	Rewrite(ctx context.Context, req proxy.Request, call proxy.Call) (proxy.Prepared, error)
+}
+
+// ProxyStore is the binding writes the proxy makes: the pre-bind of a row made
+// by `session new`, and the consent grants.
+type ProxyStore interface {
+	Bind(binding bindings.Binding) error
+	AddGrant(host, name string, grant bindings.Grant) error
+	DropGrant(host, name string, grant bindings.Grant) error
 }

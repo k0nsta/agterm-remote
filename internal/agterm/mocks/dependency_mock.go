@@ -149,3 +149,47 @@ func (mr *MockStreamerMockRecorder) Stream(ctx, name any, args ...any) *gomock.C
 	varargs := append([]any{ctx, name}, args...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stream", reflect.TypeOf((*MockStreamer)(nil).Stream), varargs...)
 }
+
+// MockExecutor is a mock of Executor interface.
+type MockExecutor struct {
+	ctrl     *gomock.Controller
+	recorder *MockExecutorMockRecorder
+	isgomock struct{}
+}
+
+// MockExecutorMockRecorder is the mock recorder for MockExecutor.
+type MockExecutorMockRecorder struct {
+	mock *MockExecutor
+}
+
+// NewMockExecutor creates a new mock instance.
+func NewMockExecutor(ctrl *gomock.Controller) *MockExecutor {
+	mock := &MockExecutor{ctrl: ctrl}
+	mock.recorder = &MockExecutorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockExecutor) EXPECT() *MockExecutorMockRecorder {
+	return m.recorder
+}
+
+// Exec mocks base method.
+func (m *MockExecutor) Exec(ctx context.Context, stdin []byte, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, stdin, stdout, stderr, name}
+	for _, a := range args {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Exec", varargs...)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Exec indicates an expected call of Exec.
+func (mr *MockExecutorMockRecorder) Exec(ctx, stdin, stdout, stderr, name any, args ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, stdin, stdout, stderr, name}, args...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exec", reflect.TypeOf((*MockExecutor)(nil).Exec), varargs...)
+}

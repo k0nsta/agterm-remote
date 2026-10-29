@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -483,5 +484,318 @@ func TestCtlReloadReturnsDiagnosticCount(t *testing.T) {
 		Return([]byte(`no socket`), 1, errors.New("exit status 1"))
 	if _, err := ctl.Reload(context.Background(), "hooks"); err == nil {
 		t.Fatal("Reload() error = nil, want failure")
+	}
+}
+
+func TestCtlTreeRowsDecodesPanesAndForegrounds(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	tree := `{"result":{"tree":{"workspaces":[{"sessions":[
+		{"id":"row-1","name":"agr","hasSplit":true,
+			"foreground":["claude","--resume","abc"],"foregroundShell":"zsh",
+			"splitForeground":["codex"],"splitForegroundShell":"bash",
+			"surfaces":[{"kind":"left","paneID":"L","visible":true},{"kind":"right","paneID":"R","visible":true}]},
+		{"id":"row-2","name":"plain","splitForegroundShell":"zsh","surfaces":[{"kind":"left","paneID":"P","visible":true}]},
+		{"name":"no id"}]}]}}}`
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return([]byte(tree), 0, nil)
+	got, err := ctl.TreeRows(context.Background())
+	if err != nil {
+		t.Fatalf("TreeRows() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("TreeRows() = %#v, want the two rows that have an id", got)
+	}
+	first := got[0]
+	if first.ID != "row-1" || first.Name != "agr" || !first.HasSplit {
+		t.Fatalf("first row = %#v", first)
+	}
+	if strings.Join(first.Foreground, " ") != "claude --resume abc" || first.ForegroundShell != "zsh" {
+		t.Fatalf("left foreground = %#v, %q", first.Foreground, first.ForegroundShell)
+	}
+	if strings.Join(first.SplitForeground, " ") != "codex" || first.SplitForegroundShell != "bash" {
+		t.Fatalf("split foreground = %#v, %q", first.SplitForeground, first.SplitForegroundShell)
+	}
+	wantPanes := []agterm.Surface{{Kind: "left", PaneID: "L", Visible: true}, {Kind: "right", PaneID: "R", Visible: true}}
+	if len(first.Surfaces) != 2 || first.Surfaces[0] != wantPanes[0] || first.Surfaces[1] != wantPanes[1] {
+		t.Fatalf("panes = %#v, want %#v", first.Surfaces, wantPanes)
+	}
+	second := got[1]
+	if second.HasSplit || second.Foreground != nil || second.SplitForeground != nil || second.SplitForegroundShell != "zsh" {
+		t.Fatalf("a row without those fields = %#v", second)
+	}
+}
+
+func TestCtlTreeRowsReportsCommandFailure(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return([]byte("boom"), 1, errors.New("exit 1"))
+	if _, err := ctl.TreeRows(context.Background()); err == nil || !strings.Contains(err.Error(), "tree") {
+		t.Fatalf("TreeRows() error = %v", err)
+	}
+}
+
+func TestCtlExecAppendsTheSocketAndStreams(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	executor := mocks.NewMockExecutor(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, nil, nil, agterm.WithExecutor(executor))
+	var stdout, stderr strings.Builder
+	executor.EXPECT().Exec(gomock.Any(), []byte("in"), &stdout, &stderr, testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return(2, nil)
+	code, err := ctl.Exec(context.Background(), []byte("in"), &stdout, &stderr, "tree", "--json")
+	if code != 2 || err != nil {
+		t.Fatalf("Exec() = %d, %v, want 2 passed through", code, err)
+	}
+}
+
+func TestCtlAskOpenUsesExactArgvAndReadsTheID(t *testing.T) {
+	t.Helper()
+	request := agterm.AskRequest{
+		Title: "Anything on h wants to type", Message: "From session w1: ⟦hi⟧",
+		Buttons: []agterm.AskButton{{ID: "once", Label: "Allow once"}, {ID: "deny", Label: "Deny"}},
+		Default: "deny", Row: "row-1", PaneID: "pane-1",
+	}
+	args := []any{"ask", "open", request.Title, "--message", request.Message,
+		"--button", "once=Allow once", "--button", "deny=Deny", "--default", "deny", "--no-block",
+		"--pane-id", "pane-1", "--target", "row-1", "--socket", testCtlSock}
+	for _, tc := range []struct{ name, out string }{
+		{"bare", `{"id":"dlg-1"}`},
+		{"wrapped", `{"ok":true,"result":{"id":"dlg-1"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, args...).Return([]byte(tc.out), 0, nil)
+			id, err := ctl.AskOpen(context.Background(), request)
+			if err != nil || id != "dlg-1" {
+				t.Fatalf("AskOpen() = %q, %v, want dlg-1", id, err)
+			}
+		})
+	}
+}
+
+func TestCtlAskOpenFailures(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name    string
+		out     string
+		exit    int
+		err     error
+		pending bool
+	}{
+		{name: "dialog already pending", out: "error: ask already pending", exit: 1, err: errors.New("exit status 1"), pending: true},
+		{name: "other failure", out: "error: no session", exit: 1, err: errors.New("exit status 1")},
+		{name: "not json", out: "dlg-1"},
+		{name: "no id", out: `{"ok":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, gomock.Any()).Return([]byte(tc.out), tc.exit, tc.err)
+			_, err := ctl.AskOpen(context.Background(), agterm.AskRequest{Title: "t", Default: "d"})
+			if err == nil || errors.Is(err, agterm.ErrAskPending) != tc.pending {
+				t.Fatalf("AskOpen() error = %v, want a failure (pending %v)", err, tc.pending)
+			}
+		})
+	}
+}
+
+func TestCtlAskResultStates(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		out  string
+		exit int
+		err  error
+		want agterm.AskAnswer
+		fail bool
+	}{
+		{name: "pending", out: `{"result":"pending"}`, exit: 1, err: errors.New("exit status 1"), want: agterm.AskAnswer{State: agterm.AskPending}},
+		{name: "cancelled", out: `{"result":"cancelled"}`, exit: 2, err: errors.New("exit status 2"), want: agterm.AskAnswer{State: agterm.AskCancelled}},
+		{name: "answered", out: `{"result":"answered","id":"pair"}`, want: agterm.AskAnswer{State: agterm.AskAnswered, ID: "pair"}},
+		{name: "exit 1 but not pending", out: `{"result":"answered","id":"x"}`, exit: 1, err: errors.New("exit status 1"), fail: true},
+		{name: "error text", out: "error: no such dialog", exit: 1, err: errors.New("exit status 1"), fail: true},
+		{name: "exec failed", err: errors.New("no agtermctl"), fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "ask", "result", "dlg-1", "--socket", testCtlSock).
+				Return([]byte(tc.out), tc.exit, tc.err)
+			got, err := ctl.AskResult(context.Background(), "dlg-1")
+			if (err != nil) != tc.fail || got != tc.want {
+				t.Fatalf("AskResult() = %+v, %v, want %+v (failure %v)", got, err, tc.want, tc.fail)
+			}
+		})
+	}
+}
+
+func TestCtlAskCancelUsesExactArgv(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	runner := mocks.NewMockRunner(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, runner, nil, nil)
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "ask", "cancel", "dlg-1", "--socket", testCtlSock).Return(nil)
+	if err := ctl.AskCancel(context.Background(), "dlg-1"); err != nil {
+		t.Fatalf("AskCancel() error = %v", err)
+	}
+}
+
+func TestCtlTreeRowsDecodesHTMLOverlays(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	tree := `{"result":{"tree":{"workspaces":[{"sessions":[
+		{"id":"row-1","htmlOverlays":[{"id":"PG1","pane":"left","state":"loaded","javascript":true},{"id":"PG2","state":"loading"}]},
+		{"id":"row-2"}]}]}}}`
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return([]byte(tree), 0, nil)
+	rows, err := ctl.TreeRows(context.Background())
+	if err != nil {
+		t.Fatalf("TreeRows() error = %v", err)
+	}
+	want := []agterm.HTMLOverlay{{ID: "PG1", Pane: "left", State: "loaded"}, {ID: "PG2", State: "loading"}}
+	if len(rows[0].HTMLOverlays) != 2 || rows[0].HTMLOverlays[0] != want[0] || rows[0].HTMLOverlays[1] != want[1] || rows[1].HTMLOverlays != nil {
+		t.Fatalf("overlays = %+v / %+v, want %+v and none", rows[0].HTMLOverlays, rows[1].HTMLOverlays, want)
+	}
+}
+
+func TestCtlNotifyUsesExactArgv(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	runner := mocks.NewMockRunner(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, runner, nil, nil)
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, "notify", "body text", "--title", "a title", "--target", "row-1", "--socket", testCtlSock).Return(nil)
+	if err := ctl.Notify(context.Background(), "row-1", "a title", "body text"); err != nil {
+		t.Fatalf("Notify() error = %v", err)
+	}
+}
+
+func TestCtlWorkspacesListsRowsPerWorkspace(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+	tree := `{"result":{"tree":{"workspaces":[
+		{"id":"W1","name":"local","active":false,"sessions":[{"id":"row-1"}]},
+		{"id":"W2","name":"myhost - tools","active":true,"sessions":[{"id":"row-2"},{"id":"row-3"}]}]}}}`
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
+		Return([]byte(tree), 0, nil)
+	got, err := ctl.Workspaces(context.Background())
+	if err != nil {
+		t.Fatalf("Workspaces() error = %v", err)
+	}
+	want := []agterm.Workspace{
+		{ID: "W1", Name: "local", Rows: []string{"row-1"}},
+		{ID: "W2", Name: "myhost - tools", Rows: []string{"row-2", "row-3"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Workspaces() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCtlNewRowPlacesTheRow(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name  string
+		row   agterm.NewRow
+		where []any
+	}{
+		{name: "after a row", row: agterm.NewRow{Name: "a2", After: "row-1"}, where: []any{"--after", "row-1"}},
+		{name: "in a workspace", row: agterm.NewRow{Name: "a2", Workspace: "W2"}, where: []any{"--workspace", "W2"}},
+		{name: "in a named workspace", row: agterm.NewRow{Name: "a2", WorkspaceName: "staging box"},
+			where: []any{"--workspace-name", "staging box", "--create-workspace"}},
+		{name: "current workspace", row: agterm.NewRow{Name: "a2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			args := append(append([]any{"session", "new", "--name", "a2"}, tc.where...), "--json", "--socket", testCtlSock)
+			outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, args...).
+				Return([]byte(`{"ok":true,"result":{"id":"NEW"}}`), 0, nil)
+			if id, err := ctl.NewRow(context.Background(), tc.row); err != nil || id != "NEW" {
+				t.Fatalf("NewRow() = (%q, %v), want NEW", id, err)
+			}
+		})
+	}
+}
+
+func TestCtlNewRowReportsFailures(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name string
+		out  string
+		exit int
+		err  error
+		want string
+	}{
+		{name: "refused", out: `error: workspace not found`, exit: 1, err: errors.New("exit status 1"), want: "workspace not found"},
+		{name: "no id", out: `{"ok":true,"result":{}}`, want: "no id"},
+		{name: "not json", out: `ok`, want: "decode"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			outputter := mocks.NewMockOutputter(ctrl)
+			ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
+			outputter.EXPECT().Output(gomock.Any(), gomock.Any(), testCtlPath, gomock.Any()).
+				Return([]byte(tc.out), tc.exit, tc.err).AnyTimes()
+			if _, err := ctl.NewRow(context.Background(), agterm.NewRow{Name: "a2"}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("NewRow() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCtlInWindowPinsTheFlowsCommands(t *testing.T) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	outputter := mocks.NewMockOutputter(ctrl)
+	runner := mocks.NewMockRunner(ctrl)
+	base := agterm.NewCtl(testCtlPath, testCtlSock, runner, outputter, nil)
+	ctl := base.InWindow("WIN")
+	ctx := context.Background()
+	pinned := []any{"--window", "WIN", "--socket", testCtlSock}
+	tree := `{"result":{"tree":{"workspaces":[]}}}`
+
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, append([]any{"tree", "--json"}, pinned...)...).Return([]byte(tree), 0, nil)
+	if _, err := ctl.Workspaces(ctx); err != nil {
+		t.Fatalf("Workspaces() error = %v", err)
+	}
+	outputter.EXPECT().Output(gomock.Any(), gomock.Any(), testCtlPath, append([]any{"pick", "open", "--prompt", "p", "--allow-custom"}, pinned...)...).
+		Return([]byte(`{"result":"picked","id":"x"}`), 0, nil)
+	if _, err := ctl.Pick(ctx, nil, "p"); err != nil {
+		t.Fatalf("Pick() error = %v", err)
+	}
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, append([]any{"session", "new", "--name", "a2", "--after", "row-1", "--json"}, pinned...)...).
+		Return([]byte(`{"ok":true,"result":{"id":"NEW"}}`), 0, nil)
+	if _, err := ctl.NewRow(ctx, agterm.NewRow{Name: "a2", After: "row-1"}); err != nil {
+		t.Fatalf("NewRow() error = %v", err)
+	}
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, append([]any{"session", "text", "--target", "NEW", "--pane-id", "P"}, pinned...)...).Return(nil, 0, nil)
+	if _, err := ctl.PaneText(ctx, "NEW", "P"); err != nil {
+		t.Fatalf("PaneText() error = %v", err)
+	}
+	outputter.EXPECT().Output(gomock.Any(), []byte("x\n"), testCtlPath, append([]any{"session", "type", "--stdin", "--target", "NEW", "--pane-id", "P"}, pinned...)...).Return(nil, 0, nil)
+	if err := ctl.TypeLine(ctx, "NEW", "P", "x"); err != nil {
+		t.Fatalf("TypeLine() error = %v", err)
+	}
+	runner.EXPECT().Run(gomock.Any(), testCtlPath, append([]any{"session", "close", "--target", "NEW"}, pinned...)...)
+	if err := ctl.CloseRow(ctx, "NEW"); err != nil {
+		t.Fatalf("CloseRow() error = %v", err)
+	}
+	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).Return([]byte(tree), 0, nil)
+	if _, err := base.Workspaces(ctx); err != nil {
+		t.Fatalf("unscoped Workspaces() error = %v", err)
 	}
 }

@@ -38,6 +38,12 @@ func RunInstall(ctx context.Context, args []string, installer Installer, out, er
 		return 1
 	}
 	_, _ = fmt.Fprintf(out, "installed agr %s on %s (mux %s, relay %s)\n", result.Version, host, result.Mux, result.Relay)
+	if result.Proxy != "" {
+		_, _ = fmt.Fprintln(out, result.Proxy)
+	}
+	if result.Skill != "" {
+		_, _ = fmt.Fprintln(out, result.Skill)
+	}
 	if result.Terminfo != "" {
 		_, _ = fmt.Fprintln(out, result.Terminfo)
 	}

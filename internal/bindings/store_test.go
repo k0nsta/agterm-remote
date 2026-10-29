@@ -2,6 +2,7 @@ package bindings
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -201,8 +202,8 @@ func paneBinding(t *testing.T, row, pane, paneID, host, name string) Binding {
 
 func TestUpsertRetiresSupersededPanes(t *testing.T) {
 	t.Helper()
-	left := paneBinding(t, "row-1", "left", "tok-left", "homelab", "a")
-	right := paneBinding(t, "row-1", "right", "tok-right", "homelab", "b")
+	left := paneBinding(t, "row-1", "left", "tok-left", "myhost", "a")
+	right := paneBinding(t, "row-1", "right", "tok-right", "myhost", "b")
 	tests := []struct {
 		name    string
 		current []Binding
@@ -218,18 +219,18 @@ func TestUpsertRetiresSupersededPanes(t *testing.T) {
 		{
 			name:    "same pane token replaces across rows after a promote",
 			current: []Binding{left, right},
-			next:    paneBinding(t, "row-2", "left", "tok-right", "homelab", "c"),
-			want:    []Binding{left, paneBinding(t, "row-2", "left", "tok-right", "homelab", "c")},
+			next:    paneBinding(t, "row-2", "left", "tok-right", "myhost", "c"),
+			want:    []Binding{left, paneBinding(t, "row-2", "left", "tok-right", "myhost", "c")},
 		},
 		{
 			name:    "same row and slot replaces a dead pane's successor",
 			current: []Binding{left, right},
-			next:    paneBinding(t, "row-1", "right", "tok-new", "homelab", "c"),
-			want:    []Binding{left, paneBinding(t, "row-1", "right", "tok-new", "homelab", "c")},
+			next:    paneBinding(t, "row-1", "right", "tok-new", "myhost", "c"),
+			want:    []Binding{left, paneBinding(t, "row-1", "right", "tok-new", "myhost", "c")},
 		},
 		{
 			name:    "same host and name moves the session to the new pane",
-			current: []Binding{left, paneBinding(t, "row-2", "left", "tok-other", "homelab", "b")},
+			current: []Binding{left, paneBinding(t, "row-2", "left", "tok-other", "myhost", "b")},
 			next:    right,
 			want:    []Binding{left, right},
 		},
@@ -241,13 +242,13 @@ func TestUpsertRetiresSupersededPanes(t *testing.T) {
 		},
 		{
 			name:    "empty token replaces the whole row",
-			current: []Binding{left, right, paneBinding(t, "row-2", "left", "tok-other", "homelab", "c")},
-			next:    paneBinding(t, "row-1", "right", "", "homelab", "d"),
-			want:    []Binding{paneBinding(t, "row-2", "left", "tok-other", "homelab", "c"), paneBinding(t, "row-1", "right", "", "homelab", "d")},
+			current: []Binding{left, right, paneBinding(t, "row-2", "left", "tok-other", "myhost", "c")},
+			next:    paneBinding(t, "row-1", "right", "", "myhost", "d"),
+			want:    []Binding{paneBinding(t, "row-2", "left", "tok-other", "myhost", "c"), paneBinding(t, "row-1", "right", "", "myhost", "d")},
 		},
 		{
 			name:    "a tokenless entry is replaced by any open in its row",
-			current: []Binding{paneBinding(t, "row-1", "left", "", "homelab", "a")},
+			current: []Binding{paneBinding(t, "row-1", "left", "", "myhost", "a")},
 			next:    right,
 			want:    []Binding{right},
 		},
@@ -265,8 +266,8 @@ func TestUpsertRetiresSupersededPanes(t *testing.T) {
 func TestStoreSplitRowKeepsBothPanes(t *testing.T) {
 	t.Helper()
 	store := testStore(t)
-	left := paneBinding(t, "row-1", "left", "tok-left", "homelab", "a")
-	right := paneBinding(t, "row-1", "right", "tok-right", "homelab", "b")
+	left := paneBinding(t, "row-1", "left", "tok-left", "myhost", "a")
+	right := paneBinding(t, "row-1", "right", "tok-right", "myhost", "b")
 	for _, item := range []Binding{left, right} {
 		if err := store.Bind(item); err != nil {
 			t.Fatalf("Bind(%#v) error = %v", item, err)
@@ -285,5 +286,168 @@ func TestStoreSplitRowKeepsBothPanes(t *testing.T) {
 	}
 	if got := store.ForRow("row-1"); len(got) != 0 {
 		t.Fatalf("ForRow(row-1) after UnbindRow = %#v, want none", got)
+	}
+}
+
+func TestGrantsRoundTripAndOmittedWhenEmpty(t *testing.T) {
+	store := testStore(t)
+	plain := binding(t, "row-a", "host-a", "api")
+	granted := binding(t, "row-b", "host-b", "web")
+	granted.Grants = []Grant{{Row: "orch-row", PaneID: "orch-pane", Kind: GrantOrchestrator}}
+	if err := store.Save([]Binding{plain, granted}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, []Binding{plain, granted}) {
+		t.Fatalf("Load() = %+v", got)
+	}
+	data, err := os.ReadFile(store.dirs.Bindings())
+	if err != nil {
+		t.Fatalf("read bindings: %v", err)
+	}
+	if strings.Count(string(data), `"grants"`) != 1 {
+		t.Fatalf("grants must be written only for the granted binding:\n%s", data)
+	}
+	if !strings.Contains(string(data), `"kind": "orchestrator"`) || !strings.Contains(string(data), `"pane_id": "orch-pane"`) {
+		t.Fatalf("grant JSON keys missing:\n%s", data)
+	}
+}
+
+func TestBindingsFileWithoutGrantsStillLoads(t *testing.T) {
+	store := testStore(t)
+	old := `[{"row":"r","pane_id":"p","pane":"left","host":"h","name":"n","mux":"tmux","bound_at":"2023-11-14T22:13:20Z"}]`
+	if err := os.MkdirAll(store.dirs.Cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.dirs.Bindings(), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Row != "r" || got[0].Grants != nil {
+		t.Fatalf("Load() = %+v", got)
+	}
+}
+
+func TestRebindKeepsGrantsOfSameHostAndName(t *testing.T) {
+	store := testStore(t)
+	first := binding(t, "row-a", "host-a", "api")
+	if err := store.Bind(first); err != nil {
+		t.Fatal(err)
+	}
+	grant := Grant{Row: "orch", PaneID: "orch-pane", Kind: GrantConsent}
+	if err := store.AddGrant("host-a", "api", grant); err != nil {
+		t.Fatalf("AddGrant() error = %v", err)
+	}
+
+	again := binding(t, "row-a", "host-a", "api")
+	again.BoundAt = again.BoundAt.Add(time.Hour)
+	if err := store.Bind(again); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := store.ByHostName("host-a", "api")
+	if !ok || !reflect.DeepEqual(got.Grants, []Grant{grant}) || !got.BoundAt.Equal(again.BoundAt) {
+		t.Fatalf("re-bind of the same host and name = %+v, ok=%v", got, ok)
+	}
+
+	// Another row taking over the name is still the same session.
+	moved := binding(t, "row-b", "host-a", "api")
+	if err := store.Bind(moved); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.ByHostName("host-a", "api"); !reflect.DeepEqual(got.Grants, []Grant{grant}) {
+		t.Fatalf("grants after the name moved row = %+v", got.Grants)
+	}
+
+	// A different name in the same pane is a new session: no grants.
+	renamed := binding(t, "row-b", "host-a", "web")
+	if err := store.Bind(renamed); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.ByHostName("host-a", "web"); got.Grants != nil {
+		t.Fatalf("a different name kept grants: %+v", got.Grants)
+	}
+	if _, ok := store.ByHostName("host-a", "api"); ok {
+		t.Fatal("the superseded binding must be gone")
+	}
+}
+
+func TestRebindWithGrantsOfItsOwnKeepsThose(t *testing.T) {
+	store := testStore(t)
+	if err := store.Bind(binding(t, "row-a", "host-a", "api")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddGrant("host-a", "api", Grant{Row: "old", PaneID: "p", Kind: GrantConsent}); err != nil {
+		t.Fatal(err)
+	}
+	next := binding(t, "row-a", "host-a", "api")
+	next.Grants = []Grant{{Row: "new", PaneID: "q", Kind: GrantOrchestrator}}
+	if err := store.Bind(next); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.ByHostName("host-a", "api")
+	if !reflect.DeepEqual(got.Grants, next.Grants) {
+		t.Fatalf("Grants = %+v, want the caller's", got.Grants)
+	}
+}
+
+func TestAddGrantIsIdempotentAndDropGrantRemoves(t *testing.T) {
+	store := testStore(t)
+	if err := store.Bind(binding(t, "row-a", "host-a", "api")); err != nil {
+		t.Fatal(err)
+	}
+	one := Grant{Row: "r1", PaneID: "p1", Kind: GrantConsent}
+	two := Grant{Row: "r2", PaneID: "p2", Kind: GrantOrchestrator}
+	for _, grant := range []Grant{one, one, two} {
+		if err := store.AddGrant("host-a", "api", grant); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := store.ByHostName("host-a", "api")
+	if !reflect.DeepEqual(got.Grants, []Grant{one, two}) {
+		t.Fatalf("Grants = %+v", got.Grants)
+	}
+	if err := store.DropGrant("host-a", "api", one); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DropGrant("host-a", "api", one); err != nil {
+		t.Fatalf("dropping a grant the binding lacks must not fail: %v", err)
+	}
+	got, _ = store.ByHostName("host-a", "api")
+	if !reflect.DeepEqual(got.Grants, []Grant{two}) {
+		t.Fatalf("Grants after drop = %+v", got.Grants)
+	}
+	if err := store.DropGrant("host-a", "api", two); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = store.ByHostName("host-a", "api")
+	if got.Grants != nil {
+		t.Fatalf("Grants after the last drop = %+v, want nil", got.Grants)
+	}
+}
+
+func TestGrantOnMissingBindingIsAnErrorNotAnEntry(t *testing.T) {
+	store := testStore(t)
+	grant := Grant{Row: "r", PaneID: "p", Kind: GrantConsent}
+	if err := store.Bind(binding(t, "row-a", "host-a", "api")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UnbindRow("row-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddGrant("host-a", "api", grant); !errors.Is(err, ErrNoBinding) {
+		t.Fatalf("AddGrant() error = %v, want ErrNoBinding", err)
+	}
+	if err := store.DropGrant("host-a", "api", grant); !errors.Is(err, ErrNoBinding) {
+		t.Fatalf("DropGrant() error = %v, want ErrNoBinding", err)
+	}
+	got, err := store.Load()
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Load() = %+v, %v; a failed grant must not create an entry", got, err)
 	}
 }
