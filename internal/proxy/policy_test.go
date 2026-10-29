@@ -892,3 +892,35 @@ func TestAttachedAcceptsOpenFlagsAnywhere(t *testing.T) {
 		})
 	}
 }
+
+// TestAuthorizeOverlayOpenMarksAWholeRow: a page may cover the row only when
+// every pane of it is the host's; a split with a Mac shell stays pane-only.
+func TestAuthorizeOverlayOpenMarksAWholeRow(t *testing.T) {
+	f := newFixture(t)
+	open := func(row, side string) Decision {
+		t.Helper()
+		args := []string{"session", "overlay", "open", "--url", "https://example.com", "--target", row}
+		if side != "" {
+			args = append(args, "--pane", side)
+		}
+		got := f.authorize(t, args...)
+		wantAllow(t, got)
+		return got
+	}
+	if got := open(rowCaller, ""); !got.Call.Targets[0].WholeRow {
+		t.Fatalf("caller's own row: Targets = %+v, want WholeRow", got.Call.Targets)
+	}
+	if got := open(rowMixed, "left"); got.Call.Targets[0].WholeRow || got.Call.Targets[0].Side != "left" {
+		t.Fatalf("mixed row: Targets = %+v, want the left pane only", got.Call.Targets)
+	}
+	f.binds = append(f.binds, bind(t, rowMixed, mixedRight, "right", testHost, "w3-2"))
+	row := f.row(t, rowMixed)
+	row.SplitForegroundShell = ""
+	row.SplitForeground = attachedFG(t, testHost, "w3-2")
+	if got := open(rowMixed, "left"); !got.Call.Targets[0].WholeRow {
+		t.Fatalf("row with both panes the host's: Targets = %+v, want WholeRow", got.Call.Targets)
+	}
+	if got := f.authorize(t, "session", "overlay", "close", "--target", rowMixed, "--pane", "left"); got.Call.Targets[0].WholeRow {
+		t.Fatal("WholeRow is for overlay open only")
+	}
+}

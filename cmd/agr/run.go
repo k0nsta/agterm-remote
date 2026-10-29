@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/cli"
+	"github.com/k0nsta/agterm-remote/internal/settings"
 )
 
 var version = "dev"
@@ -36,7 +38,7 @@ Commands:
   end [row]                Kill a row's remote sessions and close the row
   paste [row] [pane-id]   Send the clipboard or latest screenshot to a remote row
   skill                   Print the agr skill for Claude (agr setup and agr install write it)
-  setup [--end-key <chord>] [--paste-key <chord>]
+  setup [--end-key <chord>] [--paste-key <chord>] [--page-size <percent>]
                           Make agterm's ⌘D and ⌘J follow a remote row; add End and Paste commands
 
 Options:
@@ -158,37 +160,76 @@ func runSkill(_ context.Context, _ *application, args []string, out, errw io.Wri
 	return cli.RunSkill(version, out, errw)
 }
 
+const setupUsage = "usage: agr setup [--end-key <chord>] [--paste-key <chord>] [--page-size <percent>]"
+
 func runSetup(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
 	var endKey string
 	var pasteKey string
+	pageSize := -1
 	seenEnd, seenPaste := false, false
 	for i := 0; i < len(args); i++ {
 		if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" || strings.HasPrefix(args[i+1], "-") {
-			_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+			_, _ = fmt.Fprintln(errw, setupUsage)
 			return 2
 		}
 		switch args[i] {
 		case "--end-key":
 			if seenEnd {
-				_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+				_, _ = fmt.Fprintln(errw, setupUsage)
 				return 2
 			}
 			seenEnd = true
 			endKey = args[i+1]
 		case "--paste-key":
 			if seenPaste {
-				_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+				_, _ = fmt.Fprintln(errw, setupUsage)
 				return 2
 			}
 			seenPaste = true
 			pasteKey = args[i+1]
+		case "--page-size":
+			size, err := strconv.Atoi(args[i+1])
+			if pageSize != -1 || err != nil || size < 1 || size > 100 {
+				_, _ = fmt.Fprintln(errw, setupUsage+" (percent is 1-100)")
+				return 2
+			}
+			pageSize = size
 		default:
-			_, _ = fmt.Fprintln(errw, "usage: agr setup [--end-key <chord>] [--paste-key <chord>]")
+			_, _ = fmt.Fprintln(errw, setupUsage)
 			return 2
 		}
 		i++
 	}
+	if pageSize != -1 {
+		if code := savePageSize(pageSize, out, errw); code != 0 {
+			return code
+		}
+	}
 	return cli.RunSetup(ctx, app.setup(out, endKey, pasteKey), errw)
+}
+
+// savePageSize stores the default size of a host's page; 100 means full.
+func savePageSize(size int, out, errw io.Writer) int {
+	path := settings.Path()
+	current, err := settings.Load(path)
+	if err != nil {
+		_, _ = fmt.Fprintf(errw, "agr setup: %v\n", err)
+		return 1
+	}
+	current.PageSize = size
+	if size == 100 {
+		current.PageSize = 0
+	}
+	if err := settings.Save(path, current); err != nil {
+		_, _ = fmt.Fprintf(errw, "agr setup: save %s: %v\n", path, err)
+		return 1
+	}
+	if current.PageSize == 0 {
+		_, _ = fmt.Fprintln(out, "host pages: full")
+	} else {
+		_, _ = fmt.Fprintf(out, "host pages: %d%% on rows a host owns whole (a split with a Mac pane stays full)\n", size)
+	}
+	return 0
 }
 
 func runOnSplit(ctx context.Context, app *application, args []string, _, errw io.Writer) int {

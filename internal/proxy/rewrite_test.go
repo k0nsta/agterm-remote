@@ -419,3 +419,79 @@ func TestRewriteOverlayDropsFollowWithAWarning(t *testing.T) {
 		}
 	}
 }
+
+// ownMixedRow binds the mixed row's right pane to the host too, so the host
+// owns the whole split row.
+func ownMixedRow(t *testing.T, f *fixture) {
+	t.Helper()
+	f.binds = append(f.binds, bind(t, rowMixed, mixedRight, "right", testHost, "w3-2"))
+	row := f.row(t, rowMixed)
+	row.SplitForegroundShell = ""
+	row.SplitForeground = attachedFG(t, testHost, "w3-2")
+}
+
+func TestRewritePageSize(t *testing.T) {
+	t.Helper()
+	html := []string{"session", "overlay", "open", "--html", "@0", "--target", rowMixed, "--pane", "left"}
+	tests := []struct {
+		name     string
+		owned    bool
+		size     int
+		extra    []string
+		wantArgs []string
+		wantWarn []string
+		wantSide string
+	}{
+		{name: "no default keeps the pane", owned: true,
+			wantArgs: []string{"--target=" + rowMixed, "--pane=left"}, wantSide: "left"},
+		{name: "default covers an owned row", owned: true, size: 70,
+			wantArgs: []string{"--target=" + rowMixed, "--size-percent=70"}},
+		{name: "100 is full", owned: true, size: 100,
+			wantArgs: []string{"--target=" + rowMixed, "--pane=left"}, wantSide: "left"},
+		{name: "the caller's size wins", owned: true, size: 70, extra: []string{"--width", "600"},
+			wantArgs: []string{"--target=" + rowMixed, "--width=600"}},
+		{name: "a Mac pane keeps it pane-only", size: 70,
+			wantArgs: []string{"--target=" + rowMixed, "--pane=left"}, wantSide: "left"},
+		{name: "a size on a pane-only page is dropped", extra: []string{"--size-percent", "50"},
+			wantArgs: []string{"--target=" + rowMixed, "--pane=left"}, wantSide: "left",
+			wantWarn: []string{"size ignored: a pane overlay is always full, and this row has a pane the host does not own"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			if tt.owned {
+				ownMixedRow(t, f)
+			}
+			rewriter := f.rewriter(t)
+			rewriter.PageSize = func() int { return tt.size }
+			prepared := f.prepare(t, rewriter, append(append([]string(nil), html...), tt.extra...)...)
+			// the shim page's --html is gone: the daemon adds its --url
+			if args := prepared.Args[3:]; !reflect.DeepEqual(args, tt.wantArgs) {
+				t.Fatalf("Args = %q, want %q after the path", prepared.Args, tt.wantArgs)
+			}
+			if !reflect.DeepEqual(prepared.Warnings, tt.wantWarn) {
+				t.Fatalf("Warnings = %q, want %q", prepared.Warnings, tt.wantWarn)
+			}
+			if prepared.Page == nil || prepared.Page.Side != tt.wantSide {
+				t.Fatalf("Page = %+v, want side %q", prepared.Page, tt.wantSide)
+			}
+		})
+	}
+}
+
+func TestRewriteWholeRowPageClosesTheRowOnCancel(t *testing.T) {
+	t.Helper()
+	f := newFixture(t)
+	ownMixedRow(t, f)
+	rewriter := f.rewriter(t)
+	rewriter.PageSize = func() int { return 60 }
+	prepared := f.prepare(t, rewriter, "session", "overlay", "open", "--url", "https://example.com",
+		"--block", "--target", rowMixed, "--pane", "left")
+	want := []string{"session", "overlay", "close", "--target=" + rowMixed}
+	if !reflect.DeepEqual(prepared.Cancel, want) {
+		t.Fatalf("Cancel = %q, want %q", prepared.Cancel, want)
+	}
+	if slices.Contains(prepared.Args, "--pane=left") || !slices.Contains(prepared.Args, "--size-percent=60") {
+		t.Fatalf("Args = %q, want the whole row at 60%%", prepared.Args)
+	}
+}

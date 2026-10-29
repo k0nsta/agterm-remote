@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/k0nsta/agterm-remote/internal/settings"
 	"github.com/k0nsta/agterm-remote/internal/skill"
 )
 
@@ -124,6 +125,10 @@ func TestRunSetupRejectsBadArguments(t *testing.T) {
 		{"setup", "--end-key", "x", "--end-key", "y"},
 		{"setup", "--paste-key", "x", "--paste-key", "y"},
 		{"setup", "--end-key", "--paste-key", "x"},
+		{"setup", "--page-size", "0"},
+		{"setup", "--page-size", "101"},
+		{"setup", "--page-size", "big"},
+		{"setup", "--page-size", "50", "--page-size", "60"},
 	} {
 		var out, errout strings.Builder
 		if got := runWithApplication(argv, &out, &errout, &application{}); got != 2 {
@@ -153,6 +158,32 @@ func TestRunSetupAcceptsBothFlagsInEitherOrder(t *testing.T) {
 				t.Fatalf("keymap.conf = %q, want both requested chords", keymap)
 			}
 		})
+	}
+}
+
+func TestRunSetupSavesThePageSize(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
+	for _, tt := range []struct {
+		size, want string
+		stored     int
+	}{
+		{size: "70", want: "host pages: 70%", stored: 70},
+		{size: "100", want: "host pages: full", stored: 0},
+	} {
+		var out, errout strings.Builder
+		if got := runWithApplication([]string{"setup", "--page-size", tt.size}, &out, &errout, &application{}); got != 0 {
+			t.Fatalf("setup --page-size %s exit = %d, stderr = %q", tt.size, got, errout.String())
+		}
+		if !strings.Contains(out.String(), tt.want) {
+			t.Fatalf("setup --page-size %s said %q, want %q", tt.size, out.String(), tt.want)
+		}
+		saved, err := settings.Load(settings.Path())
+		if err != nil || saved.PageSize != tt.stored {
+			t.Fatalf("saved = %+v, %v, want PageSize %d", saved, err, tt.stored)
+		}
 	}
 }
 

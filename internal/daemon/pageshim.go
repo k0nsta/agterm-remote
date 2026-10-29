@@ -256,13 +256,15 @@ func (s *pageShim) releaseHost(host string) {
 }
 
 // openInSlot lists the open pages of host in a row's pane slot. More than one
-// means a page was replaced and its watcher has not noticed yet.
+// means a page was replaced and its watcher has not noticed yet. A page that
+// covers the whole row (side "") is in every slot of it, so a call naming
+// either pane reaches it.
 func (s *pageShim) openInSlot(host, row, side string) []*page {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var found []*page
 	for _, p := range s.pages {
-		if p.host == host && strings.EqualFold(p.row, row) && p.side == side && p.isOpen() {
+		if p.host == host && strings.EqualFold(p.row, row) && (p.side == side || p.side == "") && p.isOpen() {
 			found = append(found, p)
 		}
 	}

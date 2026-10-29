@@ -529,3 +529,32 @@ func TestPageShimCloseDropsEverything(t *testing.T) {
 		t.Fatalf("temp directory after close: %v, want it removed", err)
 	}
 }
+
+// TestWholeRowPageIsInEverySlot: a page covering a split row answers a call
+// that names either pane, while a pane page answers only its own.
+func TestWholeRowPageIsInEverySlot(t *testing.T) {
+	t.Helper()
+	shim := newTestShim(t, newLiveSet(t).live)
+	whole, _, err := shim.register("homelab", "row-1", "", "f", "")
+	if err != nil {
+		t.Fatalf("register whole row: %v", err)
+	}
+	pane, _, err := shim.register("homelab", "row-2", "left", "f", "")
+	if err != nil {
+		t.Fatalf("register pane: %v", err)
+	}
+	for _, side := range []string{"left", "right", ""} {
+		if got := shim.openInSlot("homelab", "row-1", side); len(got) != 1 || got[0] != whole {
+			t.Fatalf("row-1 %q slot = %v, want the whole-row page", side, got)
+		}
+	}
+	if got := shim.openInSlot("homelab", "row-2", "right"); len(got) != 0 {
+		t.Fatalf("row-2 right slot = %v, want none", got)
+	}
+	if got := shim.openInSlot("homelab", "row-2", "left"); len(got) != 1 || got[0] != pane {
+		t.Fatalf("row-2 left slot = %v, want the pane page", got)
+	}
+	if got := shim.openInSlot("other", "row-1", "left"); len(got) != 0 {
+		t.Fatalf("another host's slot = %v, want none", got)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -24,6 +25,9 @@ type Rewriter struct {
 	Root     string
 	Sessions SessionLister
 	Binds    BindingLoader
+	// PageSize is the user's default size for a host's page, as a percent
+	// (agr setup --page-size); 0 or 100 keeps pages full. Nil means none.
+	PageSize func() int
 
 	mu       sync.Mutex
 	reserved map[string]bool
@@ -87,6 +91,10 @@ func (r *Rewriter) Rewrite(ctx context.Context, req Request, call Call) (Prepare
 
 func (r *Rewriter) rewrite(ctx context.Context, req Request, call Call) (Prepared, error) {
 	prepared := Prepared{Warnings: append([]string(nil), call.Warnings...)}
+	call, warning := r.sizePage(call)
+	if warning != "" {
+		prepared.Warnings = append(prepared.Warnings, warning)
+	}
 	if hasOpt(call.Opts, "stdin") {
 		prepared.Stdin = req.Stdin
 	}
@@ -111,6 +119,37 @@ func (r *Rewriter) rewrite(ctx context.Context, req Request, call Call) (Prepare
 	}
 	prepared.Args = call.Args()
 	return prepared, nil
+}
+
+// sizePage decides the size of a host's page. agterm draws a pane overlay
+// full, always, so a size needs the whole row: the page then covers the row,
+// at the caller's size or else the user's default.
+func (r *Rewriter) sizePage(call Call) (Call, string) {
+	page := len(call.Files) > 0 || hasOpt(call.Opts, "url")
+	if call.Leaf != "session overlay open" || !page || len(call.Targets) != 1 {
+		return call, ""
+	}
+	sized := hasOpt(call.Opts, "size-percent") || hasOpt(call.Opts, "width") || hasOpt(call.Opts, "height")
+	if !call.Targets[0].WholeRow {
+		if !sized || call.Targets[0].Side == "" {
+			return call, ""
+		}
+		call.Opts = withoutOpts(call.Opts, "size-percent", "width", "height")
+		return call, "size ignored: a pane overlay is always full, and this row has a pane the host does not own"
+	}
+	if !sized {
+		size := 0
+		if r.PageSize != nil {
+			size = r.PageSize()
+		}
+		if size <= 0 || size >= 100 {
+			return call, ""
+		}
+		call.Opts = append(append([]Opt(nil), call.Opts...), Opt{Name: "size-percent", Value: strconv.Itoa(size)})
+	}
+	call.Targets = []Target{call.Targets[0]}
+	call.Targets[0].Side = ""
+	return call, ""
 }
 
 func hasOpt(opts []Opt, name string) bool {

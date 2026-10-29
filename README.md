@@ -232,6 +232,11 @@ agtermctl session overlay open --html /tmp/panel.html --js --block
 - **Full ids only**: `--target` and `--pane-id` take full ids from
   `agtermctl tree --json`. Prefixes and `active` are refused.
 - **One-file pages**: an HTML page must be a single self-contained file.
+- **Page size**: a page covers the caller's pane, full size. On a row whose
+  panes are all the host's it floats instead, at the size the caller gives or
+  your default: `agr setup --page-size 70` (stored in
+  `~/.config/agr/config.json`; `100` is full again). A split with a Mac pane
+  stays full.
 - **`foreground` limitation**: a remote row's `foreground` in `tree --json` is
   `agr`, not the remote program. Tools that poll it (such as `spawn-agent`'s
   "is it running" check) see `agr`; read `session text` instead.

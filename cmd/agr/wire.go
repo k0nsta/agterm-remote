@@ -22,6 +22,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/proxy"
 	"github.com/k0nsta/agterm-remote/internal/receiver"
 	"github.com/k0nsta/agterm-remote/internal/remote"
+	"github.com/k0nsta/agterm-remote/internal/settings"
 	"golang.org/x/term"
 )
 
@@ -174,7 +175,7 @@ func newApplication() *application {
 		Dirs: dirs, UI: control, Remote: remoteRunner, Events: control,
 		Rows: control, Sink: status, Supervisors: bridgeFactory{}, Bindings: store,
 		Ctl: control, Authorizer: proxy.NewPolicy(control, store), ProxyStore: store,
-		Rewriter: &proxy.Rewriter{Agr: stableAgr(), Root: dirs.Proxy(), Sessions: remoteRunner, Binds: store},
+		Rewriter: &proxy.Rewriter{Agr: stableAgr(), Root: dirs.Proxy(), Sessions: remoteRunner, Binds: store, PageSize: pageSize},
 		// No Logger: injecting one makes Daemon.openLog return early, so
 		// dirs.Log() is never created. The daemon is normally started detached
 		// with stdio on /dev/null, so a stderr logger discards every
@@ -223,3 +224,14 @@ var (
 	_ daemon.Supervisor                       = (*bridge.Supervisor)(nil)
 	_ interface{ Run(context.Context) error } = (*daemon.Daemon)(nil)
 )
+
+// pageSize reads the user's default size for a host's page on each use, so
+// `agr setup --page-size` applies without a daemon restart. An unreadable
+// file keeps pages full.
+func pageSize() int {
+	s, err := settings.Load(settings.Path())
+	if err != nil {
+		return 0
+	}
+	return s.PageSize
+}

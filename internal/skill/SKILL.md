@@ -45,7 +45,10 @@ The command is `agtermctl session overlay open` (there is no top-level `overlay`
 - An image: write a one-file HTML page with the image inline (`<img src="data:image/png;base64,…" style="max-width:100%">`)
   and open it with `--html`. The agterm skill's `show-image.sh` cannot scale an image on a host (it needs macOS `sips`).
 - Web page: `agtermctl session overlay open --url https://… --target "$AGTERM_SESSION_ID" --pane "$AGTERM_PANE"`. No `--js`.
-- Refused from a host: `--persistent`, and `--size-percent` together with `--pane`. `--follow` is ignored with a warning.
+- Size: on a row whose panes are all this host's, the page floats at the user's default size, or at your
+  `--size-percent` / `--width` / `--height`; `session overlay resize` changes it later. Elsewhere it fills your pane
+  and a size is ignored with a warning.
+- Refused from a host: `--persistent`. `--follow` is ignored with a warning.
 - A page behind a login (a claude.ai artifact) opens signed out. Show its HTML with `--html` instead, or give the user the link.
 
 ## Hand off to a local agent

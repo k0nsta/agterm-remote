@@ -160,7 +160,7 @@ var allowlist = []leafSpec{
 	{path: words("session overlay open"), scope: scopePane, write: true, by: bySide, maxPos: 1, posCommand: true,
 		opts: join(
 			[]optSpec{{name: "html", value: true, role: roleFile}, {name: "url", value: true}},
-			plainFlags("js", "wait"), plainValues("size-percent", "background-color"),
+			plainFlags("js", "wait"), plainValues("size-percent", "width", "height", "background-color"),
 			[]optSpec{optBlock, optTarget, optPane, {name: "follow", dropped: "it would move the user's selection"}}),
 		check: checkOverlayOpen},
 	{path: words("session overlay close"), scope: scopePane, write: true, by: bySide, maxPos: 0,
@@ -341,6 +341,9 @@ type Target struct {
 	PaneID string
 	// Side is left or right on a row with a split, else empty.
 	Side string
+	// WholeRow is set, for an overlay open, when every pane of the row is the
+	// host's: the page may then cover the row and float at a size.
+	WholeRow bool
 }
 
 // FileRef is an option that names a body file.
@@ -964,25 +967,33 @@ func (a *authz) checkOwned(row agterm.TreeRow, surface agterm.Surface) string {
 	return ""
 }
 
+// wholeRowRefusal returns why the host does not own every pane of row, or "".
+func (a *authz) wholeRowRefusal(row agterm.TreeRow) string {
+	list := panes(row)
+	if len(list) == 0 {
+		return fmt.Sprintf("row %s has no pane", row.ID)
+	}
+	for _, surface := range row.Surfaces {
+		if surface.Kind != "left" && surface.Kind != "right" {
+			return fmt.Sprintf("row %s has a local %s terminal the host does not own (a row-level call needs every pane of the row)", row.ID, surface.Kind)
+		}
+	}
+	for _, surface := range list {
+		if why := a.checkOwned(row, surface); why != "" {
+			return fmt.Sprintf("row %s: %s (a row-level call needs every pane of the row)", row.ID, why)
+		}
+	}
+	return ""
+}
+
 func (a *authz) rowScope() Decision {
 	rows, err := a.targetRows()
 	if err != nil {
 		return refuse("%s: %v", a.leaf.name(), err)
 	}
 	for _, row := range rows {
-		list := panes(row)
-		if len(list) == 0 {
-			return refuse("%s: row %s has no pane", a.leaf.name(), row.ID)
-		}
-		for _, surface := range row.Surfaces {
-			if surface.Kind != "left" && surface.Kind != "right" {
-				return refuse("%s: row %s has a local %s terminal the host does not own (a row-level call needs every pane of the row)", a.leaf.name(), row.ID, surface.Kind)
-			}
-		}
-		for _, surface := range list {
-			if why := a.checkOwned(row, surface); why != "" {
-				return refuse("%s: row %s: %s (a row-level call needs every pane of the row)", a.leaf.name(), row.ID, why)
-			}
+		if why := a.wholeRowRefusal(row); why != "" {
+			return refuse("%s: %s", a.leaf.name(), why)
 		}
 		target := Target{Row: row.ID}
 		if a.paneID != "" || a.side != "" {
@@ -1012,7 +1023,11 @@ func (a *authz) paneScope() Decision {
 	if a.leaf.by == bySide {
 		a.call.PaneBy = PaneBySide
 	}
-	a.call.Targets = []Target{a.target(row, surface)}
+	target := a.target(row, surface)
+	if a.leaf.name() == "session overlay open" {
+		target.WholeRow = a.wholeRowRefusal(row) == ""
+	}
+	a.call.Targets = []Target{target}
 
 	if b, bound := a.w.bound[key(surface.PaneID)]; bound && b.Host != a.host {
 		return refuse("%s: pane %s is bound to another host", a.leaf.name(), surface.PaneID)
