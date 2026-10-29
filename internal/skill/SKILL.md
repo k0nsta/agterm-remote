@@ -42,7 +42,7 @@ The command is `agtermctl session overlay open` (there is no top-level `overlay`
 - Interactive page (decide panel, form): `agtermctl session overlay open --html page.html --js --block --target "$AGTERM_SESSION_ID" --pane "$AGTERM_PANE"`.
   One self-contained file; it can only submit and close. Prints `{"outcome":"submitted","value":…}`.
 - Web page: `agtermctl session overlay open --url https://… --target "$AGTERM_SESSION_ID" --pane "$AGTERM_PANE"`. No `--js`.
-- Refused from a host: `--follow`, `--persistent`, and `--size-percent` together with `--pane`.
+- Refused from a host: `--persistent`, and `--size-percent` together with `--pane`. `--follow` is ignored with a warning.
 - A page behind a login (a claude.ai artifact) opens signed out. Show its HTML with `--html` instead, or give the user the link.
 
 ## Hand off to a local agent
