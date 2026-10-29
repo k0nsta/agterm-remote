@@ -1,6 +1,6 @@
 ---
 name: agr
-description: Work with remote hosts through agr, the remote-session bridge for agterm. Use when the user says "on <host>", "from <host>", "remote session", "remote worker", "hand off to <row>", "spawn on <host>", "tear down on <host>", or names a host that `agr ls <host>` accepts; also when AGTERM_SOCKET=agr-proxy, which means this Claude runs in a remote row.
+description: Work with remote hosts through agr, the remote-session bridge for agterm. Use when the user says "on <host>", "from <host>", "remote session", "remote worker", "hand off to <row>", "spawn on <host>", "tear down on <host>", or names a host that `agr ls <host>` accepts; also when AGTERM_SOCKET=agr-proxy, which means this Claude runs in a remote row: then load it before any agtermctl call, overlay, image or decide panel, ahead of the agterm skill.
 ---
 <!-- agr-skill @VERSION@ -->
 
@@ -41,6 +41,9 @@ The command is `agtermctl session overlay open` (there is no top-level `overlay`
 
 - Interactive page (decide panel, form): `agtermctl session overlay open --html page.html --js --block --target "$AGTERM_SESSION_ID" --pane "$AGTERM_PANE"`.
   One self-contained file; it can only submit and close. Prints `{"outcome":"submitted","value":…}`.
+- Static HTML (report, diagram): the same `--html page.html`, without `--js --block`. Never screenshot a page to show it.
+- An image: write a one-file HTML page with the image inline (`<img src="data:image/png;base64,…" style="max-width:100%">`)
+  and open it with `--html`. The agterm skill's `show-image.sh` cannot scale an image on a host (it needs macOS `sips`).
 - Web page: `agtermctl session overlay open --url https://… --target "$AGTERM_SESSION_ID" --pane "$AGTERM_PANE"`. No `--js`.
 - Refused from a host: `--persistent`, and `--size-percent` together with `--pane`. `--follow` is ignored with a warning.
 - A page behind a login (a claude.ai artifact) opens signed out. Show its HTML with `--html` instead, or give the user the link.
