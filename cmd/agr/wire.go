@@ -118,7 +118,7 @@ func (a *application) newRow(window string) cli.NewDependencies {
 	return cli.NewDependencies{
 		Hosts: func() ([]string, error) { return remote.CachedHosts(dirs) },
 		Store: a.store, Remote: a.openRemote, Picker: ctl, Rows: ctl, Workspaces: ctl,
-		Opener: ctl, Closer: ctl, Panes: ctl, Agr: stableAgr(),
+		Opener: ctl, Closer: ctl, Panes: ctl, Agr: stableAgr(), StartCommands: startCommands(),
 	}
 }
 
@@ -244,6 +244,16 @@ var (
 	_ daemon.Supervisor                       = (*bridge.Supervisor)(nil)
 	_ interface{ Run(context.Context) error } = (*daemon.Daemon)(nil)
 )
+
+// startCommands reads the user's start commands for agr new. An unreadable
+// file offers none, so a new session starts a shell.
+func startCommands() []settings.StartCommand {
+	s, err := settings.Load(settings.Path())
+	if err != nil {
+		return nil
+	}
+	return s.StartCommands
+}
 
 // pageSize reads the user's default size for a host's page on each use, so
 // `agr setup --page-size` applies without a daemon restart. An unreadable

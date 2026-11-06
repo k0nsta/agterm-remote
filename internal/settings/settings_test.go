@@ -9,7 +9,7 @@ import (
 func TestLoadMissingIsZero(t *testing.T) {
 	t.Helper()
 	got, err := Load(filepath.Join(t.TempDir(), "none.json"))
-	if err != nil || got != (Settings{}) {
+	if err != nil || got.PageSize != 0 || got.StartCommands != nil {
 		t.Fatalf("Load() = %+v, %v, want zero settings", got, err)
 	}
 }
