@@ -173,8 +173,11 @@ To start a program in a new session, list it in `~/.config/agr/config.json`;
 skips it.
 
 ```json
-{ "start_commands": [ { "name": "claude", "command": "claude -n {name}" } ] }
+{ "start_commands": [ { "name": "claude", "command": "cd ~/{name} 2>/dev/null; claude -n {name}" } ] }
 ```
+
+A new session starts in the host's home, where Claude Code asks to trust the
+folder every time; the `cd` starts it in the project folder of that name instead.
 
 ### Paste a screenshot (or files)
 
