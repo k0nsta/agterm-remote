@@ -167,6 +167,15 @@ first; type a name to create one). A new row opens right after the current
 one, or in the chosen workspace, and runs `agr open <host> <name>` in its shell,
 so a failed connection stays readable there. Escape at any picker opens nothing.
 
+To start a program in a new session, list it in `~/.config/agr/config.json`;
+`{name}` is the session name. A new session then gets a fourth picker: shell
+(Enter), one of these, or a typed command. Attaching to a running session
+skips it.
+
+```json
+{ "start_commands": [ { "name": "claude", "command": "claude -n {name}" } ] }
+```
+
 ### Paste a screenshot (or files)
 
 On a row opened with `agr open`, press `ctrl+a>v` to upload local content to

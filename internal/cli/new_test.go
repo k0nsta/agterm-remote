@@ -12,6 +12,7 @@ import (
 	"github.com/k0nsta/agterm-remote/internal/bindings"
 	"github.com/k0nsta/agterm-remote/internal/paths/pathstest"
 	"github.com/k0nsta/agterm-remote/internal/remote"
+	"github.com/k0nsta/agterm-remote/internal/settings"
 )
 
 // pickSequenceFake answers each Pick with the next result, recording what
@@ -137,6 +138,96 @@ func TestNewOpensTheSessionInARowAfterTheCurrentOne(t *testing.T) {
 	}
 	if want := []string{"row-new/P"}; !reflect.DeepEqual(f.panes.typedIn, want) {
 		t.Fatalf("typed into %v, want %v", f.panes.typedIn, want)
+	}
+}
+
+func withStarts(t *testing.T, f newFixture) newFixture {
+	t.Helper()
+	f.deps.StartCommands = []settings.StartCommand{{Name: "claude", Command: "claude -n {name}"}, {Name: "top", Command: "htop"}}
+	return f
+}
+
+func TestNewStartsTheChosenCommand(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name  string
+		start agterm.PickResult
+		want  string
+	}{
+		{name: "shell", start: picked(t, "shell"), want: ""},
+		{name: "configured, with the session name", start: picked(t, "claude"), want: "claude -n a2"},
+		{name: "typed", start: typed(t, " vim '{name}.md' "), want: "vim 'a2.md'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := withStarts(t, newNewFixture(t, picked(t, "myhost"), typed(t, "a2"), tc.start, picked(t, "W2")))
+			if err := New(context.Background(), "row-1", f.deps); err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if got, want := labels(t, f.picker.items[2]), []string{"shell", "claude", "top"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("start picker = %v, want %v", got, want)
+			}
+			argv := []string{"/opt/homebrew/bin/agr", "open", "myhost", "a2"}
+			if tc.want != "" {
+				argv = append(argv, "--command", `"${SHELL:-/bin/sh}" -lic `+remote.QuoteRemoteCommand(tc.want))
+			}
+			if want := []string{remote.QuoteRemoteCommand(argv...)}; !reflect.DeepEqual(f.panes.typed, want) {
+				t.Fatalf("typed = %q, want %q", f.panes.typed, want)
+			}
+		})
+	}
+}
+
+func TestNewAttachingAnExistingSessionAsksNoStart(t *testing.T) {
+	t.Helper()
+	f := withStarts(t, newNewFixture(t, picked(t, "myhost"), typed(t, "a1"), picked(t, "W2")))
+	if err := New(context.Background(), "row-1", f.deps); err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if len(f.picker.prompts) != 3 {
+		t.Fatalf("prompts = %q, want host, session and workspace only", f.picker.prompts)
+	}
+	if want := []string{"'/opt/homebrew/bin/agr' 'open' 'myhost' 'a1'"}; !reflect.DeepEqual(f.panes.typed, want) {
+		t.Fatalf("typed = %q, want %q", f.panes.typed, want)
+	}
+}
+
+func TestNewCancelAtStartCreatesNoRow(t *testing.T) {
+	t.Helper()
+	f := withStarts(t, newNewFixture(t, picked(t, "myhost"), typed(t, "a2")))
+	f.picker.errs = []error{nil, nil, agterm.ErrCancelled}
+	var errw strings.Builder
+	if code := RunNew(context.Background(), "row-1", f.deps, &errw); code != 0 || errw.Len() != 0 {
+		t.Fatalf("RunNew() = %d, %q; want 0 and no error", code, errw.String())
+	}
+	if len(f.opener.rows) != 0 || len(f.panes.typed) != 0 {
+		t.Fatalf("cancel created %v, typed %q", f.opener.rows, f.panes.typed)
+	}
+}
+
+func TestNewRejectsBadStartCommands(t *testing.T) {
+	t.Helper()
+	for _, tc := range []struct {
+		name   string
+		starts []settings.StartCommand
+		start  agterm.PickResult
+		want   string
+	}{
+		{name: "blank typed", starts: []settings.StartCommand{{Name: "x", Command: "x"}}, start: typed(t, "  "), want: "invalid start command"},
+		{name: "repeated name", starts: []settings.StartCommand{{Name: "x", Command: "x"}, {Name: "x", Command: "y"}}, want: "repeated name"},
+		{name: "shadows shell", starts: []settings.StartCommand{{Name: "shell", Command: "x"}}, want: "repeated name"},
+		{name: "empty command", starts: []settings.StartCommand{{Name: "x"}}, want: "no command"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newNewFixture(t, picked(t, "myhost"), typed(t, "a2"), tc.start)
+			f.deps.StartCommands = tc.starts
+			err := New(context.Background(), "row-1", f.deps)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("New() error = %v, want %q", err, tc.want)
+			}
+			if len(f.opener.rows) != 0 {
+				t.Fatalf("New() created %v", f.opener.rows)
+			}
+		})
 	}
 }
 

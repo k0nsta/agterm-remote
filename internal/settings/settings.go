@@ -15,6 +15,15 @@ type Settings struct {
 	// PageSize is the percent a host's page opens at on a row the host owns
 	// whole; 0 keeps pages full.
 	PageSize int `json:"page_size_percent,omitempty"`
+	// StartCommands are what `agr new` offers to run in a new session besides
+	// a plain shell, in this order; {name} in a command is the session name.
+	StartCommands []StartCommand `json:"start_commands,omitempty"`
+}
+
+// StartCommand is one entry of the `agr new` start picker.
+type StartCommand struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
 }
 
 // Path is the settings file: $XDG_CONFIG_HOME/agr/config.json, else

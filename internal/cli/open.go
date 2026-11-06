@@ -338,30 +338,37 @@ func orchestratorGrant(ctx context.Context, spec, ownRow string, deps OpenDepend
 }
 
 func chooseOpenName(ctx context.Context, host string, deps OpenDependencies, out, errout io.Writer) (string, error) {
+	name, _, err := chooseOpenSession(ctx, host, deps, out, errout)
+	return name, err
+}
+
+// chooseOpenSession is chooseOpenName that also reports whether the chosen
+// name is a session already running on host.
+func chooseOpenSession(ctx context.Context, host string, deps OpenDependencies, out, errout io.Writer) (string, bool, error) {
 	if deps.Picker == nil {
 		if deps.Remote == nil || deps.Store == nil {
-			return "", ErrPickerUnavailable
+			return "", false, ErrPickerUnavailable
 		}
 		listing, err := List(ctx, host, deps.Remote, deps.Store, deps.Rows)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		_, _ = io.WriteString(out, listing)
 		_, _ = fmt.Fprintf(errout, "no agtermctl for the picker — usage: agr open <host> <name>\n")
-		return "", ErrPickerUnavailable
+		return "", false, ErrPickerUnavailable
 	}
 	if deps.Remote == nil {
-		return "", errors.New("remote runner is unavailable")
+		return "", false, errors.New("remote runner is unavailable")
 	}
 	sessions, err := deps.Remote.Sessions(ctx, host)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	var bound []bindings.Binding
 	if deps.Store != nil {
 		bound, err = deps.Store.Load()
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
 	var tree []string
@@ -371,18 +378,25 @@ func chooseOpenName(ctx context.Context, host string, deps OpenDependencies, out
 	result, err := deps.Picker.Pick(ctx, ItemsFor(host, sessions, bound, tree),
 		"session on "+host+" — or type a new name")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
+	name := ""
 	switch result.Kind {
 	case "picked":
-		return result.ID, nil
+		name = result.ID
 	case "custom":
-		return result.Query, nil
+		name = result.Query
 	case "cancelled":
-		return "", agterm.ErrCancelled
+		return "", false, agterm.ErrCancelled
 	default:
-		return "", fmt.Errorf("unexpected picker result %q", result.Kind)
+		return "", false, fmt.Errorf("unexpected picker result %q", result.Kind)
 	}
+	for _, session := range sessions {
+		if session.Name == name {
+			return name, true, nil
+		}
+	}
+	return name, false, nil
 }
 
 func localMoshPath(deps OpenDependencies) string {

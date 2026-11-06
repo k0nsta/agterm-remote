@@ -11,6 +11,7 @@ import (
 
 	"github.com/k0nsta/agterm-remote/internal/agterm"
 	"github.com/k0nsta/agterm-remote/internal/remote"
+	"github.com/k0nsta/agterm-remote/internal/settings"
 	"github.com/k0nsta/agterm-remote/internal/token"
 )
 
@@ -27,6 +28,8 @@ type NewDependencies struct {
 	Opener     RowOpener
 	Closer     RowCloser
 	Panes      Panes
+	// StartCommands are offered for a new session besides a shell.
+	StartCommands []settings.StartCommand
 	// Agr is the absolute path of this binary, typed into the new row: its
 	// shell may not have it on PATH.
 	Agr string
@@ -40,8 +43,8 @@ type NewDependencies struct {
 
 const defaultSessionsTimeout = 15 * time.Second
 
-// New opens remote work in a new row: it asks for a host, a session on it
-// and a workspace, then creates the row (right after row when its workspace
+// New opens remote work in a new row: it asks for a host, a session on it,
+// for a new session what it starts (see pickStart), and a workspace, then creates the row (right after row when its workspace
 // is kept) and types `<agr> open <host> <name>` into its shell. The shell is
 // the user's login shell, so mosh is on PATH and a failed attach stays
 // readable there. Every question comes before the row exists, so a cancel
@@ -63,7 +66,7 @@ func New(ctx context.Context, row string, deps NewDependencies) error {
 	if timeout <= 0 {
 		timeout = defaultSessionsTimeout
 	}
-	name, err := chooseOpenName(ctx, host, OpenDependencies{
+	name, existing, err := chooseOpenSession(ctx, host, OpenDependencies{
 		Remote: timedSessions{OpenerRemote: deps.Remote, timeout: timeout},
 		Picker: deps.Picker, Rows: deps.Rows, Store: deps.Store,
 	}, io.Discard, io.Discard)
@@ -73,11 +76,21 @@ func New(ctx context.Context, row string, deps NewDependencies) error {
 	if !token.Valid(name) {
 		return fmt.Errorf("invalid name %q (use [A-Za-z0-9_.-])", name)
 	}
+	argv := []string{deps.Agr, "open", host, name}
+	if !existing {
+		command, err := pickStart(ctx, name, deps.StartCommands, deps.Picker)
+		if err != nil {
+			return err
+		}
+		if command != "" {
+			argv = append(argv, "--command", command)
+		}
+	}
 	place, err := pickWorkspace(ctx, row, name, deps)
 	if err != nil {
 		return err
 	}
-	line := remote.QuoteRemoteCommand(deps.Agr, "open", host, name)
+	line := remote.QuoteRemoteCommand(argv...)
 	if !remote.Printable(line) {
 		return fmt.Errorf("refusing to type a non-printable command %q", line)
 	}
@@ -164,6 +177,59 @@ func pickHost(ctx context.Context, row string, deps NewDependencies) (string, er
 		return "", fmt.Errorf("invalid remote host %q", host)
 	}
 	return host, nil
+}
+
+// startShell is the start picker's first entry: no command, a login shell.
+const startShell = "shell"
+
+// pickStart asks what a new session runs: a plain shell (first, so Enter
+// keeps the default), one of the user's start commands, or a command typed
+// into the picker. Without start commands it asks nothing. {name} becomes the
+// session name, so a program can take the row's name. It returns the
+// --command for agr open, empty for a shell. The host runs --command with
+// sh -c, so the command goes through the user's login and interactive shell
+// to see their PATH.
+func pickStart(ctx context.Context, name string, starts []settings.StartCommand, picker Picker) (string, error) {
+	if len(starts) == 0 {
+		return "", nil
+	}
+	items := []agterm.PickItem{{ID: startShell, Label: startShell, Subtitle: "login shell"}}
+	commands := map[string]string{}
+	for _, start := range starts {
+		if start.Name == "" || start.Name == startShell || commands[start.Name] != "" {
+			return "", fmt.Errorf("start_commands: invalid or repeated name %q", start.Name)
+		}
+		command := expandStart(start.Command, name)
+		if strings.TrimSpace(command) == "" {
+			return "", fmt.Errorf("start_commands: %q has no command", start.Name)
+		}
+		commands[start.Name] = command
+		items = append(items, agterm.PickItem{ID: start.Name, Label: start.Name, Subtitle: command})
+	}
+	result, err := picker.Pick(ctx, items, "start "+name+" with — or type a command")
+	if err != nil {
+		return "", err
+	}
+	command := ""
+	switch result.Kind {
+	case "picked":
+		if result.ID == startShell {
+			return "", nil
+		}
+		command = commands[result.ID]
+	case "custom":
+		command = expandStart(strings.TrimSpace(result.Query), name)
+	default:
+		return "", fmt.Errorf("unexpected picker result %q", result.Kind)
+	}
+	if command == "" || !remote.Printable(command) {
+		return "", fmt.Errorf("invalid start command %q", command)
+	}
+	return `"${SHELL:-/bin/sh}" -lic ` + remote.QuoteRemoteCommand(command), nil
+}
+
+func expandStart(command, name string) string {
+	return strings.ReplaceAll(command, "{name}", name)
 }
 
 // pickWorkspace offers the window's workspaces, the row's own first; keeping
