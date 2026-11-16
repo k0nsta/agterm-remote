@@ -39,7 +39,7 @@ assert_eq 0a1b-2c3d "$(sed -n 's/^claude_session=//p' "$state")" 'a Claude hook 
 reboot
 attach
 assert_eq "agr: restoring work in $proj, resuming Claude" "$(restored)" 'a recreated session says what it restores'
-assert_contains 'claude --resume 0a1b-2c3d' "$("$REAL_TMUX" -L agr-test display-message -p -t '=work:' '#{pane_start_command}')" 'the recreated session resumes the conversation'
+assert_contains 'claude --resume 0a1b-2c3d || claude' "$("$REAL_TMUX" -L agr-test display-message -p -t '=work:' '#{pane_start_command}')" 'the recreated session resumes the conversation, or starts a new one'
 assert_eq "$proj" "$("$REAL_TMUX" -L agr-test display-message -p -t '=work:' '#{pane_start_path}')" 'the recreated session starts in the project directory'
 
 TMUX_PANE=$(pane_of work)
@@ -79,7 +79,9 @@ fi
 mkdir -p "$proj"
 now=$(date +%s)
 printf 'cwd=%s\nagent=claude\nat=%s\n' "$proj" "$((now - 60))" > "$HOME/.cache/agr/sessions/api"
-printf 'cwd=/nowhere\nat=%s\n' "$now" > "$HOME/.cache/agr/sessions/gone"
+printf 'cwd=/nowhere\n' > "$HOME/.cache/agr/sessions/gone"
+printf 'cwd=%s\n' "$proj" > "$HOME/.cache/agr/sessions/dated"
+touch -t 202001010000 "$HOME/.cache/agr/sessions/dated"
 printf 'cwd=%s\nat=%s\n' "$proj" "$((now - 40 * 86400))" > "$HOME/.cache/agr/sessions/ancient"
 listing=$(run_agr remembered | sed '1d')
 api_line=$(printf '%s\n' "$listing" | grep '^api	')
@@ -88,6 +90,9 @@ assert_eq 1 "$(printf '%s' "$api_line" | cut -f5)" 'remembered says the director
 age=$(printf '%s' "$api_line" | cut -f2)
 [ "$age" -ge 60 ] && [ "$age" -lt 120 ] || { printf 'wrong age %s\n' "$age" >&2; exit 1; }
 assert_eq 0 "$(printf '%s\n' "$listing" | grep '^gone	' | cut -f5)" 'a deleted directory is flagged'
+age=$(printf '%s\n' "$listing" | grep '^gone	' | cut -f2)
+[ "$age" -lt 60 ] || { printf 'a memory without a time is %s s old\n' "$age" >&2; exit 1; }
+assert_not_contains 'dated' "$listing" 'a memory without a time ages by its file date'
 assert_not_contains 'ancient' "$listing" 'a memory older than 30 days is not listed'
 if [ -e "$HOME/.cache/agr/sessions/ancient" ]; then
 	printf '%s\n' 'an expired memory was kept' >&2

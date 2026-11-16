@@ -218,7 +218,7 @@ remembered() {
 		valid_token "$name" || continue
 		at=$(recall "$name" at)
 		case "$at" in
-			''|*[!0-9]*) at=$now ;;
+			''|*[!0-9]*) at=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || printf '%s' "$now") ;;
 		esac
 		age=$((now - at))
 		[ "$age" -ge 0 ] || age=0
@@ -265,7 +265,9 @@ restore_session() {
 		id=$(recall "$1" claude_session)
 		case "$id" in
 			''|*[!0-9A-Fa-f-]*) resume='claude --continue' ;;
-			*) resume="claude --resume $id" ;;
+			# A conversation that never saved a message cannot be resumed:
+			# start a new one in its place rather than leave a bare shell.
+			*) resume="claude --resume $id || claude" ;;
 		esac
 		attach_command="\"\${SHELL:-/bin/sh}\" -lc '$resume'"
 		restored="${restored:+$restored, }resuming Claude"
