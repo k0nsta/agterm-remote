@@ -55,8 +55,18 @@ func MergeHooks(existing []byte) (merged []byte, changed bool, err error) {
 		{event: "PostToolUse", state: "active", args: " --blink"},
 		{event: "Notification", state: "blocked"},
 		{event: "Stop", state: "completed", args: " --auto-reset"},
+		// SessionStart and SessionEnd tell the host when the agent runs, so a
+		// session recreated after a reboot resumes it, and only while it ran.
+		{event: "SessionStart", state: "agent-start"},
+		{event: "SessionEnd", state: "agent-end"},
 	} {
 		wantCommand := agrHookPath + " status " + wanted.state + wanted.args
+		switch wanted.state {
+		case "agent-start":
+			wantCommand = agrHookPath + " agent start"
+		case "agent-end":
+			wantCommand = agrHookPath + " agent end"
+		}
 		var didChange bool
 		didChange, err = mergeHookEvent(hookConfig, wanted.event, wanted.state, wantCommand)
 		if err != nil {
@@ -150,6 +160,14 @@ func agrHookState(command string) string {
 			continue
 		}
 		stateIndex := index + 1
+		if stateIndex+1 < len(parts) && parts[stateIndex] == "agent" {
+			switch parts[stateIndex+1] {
+			case "start":
+				return "agent-start"
+			case "end":
+				return "agent-end"
+			}
+		}
 		if stateIndex < len(parts) && parts[stateIndex] == "status" {
 			stateIndex++
 		}

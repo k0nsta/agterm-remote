@@ -9,7 +9,7 @@ have() {
 
 usage() {
 	printf '%s\n' "agr $AGR_VERSION — remote session bridge" >&2
-	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|paste-put|status|ctl|--version} ..." >&2
+	printf '%s\n' "usage: agr {attach|sessions|remembered|cwd|reap|paste-put|status|agent|ctl|--version} ..." >&2
 	exit "${1:-2}"
 }
 
@@ -165,9 +165,121 @@ tmux_clipboard_override() {
 	esac
 }
 
+# Session memory: where a session worked and whether Claude ran in it, kept on
+# disk so attach can recreate a session that a host reboot killed. One file per
+# session name with key=value lines; the agent hooks keep it current.
+AGR_STATE_DIR=$HOME/.cache/agr/sessions
+
+# remember NAME KEY VALUE sets one line of NAME's file; an empty VALUE drops it.
+remember() {
+	valid_token "$1" || return 0
+	case "$3" in
+		*'
+'*) return 0 ;;
+	esac
+	mkdir -p "$AGR_STATE_DIR" 2>/dev/null || return 0
+	f=$AGR_STATE_DIR/$1
+	tmp=$f.$$
+	if {
+		if [ -f "$f" ]; then grep -v -e "^$2=" -e '^at=' "$f" || :; fi
+		if [ -n "$3" ]; then printf '%s=%s\n' "$2" "$3"; fi
+		printf 'at=%s\n' "$(date +%s)"
+	} >"$tmp" 2>/dev/null; then
+		mv -f "$tmp" "$f" 2>/dev/null || rm -f "$tmp"
+	else
+		rm -f "$tmp"
+	fi
+	return 0
+}
+
+# recall NAME KEY prints KEY's value from NAME's file, or nothing.
+recall() {
+	[ -f "$AGR_STATE_DIR/$1" ] || return 0
+	sed -n "s/^$2=//p" "$AGR_STATE_DIR/$1" | sed -n '1p'
+}
+
+forget() {
+	valid_token "$1" || return 0
+	rm -f "$AGR_STATE_DIR/$1"
+}
+
+# AGR_STATE_TTL drops the memory of a session nobody touched for 30 days.
+AGR_STATE_TTL=2592000
+
+# remembered prints one line per remembered session: name, seconds since it
+# was last active, its directory, its agent, and 1 when the directory still
+# exists. Memories older than AGR_STATE_TTL are removed instead.
+remembered() {
+	[ -d "$AGR_STATE_DIR" ] || return 0
+	now=$(date +%s)
+	for f in "$AGR_STATE_DIR"/*; do
+		[ -f "$f" ] || continue
+		name=${f##*/}
+		valid_token "$name" || continue
+		at=$(recall "$name" at)
+		case "$at" in
+			''|*[!0-9]*) at=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || printf '%s' "$now") ;;
+		esac
+		age=$((now - at))
+		[ "$age" -ge 0 ] || age=0
+		if [ "$age" -gt "$AGR_STATE_TTL" ]; then
+			rm -f "$f"
+			continue
+		fi
+		dir=$(recall "$name" cwd)
+		case "$dir" in
+			*'	'*) dir= ;;
+		esac
+		exists=0
+		[ -z "$dir" ] || [ ! -d "$dir" ] || exists=1
+		printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$age" "$dir" "$(recall "$name" agent)" "$exists"
+	done
+}
+
+# remember_agent records, from a Claude Code hook, where the agent works and
+# its conversation id (from the hook's JSON on stdin), so a recreated session
+# can resume it.
+remember_agent() {
+	[ -n "${CLAUDE_PROJECT_DIR:-}" ] || return 0
+	remember "$1" cwd "$CLAUDE_PROJECT_DIR"
+	remember "$1" agent claude
+	[ ! -t 0 ] || return 0
+	id=$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([0-9A-Fa-f-]*\)".*/\1/p' | sed -n '1p')
+	[ -z "$id" ] || remember "$1" claude_session "$id"
+	return 0
+}
+
+# restore_session fills in what a session that no longer exists was doing:
+# its directory, and Claude resumed in it. --cwd, --command and --fresh win.
+restore_session() {
+	[ "$attach_fresh" = 0 ] || return 0
+	[ -f "$AGR_STATE_DIR/$1" ] || return 0
+	restored=
+	if [ -z "$attach_cwd" ]; then
+		dir=$(recall "$1" cwd)
+		case "$dir" in
+			/*) if [ -d "$dir" ]; then attach_cwd=$dir; restored="in $dir"; fi ;;
+		esac
+	fi
+	if [ -z "$attach_command" ] && [ "$(recall "$1" agent)" = claude ]; then
+		id=$(recall "$1" claude_session)
+		case "$id" in
+			''|*[!0-9A-Fa-f-]*) resume='claude --continue' ;;
+			# A conversation that never saved a message cannot be resumed:
+			# start a new one in its place rather than leave a bare shell.
+			*) resume="claude --resume $id || claude" ;;
+		esac
+		attach_command="\"\${SHELL:-/bin/sh}\" -lc '$resume'"
+		restored="${restored:+$restored, }resuming Claude"
+	fi
+	[ -z "$restored" ] || printf 'agr: restoring %s %s\n' "$1" "$restored" >&2
+	return 0
+}
+
 tmux_attach() {
 	n=$1
 	if ! tmux has-session -t "=$n" 2>/dev/null; then
+		restore_session "$n"
 		set -- new-session -d -s "$n"
 		if [ -n "$attach_cwd" ]; then
 			# -c is format-expanded: a literal # must be doubled, or a path
@@ -184,6 +296,10 @@ EOF
 exec \"\${SHELL:-/bin/sh}\" -l"
 		tmux "$@"
 	else
+		dir=$(tmux_cwd "$n")
+		case "$dir" in
+			/*) remember "$n" cwd "$dir" ;;
+		esac
 		# A re-attach reaches new windows and panes only; the running shell
 		# keeps the values it started with.
 		while IFS= read -r pair; do
@@ -262,14 +378,18 @@ tmux_reap() {
 			return 1
 		fi
 		tmux kill-session -t "=$n"
+		forget "$n"
 		printf 'killed %s\n' "$n"
+	elif [ -f "$AGR_STATE_DIR/$n" ]; then
+		forget "$n"
+		printf 'forgot %s\n' "$n"
 	elif [ -z "$children" ]; then
 		printf "agr: no session '%s'\n" "$n" >&2
 		return "$AGR_NO_SESSION"
 	fi
 	while IFS= read -r child; do
 		[ -n "$child" ] || continue
-		tmux kill-session -t "=$child" 2>/dev/null && printf 'killed %s\n' "$child"
+		tmux kill-session -t "=$child" 2>/dev/null && forget "$child" && printf 'killed %s\n' "$child"
 	done <<EOF
 $children
 EOF
@@ -340,6 +460,7 @@ tmux_status() {
 	if ! tmux set-option -t "=$n:" @agr_state "$label" 2>/dev/null; then
 		exit 0
 	fi
+	remember_agent "$n"
 	relay "$n" "$state" "$@"
 	exit 0
 }
@@ -478,6 +599,8 @@ zmx_attach() {
 	fresh=1
 	if zmx_line "$n" >/dev/null; then
 		fresh=0
+	else
+		restore_session "$n"
 	fi
 	zmx_set_labels "$n" || true
 	# A new zmx session starts its shell in the caller's directory; an
@@ -584,14 +707,18 @@ zmx_reap() {
 			return 1
 		fi
 		zmx kill "$n"
+		forget "$n"
 		printf 'killed %s\n' "$n"
+	elif [ -f "$AGR_STATE_DIR/$n" ]; then
+		forget "$n"
+		printf 'forgot %s\n' "$n"
 	elif [ -z "$children" ]; then
 		printf "agr: no session '%s'\n" "$n" >&2
 		return "$AGR_NO_SESSION"
 	fi
 	while IFS= read -r child; do
 		[ -n "$child" ] || continue
-		zmx kill "$child" 2>/dev/null && printf 'killed %s\n' "$child"
+		zmx kill "$child" 2>/dev/null && forget "$child" && printf 'killed %s\n' "$child"
 	done <<EOF
 $children
 EOF
@@ -615,6 +742,7 @@ zmx_status() {
 	if ! zmx set "$ZMX_SESSION" "agr_state=$label" 2>/dev/null; then
 		exit 0
 	fi
+	remember_agent "$ZMX_SESSION"
 	relay "$ZMX_SESSION" "$state" "$@"
 	exit 0
 }
@@ -818,6 +946,7 @@ except KeyboardInterrupt:
 }
 
 attach_cwd=
+attach_fresh=0
 attach_parent=
 attach_env=
 attach_command=
@@ -857,6 +986,10 @@ parse_attach_options() {
 					/*) [ ! -d "$2" ] || attach_cwd=$2 ;;
 				esac
 				shift 2
+				;;
+			--fresh)
+				attach_fresh=1
+				shift
 				;;
 			--parent)
 				[ "$#" -ge 2 ] || usage 2
@@ -921,6 +1054,11 @@ dispatch() {
 				*) printf 'agr: unsupported multiplexer %s\n' "$AGR_MUX" >&2; exit 2 ;;
 			esac
 			;;
+		remembered)
+			[ "$#" -eq 0 ] || usage 2
+			header
+			remembered
+			;;
 		reap)
 			[ "$#" -eq 1 ] || usage 2
 			valid_token "$1" || { printf '%s\n' 'agr: invalid session name' >&2; exit 2; }
@@ -933,6 +1071,28 @@ dispatch() {
 			;;
 		paste-put)
 			paste_put "$@"
+			;;
+		agent)
+			# Claude Code's SessionStart and SessionEnd hooks: record the
+			# agent as soon as it starts (or resumes), and forget it when it
+			# leaves, so a recreated session resumes only a running agent.
+			[ "$#" -eq 1 ] || exit 2
+			case "$1" in
+				start|end) ;;
+				*) exit 2 ;;
+			esac
+			case "$AGR_MUX" in
+				tmux) n=$(tmux_current_session) || exit 0 ;;
+				zmx) zmx_current_session >/dev/null || exit 0; n=$ZMX_SESSION ;;
+				*) exit 0 ;;
+			esac
+			if [ "$1" = start ]; then
+				remember_agent "$n"
+			else
+				remember "$n" agent ""
+				remember "$n" claude_session ""
+			fi
+			exit 0
 			;;
 		status)
 			[ "$#" -ge 1 ] || exit 0

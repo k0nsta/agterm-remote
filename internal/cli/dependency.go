@@ -41,6 +41,12 @@ type Sessions interface {
 	Reap(ctx context.Context, host, name string) error
 }
 
+// RememberedLister lists the sessions a host remembers. A Sessions that
+// implements it lets ls show the ones a reboot stopped.
+type RememberedLister interface {
+	Remembered(ctx context.Context, host string) ([]remote.Remembered, error)
+}
+
 // Installer installs the embedded remote agr script and its hooks.
 type Installer interface {
 	InstallResult(ctx context.Context, host, mux string) (remote.InstallResult, error)

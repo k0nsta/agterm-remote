@@ -94,3 +94,20 @@ func TestParseSessionsRejectsInvalidNumber(t *testing.T) {
 		t.Fatalf("ParseSessions() error = %q, want line number", err)
 	}
 }
+
+func TestParseRemembered(t *testing.T) {
+	t.Helper()
+	got, err := ParseRemembered([]byte("api\t60\t/home/me/api\tclaude\t1\nbad name\t1\t/x\t\t1\nold\t5\t\t\t0\n"))
+	if err != nil {
+		t.Fatalf("ParseRemembered() error = %v", err)
+	}
+	if len(got) != 2 || got[0] != (Remembered{Name: "api", IdleSecs: 60, Dir: "/home/me/api", Agent: "claude", DirExists: true}) || got[1].Name != "old" || got[1].DirExists {
+		t.Fatalf("ParseRemembered() = %+v", got)
+	}
+	if got, err := ParseRemembered(nil); err != nil || len(got) != 0 {
+		t.Fatalf("ParseRemembered(empty) = %+v, %v", got, err)
+	}
+	if _, err := ParseRemembered([]byte("a\tx\t/d\t\t1\n")); err == nil {
+		t.Fatal("ParseRemembered() accepted a bad age")
+	}
+}

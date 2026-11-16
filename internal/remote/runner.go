@@ -250,6 +250,15 @@ func (r *Runner) Sessions(ctx context.Context, host string) ([]Session, error) {
 	return ParseSessions(body)
 }
 
+// Remembered lists the sessions the host remembers, running or not.
+func (r *Runner) Remembered(ctx context.Context, host string) ([]Remembered, error) {
+	body, err := r.Data(ctx, host, "remembered")
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemembered(body)
+}
+
 // Reap removes one agr-owned remote session. The remote refusal error is
 // intentionally returned unchanged so callers can show its stderr text.
 func (r *Runner) Reap(ctx context.Context, host, name string) error {

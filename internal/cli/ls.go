@@ -30,7 +30,14 @@ func List(ctx context.Context, host string, sessions Sessions, store BindingStor
 	if err != nil {
 		return "", err
 	}
-	if len(items) == 0 {
+	// An older host has no memory; ls then shows the running sessions only.
+	var stopped []remote.Remembered
+	if lister, ok := sessions.(RememberedLister); ok {
+		if remembered, err := lister.Remembered(ctx, host); err == nil {
+			stopped = notRunning(remembered, items)
+		}
+	}
+	if len(items) == 0 && len(stopped) == 0 {
 		return fmt.Sprintf("no agr sessions on '%s'\n", host), nil
 	}
 	bound, err := store.Load()
@@ -45,7 +52,53 @@ func List(ctx context.Context, host string, sessions Sessions, store BindingStor
 			treeAvailable = true
 		}
 	}
-	return RenderSessions(host, items, bound, live, treeAvailable), nil
+	out := ""
+	if len(items) > 0 {
+		out = RenderSessions(host, items, bound, live, treeAvailable)
+	}
+	return out + RenderStopped(host, stopped, bound, live, treeAvailable), nil
+}
+
+func notRunning(remembered []remote.Remembered, running []remote.Session) []remote.Remembered {
+	up := make(map[string]struct{}, len(running))
+	for _, session := range running {
+		up[session.Name] = struct{}{}
+	}
+	var out []remote.Remembered
+	for _, memory := range remembered {
+		if _, ok := up[memory.Name]; !ok {
+			out = append(out, memory)
+		}
+	}
+	return out
+}
+
+// RenderStopped renders the sessions a host remembers but no longer runs:
+// `agr open <host> <name>` brings each back as ON OPEN says. ROW is "bound"
+// while an agterm tab still belongs to it, so a forgotten one stands out.
+func RenderStopped(host string, stopped []remote.Remembered, bound []bindings.Binding, live []string, treeAvailable bool) string {
+	if len(stopped) == 0 {
+		return ""
+	}
+	liveSet := make(map[string]struct{}, len(live))
+	for _, row := range live {
+		liveSet[row] = struct{}{}
+	}
+	var out strings.Builder
+	fmt.Fprintf(&out, "\nstopped (agr open %s <name> restores; agr kill %s <name> forgets):\n", host, host)
+	fmt.Fprintf(&out, "%-16s %-7s %-28s %-16s %s\n", "NAME", "ACTIVE", "DIR", "ON OPEN", "ROW")
+	for _, memory := range stopped {
+		dir, onOpen := memory.Dir, "shell"
+		if dir == "" || !memory.DirExists {
+			dir, onOpen = "-", "shell in home"
+		}
+		if memory.Agent == "claude" {
+			onOpen = "resumes Claude"
+		}
+		row := bindingState(host, memory.Name, bound, liveSet, treeAvailable)
+		fmt.Fprintf(&out, "%-16s %-7s %-28s %-16s %s\n", memory.Name, HumanizeSecs(memory.IdleSecs)+" ago", dir, onOpen, row)
+	}
+	return out.String()
 }
 
 // RenderSessions renders the stable agr ls table. When treeAvailable is

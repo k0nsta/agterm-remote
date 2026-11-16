@@ -306,6 +306,34 @@ agr run <host> [--cwd <dir>] -- make test                   # one-shot ssh -t, e
 `--command` and the environment need the host's agr to be 1.3.0 or newer
 (`agr install <host>`).
 
+### After the host reboots
+
+A reboot ends every remote session; `agr open <host> <name>` brings each one
+back. The host remembers where the session worked and, when Claude was running,
+its conversation, so the new session starts in that directory with
+`claude --resume <id>`:
+
+```sh
+agr open <host> api            # agr: restoring api in /home/me/api, resuming Claude
+agr open <host> api --fresh    # start in the home directory, resume nothing
+```
+
+`agr ls <host>` lists the remembered sessions that no longer run, with when
+they were last active and whether an agterm tab still belongs to them (ROW
+`bound`), so a tab you closed and forgot stands out:
+
+```text
+stopped (agr open myhost <name> restores; agr kill myhost <name> forgets):
+NAME             ACTIVE  DIR                          ON OPEN          ROW
+api              12m ago /home/me/api                 resumes Claude   bound
+old-poc          19d ago /home/me/poc                 shell            -
+```
+
+`--cwd` and `--command` win over what is remembered, a deleted directory is
+skipped, `agr kill` / `agr end` forget the session, and a memory nobody touched
+for 30 days is dropped. It needs agr 1.5.0 on the
+host (`agr install <host>`), whose Claude hooks also record when Claude quits.
+
 ### Handing off to a local agent
 
 A remote session may `session type` into a local pane that runs `claude` or
