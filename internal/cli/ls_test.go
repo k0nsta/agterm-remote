@@ -126,3 +126,68 @@ func TestRenderSessionsSplitRowListsClosedRowOnce(t *testing.T) {
 		t.Fatalf("footer = %q, want %q", got, want)
 	}
 }
+
+// fakeRememberingSessions is a host that remembers sessions a reboot stopped.
+type fakeRememberingSessions struct {
+	fakeCLISessions
+	remembered []remote.Remembered
+	err        error
+}
+
+func (f *fakeRememberingSessions) Remembered(_ context.Context, _ string) ([]remote.Remembered, error) {
+	return f.remembered, f.err
+}
+
+func TestListShowsStoppedSessionsAfterAReboot(t *testing.T) {
+	t.Helper()
+	dirs := pathstest.Dirs(t)
+	store := bindings.New(dirs)
+	if err := store.Save([]bindings.Binding{{Row: "row-api", Host: "home", Name: "api", Pane: "left"}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sessions := &fakeRememberingSessions{
+		fakeCLISessions: fakeCLISessions{items: []remote.Session{{Name: "web", IdleSecs: 5}}},
+		remembered: []remote.Remembered{
+			{Name: "api", IdleSecs: 720, Dir: "/home/me/api", Agent: "claude", DirExists: true},
+			{Name: "old", IdleSecs: 19 * 86400, Dir: "/gone", DirExists: false},
+			{Name: "web", IdleSecs: 1, Dir: "/home/me/web", DirExists: true},
+		},
+	}
+	output, err := List(context.Background(), "home", sessions, store, &fakeCLIRows{items: []string{"row-api"}})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	for _, want := range []string{
+		"stopped (agr open home <name> restores; agr kill home <name> forgets):",
+		"api              12m ago /home/me/api                 resumes Claude   bound",
+		"old              19d ago -                            shell in home    -",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("List() output lacks %q:\n%s", want, output)
+		}
+	}
+	if strings.Count(output, "web") != 1 {
+		t.Fatalf("a running session is listed as stopped too:\n%s", output)
+	}
+}
+
+func TestListShowsOnlyStoppedSessionsWhenNoneRun(t *testing.T) {
+	t.Helper()
+	sessions := &fakeRememberingSessions{remembered: []remote.Remembered{{Name: "api", Dir: "/srv/api", DirExists: true}}}
+	output, err := List(context.Background(), "home", sessions, bindings.New(pathstest.Dirs(t)), nil)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if strings.Contains(output, "no agr sessions") || !strings.Contains(output, "api ") || strings.Contains(output, "ATT") {
+		t.Fatalf("List() = %q, want only the stopped section", output)
+	}
+}
+
+func TestListIgnoresAHostWithoutMemory(t *testing.T) {
+	t.Helper()
+	sessions := &fakeRememberingSessions{err: errors.New("agr: unknown command remembered")}
+	output, err := List(context.Background(), "home", sessions, bindings.New(pathstest.Dirs(t)), nil)
+	if err != nil || output != "no agr sessions on 'home'\n" {
+		t.Fatalf("List() = %q, %v, want the plain empty message from an older host", output, err)
+	}
+}

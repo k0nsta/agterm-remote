@@ -74,3 +74,25 @@ if [ -e "$state" ]; then
 	printf '%s\n' 'reap left the session memory behind' >&2
 	exit 1
 fi
+
+# remembered lists what a reboot left: age, directory, agent, directory kept.
+mkdir -p "$proj"
+now=$(date +%s)
+printf 'cwd=%s\nagent=claude\nat=%s\n' "$proj" "$((now - 60))" > "$HOME/.cache/agr/sessions/api"
+printf 'cwd=/nowhere\nat=%s\n' "$now" > "$HOME/.cache/agr/sessions/gone"
+printf 'cwd=%s\nat=%s\n' "$proj" "$((now - 40 * 86400))" > "$HOME/.cache/agr/sessions/ancient"
+listing=$(run_agr remembered | sed '1d')
+api_line=$(printf '%s\n' "$listing" | grep '^api	')
+assert_eq claude "$(printf '%s' "$api_line" | cut -f4)" 'remembered names the agent'
+assert_eq 1 "$(printf '%s' "$api_line" | cut -f5)" 'remembered says the directory still exists'
+age=$(printf '%s' "$api_line" | cut -f2)
+[ "$age" -ge 60 ] && [ "$age" -lt 120 ] || { printf 'wrong age %s\n' "$age" >&2; exit 1; }
+assert_eq 0 "$(printf '%s\n' "$listing" | grep '^gone	' | cut -f5)" 'a deleted directory is flagged'
+assert_not_contains 'ancient' "$listing" 'a memory older than 30 days is not listed'
+if [ -e "$HOME/.cache/agr/sessions/ancient" ]; then
+	printf '%s\n' 'an expired memory was kept' >&2
+	exit 1
+fi
+
+assert_eq 'forgot api' "$(run_agr reap api | sed '1d')" 'reap forgets a stopped session'
+assert_not_contains 'api' "$(run_agr remembered)" 'a forgotten session is not listed'

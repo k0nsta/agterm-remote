@@ -71,3 +71,40 @@ func ParseSessions(body []byte) ([]Session, error) {
 
 	return sessions, nil
 }
+
+// Remembered is a session the host remembers but that may no longer run: what
+// a reboot left behind, which `attach` would restore.
+type Remembered struct {
+	Name string
+	// IdleSecs is how long ago its agent or an attach last touched it.
+	IdleSecs int
+	Dir      string
+	Agent    string
+	// DirExists is false when the directory is gone, so it is not restored.
+	DirExists bool
+}
+
+// ParseRemembered decodes the remote remembered command: name, seconds since
+// last active, directory, agent, and 1 when the directory exists.
+func ParseRemembered(body []byte) ([]Remembered, error) {
+	text := strings.TrimSuffix(string(body), "\n")
+	if text == "" {
+		return []Remembered{}, nil
+	}
+	var out []Remembered
+	for lineNumber, line := range strings.Split(text, "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 5 {
+			return nil, fmt.Errorf("parse remembered line %d: expected 5 tab-separated fields, got %d", lineNumber+1, len(fields))
+		}
+		if !token.Valid(fields[0]) {
+			continue
+		}
+		idle, err := strconv.Atoi(fields[1])
+		if err != nil {
+			return nil, fmt.Errorf("parse remembered line %d age %q: %w", lineNumber+1, fields[1], err)
+		}
+		out = append(out, Remembered{Name: fields[0], IdleSecs: idle, Dir: fields[2], Agent: fields[3], DirExists: fields[4] == "1"})
+	}
+	return out, nil
+}

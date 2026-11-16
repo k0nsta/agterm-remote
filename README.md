@@ -318,8 +318,20 @@ agr open <host> api            # agr: restoring api in /home/me/api, resuming Cl
 agr open <host> api --fresh    # start in the home directory, resume nothing
 ```
 
+`agr ls <host>` lists the remembered sessions that no longer run, with when
+they were last active and whether an agterm tab still belongs to them (ROW
+`bound`), so a tab you closed and forgot stands out:
+
+```text
+stopped (agr open myhost <name> restores; agr kill myhost <name> forgets):
+NAME             ACTIVE  DIR                          ON OPEN          ROW
+api              12m ago /home/me/api                 resumes Claude   bound
+old-poc          19d ago /home/me/poc                 shell            -
+```
+
 `--cwd` and `--command` win over what is remembered, a deleted directory is
-skipped, and `agr kill` / `agr end` forget the session. It needs agr 1.5.0 on the
+skipped, `agr kill` / `agr end` forget the session, and a memory nobody touched
+for 30 days is dropped. It needs agr 1.5.0 on the
 host (`agr install <host>`), whose Claude hooks also record when Claude quits.
 
 ### Handing off to a local agent

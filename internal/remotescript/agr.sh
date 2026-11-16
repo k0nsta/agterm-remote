@@ -9,7 +9,7 @@ have() {
 
 usage() {
 	printf '%s\n' "agr $AGR_VERSION — remote session bridge" >&2
-	printf '%s\n' "usage: agr {attach|sessions|cwd|reap|paste-put|status|agent|ctl|--version} ..." >&2
+	printf '%s\n' "usage: agr {attach|sessions|remembered|cwd|reap|paste-put|status|agent|ctl|--version} ..." >&2
 	exit "${1:-2}"
 }
 
@@ -181,8 +181,9 @@ remember() {
 	f=$AGR_STATE_DIR/$1
 	tmp=$f.$$
 	if {
-		if [ -f "$f" ]; then grep -v "^$2=" "$f" || :; fi
+		if [ -f "$f" ]; then grep -v -e "^$2=" -e '^at=' "$f" || :; fi
 		if [ -n "$3" ]; then printf '%s=%s\n' "$2" "$3"; fi
+		printf 'at=%s\n' "$(date +%s)"
 	} >"$tmp" 2>/dev/null; then
 		mv -f "$tmp" "$f" 2>/dev/null || rm -f "$tmp"
 	else
@@ -200,6 +201,39 @@ recall() {
 forget() {
 	valid_token "$1" || return 0
 	rm -f "$AGR_STATE_DIR/$1"
+}
+
+# AGR_STATE_TTL drops the memory of a session nobody touched for 30 days.
+AGR_STATE_TTL=2592000
+
+# remembered prints one line per remembered session: name, seconds since it
+# was last active, its directory, its agent, and 1 when the directory still
+# exists. Memories older than AGR_STATE_TTL are removed instead.
+remembered() {
+	[ -d "$AGR_STATE_DIR" ] || return 0
+	now=$(date +%s)
+	for f in "$AGR_STATE_DIR"/*; do
+		[ -f "$f" ] || continue
+		name=${f##*/}
+		valid_token "$name" || continue
+		at=$(recall "$name" at)
+		case "$at" in
+			''|*[!0-9]*) at=$now ;;
+		esac
+		age=$((now - at))
+		[ "$age" -ge 0 ] || age=0
+		if [ "$age" -gt "$AGR_STATE_TTL" ]; then
+			rm -f "$f"
+			continue
+		fi
+		dir=$(recall "$name" cwd)
+		case "$dir" in
+			*'	'*) dir= ;;
+		esac
+		exists=0
+		[ -z "$dir" ] || [ ! -d "$dir" ] || exists=1
+		printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$age" "$dir" "$(recall "$name" agent)" "$exists"
+	done
 }
 
 # remember_agent records, from a Claude Code hook, where the agent works and
@@ -344,6 +378,9 @@ tmux_reap() {
 		tmux kill-session -t "=$n"
 		forget "$n"
 		printf 'killed %s\n' "$n"
+	elif [ -f "$AGR_STATE_DIR/$n" ]; then
+		forget "$n"
+		printf 'forgot %s\n' "$n"
 	elif [ -z "$children" ]; then
 		printf "agr: no session '%s'\n" "$n" >&2
 		return "$AGR_NO_SESSION"
@@ -670,6 +707,9 @@ zmx_reap() {
 		zmx kill "$n"
 		forget "$n"
 		printf 'killed %s\n' "$n"
+	elif [ -f "$AGR_STATE_DIR/$n" ]; then
+		forget "$n"
+		printf 'forgot %s\n' "$n"
 	elif [ -z "$children" ]; then
 		printf "agr: no session '%s'\n" "$n" >&2
 		return "$AGR_NO_SESSION"
@@ -1011,6 +1051,11 @@ dispatch() {
 				zmx) zmx_sessions ;;
 				*) printf 'agr: unsupported multiplexer %s\n' "$AGR_MUX" >&2; exit 2 ;;
 			esac
+			;;
+		remembered)
+			[ "$#" -eq 0 ] || usage 2
+			header
+			remembered
 			;;
 		reap)
 			[ "$#" -eq 1 ] || usage 2
