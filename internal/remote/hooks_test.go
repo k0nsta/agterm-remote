@@ -24,6 +24,10 @@ func TestMergeHooksTable(t *testing.T) {
 				`"UserPromptSubmit"`,
 				`$HOME/.local/bin/agr status active --blink`,
 				`$HOME/.local/bin/agr status blocked`,
+				`"SessionStart"`,
+				`$HOME/.local/bin/agr agent start`,
+				`"SessionEnd"`,
+				`$HOME/.local/bin/agr agent end`,
 			},
 		},
 		{
@@ -119,5 +123,20 @@ func TestMergeHooksEmptyInput(t *testing.T) {
 	merged, changed, err := MergeHooks(nil)
 	if err != nil || !changed || !json.Valid(merged) {
 		t.Fatalf("MergeHooks(nil) = changed %v, error %v, JSON %q", changed, err, merged)
+	}
+}
+
+func TestMergeHooksKeepsOneSessionEndHook(t *testing.T) {
+	t.Helper()
+	existing := `{"hooks":{"SessionEnd":[{"hooks":[{"type":"command","command":"/usr/local/bin/agr agent end"}]}]}}`
+	got, _, err := MergeHooks([]byte(existing))
+	if err != nil {
+		t.Fatalf("MergeHooks() error = %v", err)
+	}
+	if n := strings.Count(string(got), "agent end"); n != 1 {
+		t.Fatalf("MergeHooks() has %d agent end hooks, want the old one repointed:\n%s", n, got)
+	}
+	if !strings.Contains(string(got), "$HOME/.local/bin/agr agent end") {
+		t.Fatalf("MergeHooks() kept the old agr path:\n%s", got)
 	}
 }

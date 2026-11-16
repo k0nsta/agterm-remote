@@ -91,6 +91,8 @@ func TestParseOpenArgs(t *testing.T) {
 		{args: []string{"--parent", "a1", "host", "a1-2"}, positional: []string{"host", "a1-2"}, parent: "a1", ok: true},
 		{args: []string{"host", "--cwd"}},
 		{args: []string{"host", "--cwd", "/a", "--cwd", "/b"}},
+		{args: []string{"host", "w1", "--fresh"}, positional: []string{"host", "w1"}, ok: true},
+		{args: []string{"host", "--fresh", "--fresh"}},
 	} {
 		positional, opts, ok := parseOpenArgs(tc.args)
 		if ok != tc.ok || (ok && (len(positional) != len(tc.positional) || opts.Cwd != tc.cwd || opts.Parent != tc.parent)) {

@@ -52,11 +52,17 @@ type OpenOptions struct {
 	// Orchestrator is "<row>:<pane>" of a live local pane whose agent started
 	// this session: the host may type into it (an orchestrator grant).
 	Orchestrator string
+	// Fresh starts a session that no longer exists in the home directory,
+	// without resuming its agent (the host remembers both otherwise).
+	Fresh bool
 }
 
 // minEnvAgrVersion is the first remote agr whose attach takes --env and
 // --command. "dev" is a local build, which has them.
 const minEnvAgrVersion = "1.3.0"
+
+// minFreshAgrVersion is the first remote agr whose attach takes --fresh.
+const minFreshAgrVersion = "1.5.0"
 
 // agrVersionPattern is the shape of a release version; anything else but "dev"
 // is treated as too old, since the gate must not guess a remote can do more.
@@ -65,10 +71,20 @@ var agrVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+`)
 // SupportsEnvCommand reports whether a remote agr of this version accepts
 // attach --env and --command.
 func SupportsEnvCommand(agrVersion string) bool {
+	return atLeast(agrVersion, minEnvAgrVersion)
+}
+
+// supportsFresh reports whether a remote agr of this version accepts attach
+// --fresh.
+func supportsFresh(agrVersion string) bool {
+	return atLeast(agrVersion, minFreshAgrVersion)
+}
+
+func atLeast(agrVersion, minimum string) bool {
 	if agrVersion == "dev" {
 		return true
 	}
-	return agrVersionPattern.MatchString(agrVersion) && !agterm.VersionLess(agrVersion, minEnvAgrVersion)
+	return agrVersionPattern.MatchString(agrVersion) && !agterm.VersionLess(agrVersion, minimum)
 }
 
 // proxyEnvKeys are the agterm variables exported into the remote session, read
@@ -182,6 +198,10 @@ func Open(ctx context.Context, host, name string, opts OpenOptions, deps OpenDep
 		return fmt.Errorf("--command needs agr 1.3.0 or newer on %s (it has %q): run agr install %s",
 			host, info.AgrVersion, host)
 	}
+	if opts.Fresh && !supportsFresh(info.AgrVersion) {
+		return fmt.Errorf("--fresh needs agr %s or newer on %s (it has %q): run agr install %s",
+			minFreshAgrVersion, host, info.AgrVersion, host)
+	}
 	row := os.Getenv("AGTERM_SESSION_ID")
 	if row != "" && !token.Valid(row) {
 		return fmt.Errorf("invalid session-id %q (use [A-Za-z0-9_.-])", row)
@@ -271,6 +291,9 @@ func attachArgv(agrPath, name string, opts OpenOptions, env []string) []string {
 	}
 	if opts.Parent != "" {
 		argv = append(argv, "--parent", opts.Parent)
+	}
+	if opts.Fresh {
+		argv = append(argv, "--fresh")
 	}
 	for _, pair := range env {
 		argv = append(argv, "--env", pair)

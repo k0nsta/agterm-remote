@@ -20,9 +20,11 @@ const usage = "usage: agr <command> [args...]"
 const help = `usage: agr <command> [args...]
 
 Commands:
-  open <host> [name] [--cwd <dir>] [--parent <name>] [--command <cmd>] [--orchestrator <row>:<pane>]
+  open <host> [name] [--cwd <dir>] [--parent <name>] [--command <cmd>] [--orchestrator <row>:<pane>] [--fresh]
                           Attach to a remote session; without name, use the picker.
-                          --command runs only in a new session
+                          --command runs only in a new session; a session a reboot
+                          killed comes back in its directory with Claude resumed
+                          unless --fresh
   run <host> [--cwd <dir>] -- <argv>…
                           Run a program on the host in one ssh; its exit status is passed through
   ls <host>                List agr-owned remote sessions
@@ -281,7 +283,7 @@ func hookStdin() io.Reader {
 func runOpen(ctx context.Context, app *application, args []string, out, errw io.Writer) int {
 	positional, opts, ok := parseOpenArgs(args)
 	if !ok || len(positional) < 1 || len(positional) > 2 {
-		_, _ = fmt.Fprintln(errw, "usage: agr open <host> [name] [--cwd <dir>] [--parent <name>] [--command <cmd>] [--orchestrator <row>:<pane>]")
+		_, _ = fmt.Fprintln(errw, "usage: agr open <host> [name] [--cwd <dir>] [--parent <name>] [--command <cmd>] [--orchestrator <row>:<pane>] [--fresh]")
 		return 2
 	}
 	return cli.RunOpen(ctx, positional[0], optionalArg(positional, 1), opts, cli.OpenDependencies{
@@ -400,6 +402,11 @@ func parseOpenArgs(args []string) ([]string, cli.OpenOptions, bool) {
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--fresh":
+			if opts.Fresh {
+				return nil, cli.OpenOptions{}, false
+			}
+			opts.Fresh = true
 		case "--cwd", "--parent", "--command", "--orchestrator":
 			if i+1 >= len(args) || seen[args[i]] {
 				return nil, cli.OpenOptions{}, false

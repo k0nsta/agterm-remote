@@ -476,6 +476,28 @@ func TestOpenOldRemoteGetsNoEnvAndRefusesCommand(t *testing.T) {
 	}
 }
 
+func TestSupportsFreshGate(t *testing.T) {
+	t.Helper()
+	cases := map[string]bool{"1.4.0": false, "1.5.0": true, "v1.5.1": true, "dev": true, "": false}
+	for version, want := range cases {
+		if got := supportsFresh(version); got != want {
+			t.Errorf("supportsFresh(%q) = %v, want %v", version, got, want)
+		}
+	}
+}
+
+func TestAttachArgvPassesFresh(t *testing.T) {
+	t.Helper()
+	got := attachArgv("agr", "w1", OpenOptions{Fresh: true}, nil)
+	want := []string{"agr", "attach", "w1", "--fresh"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("attachArgv() = %q, want %q", got, want)
+	}
+	if got := attachArgv("agr", "w1", OpenOptions{}, nil); len(got) != 3 {
+		t.Fatalf("attachArgv() without --fresh = %q", got)
+	}
+}
+
 func TestSupportsEnvCommandGate(t *testing.T) {
 	t.Helper()
 	cases := map[string]bool{
