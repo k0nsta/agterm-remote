@@ -236,17 +236,123 @@ remembered() {
 	done
 }
 
+# hook_input holds a Claude Code hook's JSON, read from stdin once.
+hook_input=
+read_hook_input() {
+	[ ! -t 0 ] || return 0
+	hook_input=$(cat) || hook_input=
+	return 0
+}
+
+# hook_field KEY prints a string field of the hook's JSON, or nothing.
+hook_field() {
+	printf '%s\n' "$hook_input" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | sed -n '1p'
+}
+
+# valid_conversation accepts a Claude conversation id: hex digits and dashes,
+# so it is safe in a file name.
+valid_conversation() {
+	case "$1" in
+		''|*[!0-9A-Fa-f-]*) return 1 ;;
+	esac
+	return 0
+}
+
+# hook_transcript_dir prints the directory of the hook's transcript, where
+# Claude keeps every conversation of the project.
+hook_transcript_dir() {
+	tp=$(hook_field transcript_path)
+	case "$tp" in
+		/*/*) printf '%s\n' "${tp%/*}" ;;
+		*) return 1 ;;
+	esac
+}
+
+# continued_in FROM TO DIR succeeds when Claude recorded that conversation FROM
+# continues in TO: the "continued-in" line /background writes into FROM's
+# transcript when it forks the conversation out of its pane.
+continued_in() {
+	[ -f "$3/$1.jsonl" ] || return 1
+	grep -qF "\"continuedInSessionId\":\"$2\"" "$3/$1.jsonl"
+}
+
+# conversation_session prints the session a pane-less hook belongs to: the
+# one remembering the hook's conversation, or the one whose conversation was
+# forked into it (which then remembers the new one). Exactly one match counts.
+conversation_session() {
+	id=$(hook_field session_id)
+	valid_conversation "$id" || return 1
+	[ -d "$AGR_STATE_DIR" ] || return 1
+	dir=$(hook_transcript_dir) || dir=
+	same=
+	same_count=0
+	forked=
+	forked_count=0
+	for f in "$AGR_STATE_DIR"/*; do
+		[ -f "$f" ] || continue
+		name=${f##*/}
+		valid_token "$name" || continue
+		known=$(recall "$name" claude_session)
+		valid_conversation "$known" || continue
+		if [ "$known" = "$id" ]; then
+			same=$name
+			same_count=$((same_count + 1))
+		elif [ -n "$dir" ] && continued_in "$known" "$id" "$dir"; then
+			forked=$name
+			forked_count=$((forked_count + 1))
+		fi
+	done
+	if [ "$same_count" -gt 0 ]; then
+		[ "$same_count" -eq 1 ] || return 1
+		printf '%s\n' "$same"
+		return 0
+	fi
+	[ "$forked_count" -eq 1 ] || return 1
+	remember "$forked" claude_session "$id"
+	printf '%s\n' "$forked"
+}
+
+# pane_less says whether a hook must be placed by its conversation: Claude
+# Code's background sessions run outside any pane, and inherit the daemon's
+# environment, so their pane variables can name another session.
+pane_less() {
+	[ "${CLAUDE_CODE_SESSION_KIND:-}" = bg ]
+}
+
+# moved_on NAME ID succeeds when NAME's conversation was forked out of ID: the
+# Claude left in the pane still runs ID and must not take the session back.
+moved_on() {
+	known=$(recall "$1" claude_session)
+	valid_conversation "$known" || return 1
+	[ "$known" != "$2" ] || return 1
+	tdir=$(hook_transcript_dir) || return 1
+	continued_in "$2" "$known" "$tdir"
+}
+
 # remember_agent records, from a Claude Code hook, where the agent works and
-# its conversation id (from the hook's JSON on stdin), so a recreated session
-# can resume it.
+# its conversation id (from the hook's JSON), so a recreated session can
+# resume it.
 remember_agent() {
 	[ -n "${CLAUDE_PROJECT_DIR:-}" ] || return 0
 	remember "$1" cwd "$CLAUDE_PROJECT_DIR"
 	remember "$1" agent claude
-	[ ! -t 0 ] || return 0
-	id=$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([0-9A-Fa-f-]*\)".*/\1/p' | sed -n '1p')
-	[ -z "$id" ] || remember "$1" claude_session "$id"
+	id=$(hook_field session_id)
+	valid_conversation "$id" || return 0
+	! moved_on "$1" "$id" || return 0
+	remember "$1" claude_session "$id"
 	return 0
+}
+
+# forget_agent marks Claude as quit, unless the quitting Claude ran an older
+# conversation than the one the session remembers.
+forget_agent() {
+	id=$(hook_field session_id)
+	known=$(recall "$1" claude_session)
+	if [ -n "$id" ] && [ -n "$known" ] && [ "$id" != "$known" ]; then
+		return 0
+	fi
+	remember "$1" agent ""
+	remember "$1" claude_session ""
 }
 
 # restore_session fills in what a session that no longer exists was doing:
@@ -452,10 +558,22 @@ tmux_current_session() {
 	printf '%s\n' "$cur"
 }
 
+# tmux_hook_session prints the session a Claude hook belongs to: its pane's,
+# or, outside a pane, its conversation's.
+tmux_hook_session() {
+	if ! pane_less && tmux_current_session; then
+		return 0
+	fi
+	n=$(conversation_session) || return 1
+	tmux_owned "$n" || return 1
+	printf '%s\n' "$n"
+}
+
 tmux_status() {
 	state=$1
 	shift
-	n=$(tmux_current_session) || exit 0
+	read_hook_input
+	n=$(tmux_hook_session) || exit 0
 	label="$state@$(date +%s)"
 	if ! tmux set-option -t "=$n:" @agr_state "$label" 2>/dev/null; then
 		exit 0
@@ -729,21 +847,37 @@ EOF
 # fails (printing nothing) outside zmx or outside an owned session.
 zmx_current_session() {
 	[ -n "${ZMX_SESSION:-}" ] || return 1
-	v=$(zmx get "$ZMX_SESSION" agr 2>/dev/null) || return 1
-	[ "$v" = 1 ] || return 1
+	zmx_owned "$ZMX_SESSION" || return 1
 	printf '%s\n' "$ZMX_SESSION"
+}
+
+zmx_owned() {
+	v=$(zmx get "$1" agr 2>/dev/null) || return 1
+	[ "$v" = 1 ]
+}
+
+# zmx_hook_session prints the session a Claude hook belongs to: its own, or,
+# outside one, its conversation's.
+zmx_hook_session() {
+	if ! pane_less && zmx_current_session; then
+		return 0
+	fi
+	n=$(conversation_session) || return 1
+	zmx_owned "$n" || return 1
+	printf '%s\n' "$n"
 }
 
 zmx_status() {
 	state=$1
 	shift
-	zmx_current_session >/dev/null || exit 0
+	read_hook_input
+	n=$(zmx_hook_session) || exit 0
 	label="$state@$(date +%s)"
-	if ! zmx set "$ZMX_SESSION" "agr_state=$label" 2>/dev/null; then
+	if ! zmx set "$n" "agr_state=$label" 2>/dev/null; then
 		exit 0
 	fi
-	remember_agent "$ZMX_SESSION"
-	relay "$ZMX_SESSION" "$state" "$@"
+	remember_agent "$n"
+	relay "$n" "$state" "$@"
 	exit 0
 }
 
@@ -1081,16 +1215,16 @@ dispatch() {
 				start|end) ;;
 				*) exit 2 ;;
 			esac
+			read_hook_input
 			case "$AGR_MUX" in
-				tmux) n=$(tmux_current_session) || exit 0 ;;
-				zmx) zmx_current_session >/dev/null || exit 0; n=$ZMX_SESSION ;;
+				tmux) n=$(tmux_hook_session) || exit 0 ;;
+				zmx) n=$(zmx_hook_session) || exit 0 ;;
 				*) exit 0 ;;
 			esac
 			if [ "$1" = start ]; then
 				remember_agent "$n"
 			else
-				remember "$n" agent ""
-				remember "$n" claude_session ""
+				forget_agent "$n"
 			fi
 			exit 0
 			;;
