@@ -366,9 +366,19 @@ purpose line that `agr open` sets to `<host> · <name>`. `doctor` reports these
 capabilities and shows `n/a (agterm < 0.26)` where an older agterm cannot
 provide them.
 
-agterm's own remote sessions are Mac-to-Mac sessions. They do not carry agent
-status from a Linux or BSD multiplexer over SSH, so they do not replace agr's
-remote relay and per-host forwarding.
+agterm 0.42 added agterm-server (experimental): a headless agterm that runs
+sessions on a Linux host as zmx daemons and shows them in a remote window, with
+status, asks and pages drawn on the Mac. agterm 0.43 adds File ▸ New Remote
+Session. If that fits your host, it is the native route. agr is for the rest:
+
+- the tmux (or zmx) you already run, on any host with SSH and POSIX `sh`,
+  without systemd or a server daemon;
+- a host kept to an allowlist of agtermctl calls, with a consent dialog before
+  it types into a local pane;
+- pasting screenshots into a remote session, and Claude resumed after a host
+  reboot.
+
+agr is tested with agterm 0.42.3.
 
 ## Requirements
 
