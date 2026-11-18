@@ -76,6 +76,14 @@ func splitTree(t *testing.T) map[string][]agterm.Surface {
 	}}
 }
 
+// attachedSplitTree is splitTree with the split pane still running agr open.
+func attachedSplitTree(t *testing.T) map[string][]agterm.Surface {
+	t.Helper()
+	tree := splitTree(t)
+	tree["row-1"][1].Foreground = []string{"/opt/homebrew/bin/agr", "open", "myhost", "other"}
+	return tree
+}
+
 func newPaneHookDeps(t *testing.T, panes *panesFake, cwd *cwdFake, bound ...bindings.Binding) PaneHookDependencies {
 	t.Helper()
 	store := bindings.New(pathstest.Dirs(t))
@@ -196,7 +204,7 @@ func TestOnSplitLeavesThePaneAlone(t *testing.T) {
 		{name: "hidden split pane", status: "shown", tree: hiddenSplit, bound: []bindings.Binding{leftBinding(t)}},
 		{name: "no split pane", status: "shown", tree: noSplit, bound: []bindings.Binding{leftBinding(t)}},
 		{name: "row gone", status: "shown", tree: map[string][]agterm.Surface{}, bound: []bindings.Binding{leftBinding(t)}},
-		{name: "split already bound", status: "shown", tree: splitTree(t), bound: []bindings.Binding{leftBinding(t), rightBound}},
+		{name: "split already bound", status: "shown", tree: attachedSplitTree(t), bound: []bindings.Binding{leftBinding(t), rightBound}},
 		{name: "only the right pane bound", status: "shown", tree: splitTree(t), bound: []bindings.Binding{rightBound}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -210,6 +218,24 @@ func TestOnSplitLeavesThePaneAlone(t *testing.T) {
 				t.Fatalf("typed %#v, cwd calls %#v; want nothing", panes.typed, cwd.calls)
 			}
 		})
+	}
+}
+
+func TestOnSplitReopensAPaneWhoseBindingOutlivedItsProgram(t *testing.T) {
+	// agterm restarted while the split was hidden: shown again, the pane keeps
+	// its id and binding but runs a fresh local shell.
+	stale := bindings.Binding{Row: "row-1", PaneID: "R", Pane: "right", Host: "myhost", Name: "a1-2", Mux: "tmux"}
+	tree := splitTree(t)
+	tree["row-1"][1].Foreground = []string{"-zsh"}
+	panes := &panesFake{tree: tree, texts: []string{"$ "}}
+	cwd := &cwdFake{dir: "/srv"}
+	deps := newPaneHookDeps(t, panes, cwd, leftBinding(t), stale)
+	if err := OnSplit(context.Background(), "row-1", "shown", deps); err != nil {
+		t.Fatalf("OnSplit() error = %v", err)
+	}
+	want := `'/Users/me/go/bin/agr' 'open' 'myhost' 'a1-2' '--cwd' '/srv' '--parent' 'a1'`
+	if len(panes.typed) != 1 || panes.typed[0] != want {
+		t.Fatalf("typed %#v, want %q", panes.typed, want)
 	}
 }
 
