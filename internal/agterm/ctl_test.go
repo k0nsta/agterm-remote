@@ -332,7 +332,7 @@ func TestCtlSurfacesDecodesPanesPerRow(t *testing.T) {
 	outputter := mocks.NewMockOutputter(ctrl)
 	ctl := agterm.NewCtl(testCtlPath, testCtlSock, nil, outputter, nil)
 	tree := `{"result":{"tree":{"workspaces":[{"sessions":[
-		{"id":"row-1","surfaces":[{"kind":"left","paneID":"L","visible":true,"active":false},
+		{"id":"row-1","foreground":["agr","open","h","a"],"splitForeground":["zsh"],"surfaces":[{"kind":"left","paneID":"L","visible":true,"active":false},
 			{"kind":"right","paneID":"R","visible":true},{"kind":"scratch","paneID":"S","visible":false}]},
 		{"id":"row-2"}]}]}}}`
 	outputter.EXPECT().Output(gomock.Any(), []byte(nil), testCtlPath, "tree", "--json", "--socket", testCtlSock).
@@ -341,8 +341,12 @@ func TestCtlSurfacesDecodesPanesPerRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Surfaces() error = %v", err)
 	}
-	want := []agterm.Surface{{Kind: "left", PaneID: "L", Visible: true}, {Kind: "right", PaneID: "R", Visible: true}, {Kind: "scratch", PaneID: "S"}}
-	if len(got["row-1"]) != 3 || got["row-1"][0] != want[0] || got["row-1"][1] != want[1] || got["row-1"][2] != want[2] {
+	want := []agterm.Surface{
+		{Kind: "left", PaneID: "L", Visible: true, Foreground: []string{"agr", "open", "h", "a"}},
+		{Kind: "right", PaneID: "R", Visible: true, Foreground: []string{"zsh"}},
+		{Kind: "scratch", PaneID: "S"},
+	}
+	if len(got["row-1"]) != 3 || !reflect.DeepEqual(got["row-1"], want) {
 		t.Fatalf("Surfaces()[row-1] = %#v, want %#v", got["row-1"], want)
 	}
 	if surfaces, ok := got["row-2"]; !ok || len(surfaces) != 0 {
@@ -519,7 +523,7 @@ func TestCtlTreeRowsDecodesPanesAndForegrounds(t *testing.T) {
 		t.Fatalf("split foreground = %#v, %q", first.SplitForeground, first.SplitForegroundShell)
 	}
 	wantPanes := []agterm.Surface{{Kind: "left", PaneID: "L", Visible: true}, {Kind: "right", PaneID: "R", Visible: true}}
-	if len(first.Surfaces) != 2 || first.Surfaces[0] != wantPanes[0] || first.Surfaces[1] != wantPanes[1] {
+	if len(first.Surfaces) != 2 || !reflect.DeepEqual(first.Surfaces, wantPanes) {
 		t.Fatalf("panes = %#v, want %#v", first.Surfaces, wantPanes)
 	}
 	second := got[1]

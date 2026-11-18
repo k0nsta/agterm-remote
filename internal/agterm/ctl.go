@@ -230,6 +230,9 @@ type Surface struct {
 	Kind    string `json:"kind"`
 	PaneID  string `json:"paneID"`
 	Visible bool   `json:"visible"`
+	// Foreground is the pane's foreground program, from the row's
+	// foreground (primary pane) or splitForeground (split pane).
+	Foreground []string `json:"-"`
 }
 
 // Surfaces returns every live row's surfaces, keyed by row id.
@@ -240,7 +243,17 @@ func (c *Ctl) Surfaces(ctx context.Context) (map[string][]Surface, error) {
 	}
 	result := make(map[string][]Surface, len(sessions))
 	for _, session := range sessions {
-		result[session.ID] = session.Surfaces
+		surfaces := make([]Surface, len(session.Surfaces))
+		for i, surface := range session.Surfaces {
+			switch surface.Kind {
+			case "left", "top", "primary":
+				surface.Foreground = session.Foreground
+			case "right", "bottom", "split":
+				surface.Foreground = session.SplitForeground
+			}
+			surfaces[i] = surface
+		}
+		result[session.ID] = surfaces
 	}
 	return result, nil
 }

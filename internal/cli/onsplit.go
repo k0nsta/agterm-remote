@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 	"time"
 
@@ -51,7 +52,10 @@ func OnSplit(ctx context.Context, row, status string, deps PaneHookDependencies)
 	if err != nil || !ok {
 		return err
 	}
-	if target.paneBound {
+	// A binding outlives its pane's program: a split shown again after agterm
+	// restarted keeps its id but runs a fresh local shell. Only a pane still
+	// running `agr open` is left alone.
+	if target.paneBound && runsAgrOpen(target.paneForeground) {
 		return nil
 	}
 	child := target.binding.Name + "-2"
@@ -101,9 +105,10 @@ func HookEvent(event io.Reader, env func(string) string) (row, status string) {
 }
 
 type paneHookResult struct {
-	paneID    string
-	binding   bindings.Binding
-	paneBound bool
+	paneID         string
+	paneForeground []string
+	binding        bindings.Binding
+	paneBound      bool
 }
 
 // paneHookTarget does the checks both pane hooks share: a shown event on a
@@ -126,12 +131,13 @@ func paneHookTarget(ctx context.Context, row, status string, deps PaneHookDepend
 	}
 	surfaces, live := tree[row], liveSurfaceIDs(tree)
 	var primary, pane string
+	var paneForeground []string
 	for _, surface := range surfaces {
 		switch {
 		case isPrimaryPane(surface.Kind):
 			primary = surface.PaneID
 		case wanted(surface.Kind) && surface.Visible:
-			pane = surface.PaneID
+			pane, paneForeground = surface.PaneID, surface.Foreground
 		}
 	}
 	if pane == "" {
@@ -145,7 +151,7 @@ func paneHookTarget(ctx context.Context, row, status string, deps PaneHookDepend
 	if err != nil {
 		return paneHookResult{}, false, err
 	}
-	result := paneHookResult{paneID: pane}
+	result := paneHookResult{paneID: pane, paneForeground: paneForeground}
 	found := false
 	for _, binding := range all {
 		if binding.Row != row {
@@ -168,6 +174,11 @@ func isPrimaryBinding(binding bindings.Binding, primaryPaneID string) bool {
 		return binding.PaneID == primaryPaneID
 	}
 	return binding.Pane == "" || isPrimaryPane(binding.Pane)
+}
+
+// runsAgrOpen reports whether a pane's foreground is `agr open`.
+func runsAgrOpen(argv []string) bool {
+	return len(argv) >= 2 && path.Base(argv[0]) == "agr" && argv[1] == "open"
 }
 
 func isPrimaryPane(kind string) bool {
